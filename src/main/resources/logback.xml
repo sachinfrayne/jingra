@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- Console appender -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} - %-5level - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Root logger -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+    </root>
+
+    <!-- Reduce verbosity of third-party libraries -->
+    <logger name="org.apache.hadoop" level="WARN" />
+    <logger name="org.apache.parquet" level="WARN" />
+    <logger name="org.elasticsearch.client" level="WARN" />
+    <logger name="org.opensearch.client" level="WARN" />
+    <logger name="io.grpc" level="WARN" />
+</configuration>

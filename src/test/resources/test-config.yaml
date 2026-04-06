@@ -1,0 +1,47 @@
+# Example aligned with current JingraConfig (see README and src/test/resources/config/loader-test.yaml).
+engine: elasticsearch
+dataset: example
+
+elasticsearch:
+  url_env: ELASTICSEARCH_URL
+  user_env: ELASTICSEARCH_USER
+  password_env: ELASTICSEARCH_PASSWORD
+
+datasets:
+  example:
+    index_name: bench-index
+    schema_name: default
+    query_name: knn
+    path:
+      data_path: /data/corpus.parquet
+      queries_path: /data/queries.parquet
+    data_mapping:
+      id_field: id
+      vector_field: embedding
+    queries_mapping:
+      query_vector_field: query_vector
+      ground_truth_field: ground_truth
+    param_groups:
+      default:
+        - k: 10
+          size: 10
+
+evaluation:
+  warmup_workers: 1
+  measurement_workers: 4
+  warmup_rounds: 0
+  measurement_rounds: 3
+
+load:
+  batch_size: 10000
+  threads: 10
+  queue_capacity: 20
+
+output:
+  sinks:
+    - type: elasticsearch
+      write_query_metrics: true
+      config:
+        url_env: METRICS_ES_URL
+        index: jingra-results
+        metrics_index: jingra-metrics

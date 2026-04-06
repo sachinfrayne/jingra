@@ -1,0 +1,10 @@
+engine: qdrant
+dataset: test
+
+qdrant:
+  url_env: QDRANT_URL
+  api_key_env: QDRANT_KEY
+
+datasets:
+  test:
+    type: parquet

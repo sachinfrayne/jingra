@@ -1,0 +1,11 @@
+engine:
+  type: elasticsearch
+  url: http://localhost:9200
+  username: elastic
+  # Missing required fields
+  # Invalid YAML structure below
+  invalid: [unclosed array
+dataset:
+  path: /tmp/test_data.parquet
+  # Indentation error
+ id_field: catalog_id
