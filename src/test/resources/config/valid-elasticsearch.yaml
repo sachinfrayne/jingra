@@ -1,0 +1,26 @@
+engine: elasticsearch
+dataset: test-dataset
+
+elasticsearch:
+  url_env: ES_URL
+
+datasets:
+  test-dataset:
+    type: parquet
+    index_name: test_index
+    vector_size: 128
+    distance: cosine
+    schema_name: test_schema
+    query_name: test_query
+    path:
+      data_path: data.parquet
+      queries_path: queries.parquet
+    data_mapping:
+      id_field: id
+      vector_field: vector
+    queries_mapping:
+      query_vector_field: vector
+      ground_truth_field: ground_truth
+    param_groups:
+      recall@100:
+        - { size: 100, k: 1000 }

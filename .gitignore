@@ -1,0 +1,38 @@
+# Local review / agent tracking (not committed)
+.local/
+
+# Maven build output
+target/
+
+# Compiled classes (e.g. accidental javac at repo root)
+*.class
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+
+# Eclipse
+.settings/
+.classpath
+.project
+
+# macOS
+.DS_Store
+
+# Test data downloads
+/tmp/
+*.parquet.tmp
+
+# Test-generated artifacts
+jingra-config/
+
+# Python artifacts (from create_test_parquet.py)
+__pycache__/
+*.pyc
+
+# Local review artifacts
+
+REVIEW*.md

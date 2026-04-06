@@ -1,0 +1,23 @@
+engine: elasticsearch
+dataset: d1
+
+elasticsearch:
+  url_env: ES_URL
+
+datasets:
+  d1:
+    type: parquet
+    index_name: index1
+    vector_size: 128
+    distance: cosine
+    schema_name: s
+    query_name: q
+    path:
+      data_path: data.parquet
+      queries_path: queries.parquet
+    data_mapping:
+      id_field: id
+      vector_field: v
+    queries_mapping:
+      query_vector_field: qv
+      ground_truth_field: gt
