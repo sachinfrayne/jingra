@@ -18,9 +18,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Integration tests for OpenSearchEngine using Testcontainers.
- * Skipped when Docker is not available.
  */
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers(disabledWithoutDocker = false)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class OpenSearchEngineTest {
 

@@ -66,6 +66,18 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
                 : 30L;
     }
 
+    /**
+     * Whether API methods that require an initialized client may run.
+     */
+    protected boolean hasClient() {
+        return client != null;
+    }
+
+    /** Exposes configured gRPC timeout for same-package tests. */
+    protected long configuredGrpcTimeoutSeconds() {
+        return grpcTimeoutSeconds;
+    }
+
     @Override
     public boolean connect() {
         // Check for direct config values first (useful for testing), then fall back to env vars
@@ -163,7 +175,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
 
     @Override
     public boolean createIndex(String indexName, String schemaName) {
-        if (client == null) {
+        if (!hasClient()) {
             logger.error("Qdrant client not initialized");
             return false;
         }
@@ -363,7 +375,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
 
     @Override
     public boolean indexExists(String indexName) {
-        if (client == null) {
+        if (!hasClient()) {
             return false;
         }
         try {
@@ -378,7 +390,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
 
     @Override
     public boolean deleteIndex(String indexName) {
-        if (client == null) {
+        if (!hasClient()) {
             logger.error("Qdrant client not initialized");
             return false;
         }
@@ -399,7 +411,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
 
     @Override
     public int ingest(List<Document> documents, String indexName, String idField) {
-        if (client == null) {
+        if (!hasClient()) {
             logger.error("Qdrant client not initialized");
             return 0;
         }
@@ -490,7 +502,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
 
     @Override
     public QueryResponse query(String indexName, String queryName, QueryParams params) {
-        if (client == null) {
+        if (!hasClient()) {
             logger.error("Qdrant client not initialized");
             return new QueryResponse(List.of(), null, null);
         }
@@ -613,7 +625,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
 
     @Override
     public long getDocumentCount(String indexName) {
-        if (client == null) {
+        if (!hasClient()) {
             return 0;
         }
         try {
@@ -637,7 +649,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
 
     @Override
     public String getVersion() {
-        if (client == null) {
+        if (!hasClient()) {
             return "unknown";
         }
         try {
@@ -667,7 +679,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
     public Map<String, String> getIndexMetadata(String indexName) {
         Map<String, String> metadata = new HashMap<>();
 
-        if (client == null) {
+        if (!hasClient()) {
             return metadata;
         }
 
@@ -685,7 +697,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
 
     @Override
     public void close() throws Exception {
-        if (client != null) {
+        if (hasClient()) {
             client.close();
         }
         if (customChannel != null) {
