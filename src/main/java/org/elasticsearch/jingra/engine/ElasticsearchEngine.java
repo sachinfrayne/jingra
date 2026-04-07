@@ -18,7 +18,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.elasticsearch.jingra.model.Document;
 import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
-import org.elasticsearch.jingra.utils.ElasticsearchClientFactory;
 
 import java.io.StringReader;
 import java.util.ArrayList;

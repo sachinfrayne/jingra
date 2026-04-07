@@ -6,7 +6,7 @@ import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.IndexRequest;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import org.elasticsearch.jingra.model.BenchmarkResult;
-import org.elasticsearch.jingra.utils.ElasticsearchClientFactory;
+import org.elasticsearch.jingra.engine.ElasticsearchClientFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
