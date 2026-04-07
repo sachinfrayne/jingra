@@ -15,9 +15,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Integration tests for ElasticsearchEngine using Testcontainers.
- * Skipped when Docker is not available.
  */
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers(disabledWithoutDocker = false)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class ElasticsearchEngineTest {
 
