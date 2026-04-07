@@ -285,7 +285,7 @@ class ElasticsearchEngineTest {
     void testGetIndexMetadata() {
         Map<String, String> metadata = engine.getIndexMetadata(TEST_INDEX);
         assertNotNull(metadata);
-        // Empty when mappings contain no dense_vector / knn_vector; non-empty when inferred
+        assertEquals("dense_vector", metadata.get("vector_type"));
     }
 
     @Test
@@ -386,6 +386,41 @@ class ElasticsearchEngineTest {
 
     @Test
     @Order(17)
+    void testDeleteIndex_idempotentWhenMissing() {
+        assertTrue(engine.deleteIndex("jingra-es-missing-index-" + UUID.randomUUID()));
+    }
+
+    @Test
+    @Order(18)
+    void testQuery_lastQueryJsonAndIndexNameSetOnce() throws Exception {
+        Map<String, Object> config = new HashMap<>();
+        config.put("url", "http://" + elasticsearch.getHttpHostAddress());
+
+        ElasticsearchEngine fresh = new ElasticsearchEngine(config);
+        assertTrue(fresh.connect());
+        try {
+            Map<String, Object> params = new HashMap<>();
+            params.put("query_vector", generateRandomVector(128));
+            params.put("k", 5);
+            params.put("num_candidates", 10);
+            params.put("size", 5);
+
+            fresh.query(TEST_INDEX, "test-query-basic", new QueryParams(params));
+            String firstJson = fresh.getLastQueryJson();
+            assertNotNull(firstJson);
+            assertTrue(firstJson.contains("knn") || firstJson.contains("query"));
+            assertEquals(TEST_INDEX, fresh.getLastIndexName());
+
+            fresh.query("other-index-name", "test-query-basic", new QueryParams(params));
+            assertEquals(firstJson, fresh.getLastQueryJson());
+            assertEquals(TEST_INDEX, fresh.getLastIndexName());
+        } finally {
+            fresh.close();
+        }
+    }
+
+    @Test
+    @Order(19)
     void testConnect_withInsecureTls() {
         // Enable insecure TLS for this test
         System.setProperty("jingra.insecure.tls", "true");

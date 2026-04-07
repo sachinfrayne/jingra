@@ -12,7 +12,9 @@ import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch.indices.DeleteIndexRequest;
 import co.elastic.clients.elasticsearch.indices.ExistsRequest;
 import co.elastic.clients.elasticsearch.indices.GetIndexRequest;
-import co.elastic.clients.json.JsonData;
+import co.elastic.clients.elasticsearch.indices.GetIndexResponse;
+import co.elastic.clients.elasticsearch._types.mapping.Property;
+import co.elastic.clients.elasticsearch._types.mapping.TypeMapping;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.elasticsearch.jingra.model.Document;
@@ -37,6 +39,54 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
     public ElasticsearchEngine(Map<String, Object> config) {
         super(config);
+    }
+
+    /**
+     * Whether API methods that require an initialized client may run.
+     * Overridden in same-package tests to exercise branches without a real {@link ElasticsearchClient}.
+     */
+    protected boolean hasClient() {
+        return client != null;
+    }
+
+    protected boolean indexExistsOperation(String indexName) throws Exception {
+        return client.indices().exists(ExistsRequest.of(b -> b.index(indexName))).value();
+    }
+
+    protected void deleteIndexOperation(String indexName) throws Exception {
+        client.indices().delete(DeleteIndexRequest.of(b -> b.index(indexName)));
+    }
+
+    protected BulkResponse bulkOperation(BulkRequest request) throws Exception {
+        return client.bulk(request);
+    }
+
+    protected long countOperation(String indexName) throws Exception {
+        return client.count(c -> c.index(indexName)).count();
+    }
+
+    protected String versionOperation() throws Exception {
+        return client.info().version().number();
+    }
+
+    protected GetIndexResponse getIndexResponseOperation(String indexName) throws Exception {
+        return client.indices().get(GetIndexRequest.of(b -> b.index(indexName)));
+    }
+
+    protected void createIndexOperation(String indexName, String schemaJson) throws Exception {
+        CreateIndexRequest request = CreateIndexRequest.of(b -> b
+                .index(indexName)
+                .withJson(new StringReader(schemaJson))
+        );
+        client.indices().create(request);
+    }
+
+    protected SearchResponse<Map> searchOperation(String indexName, String queryJson) throws Exception {
+        return client.search(s -> s
+                        .index(indexName)
+                        .withJson(new StringReader(queryJson)),
+                Map.class
+        );
     }
 
     @Override
@@ -82,7 +132,7 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
     @Override
     public boolean createIndex(String indexName, String schemaName) {
-        if (client == null) {
+        if (!hasClient()) {
             logger.error("Elasticsearch client not initialized");
             return false;
         }
@@ -110,12 +160,7 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
             // Create index with schema
             String schemaJson = objectMapper.writeValueAsString(templateNode);
-            CreateIndexRequest request = CreateIndexRequest.of(b -> b
-                    .index(indexName)
-                    .withJson(new StringReader(schemaJson))
-            );
-
-            client.indices().create(request);
+            createIndexOperation(indexName, schemaJson);
             logger.info("Created Elasticsearch index '{}' with schema '{}'", indexName, schemaName);
             return true;
         } catch (Exception e) {
@@ -126,11 +171,11 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
     @Override
     public boolean indexExists(String indexName) {
-        if (client == null) {
+        if (!hasClient()) {
             return false;
         }
         try {
-            return client.indices().exists(ExistsRequest.of(b -> b.index(indexName))).value();
+            return indexExistsOperation(indexName);
         } catch (Exception e) {
             logger.error("Failed to check if index exists", e);
             return false;
@@ -139,13 +184,13 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
     @Override
     public boolean deleteIndex(String indexName) {
-        if (client == null) {
+        if (!hasClient()) {
             logger.error("Elasticsearch client not initialized");
             return false;
         }
 
         try {
-            client.indices().delete(DeleteIndexRequest.of(b -> b.index(indexName)));
+            deleteIndexOperation(indexName);
             logger.info("Deleted Elasticsearch index '{}'", indexName);
             return true;
         } catch (ElasticsearchException e) {
@@ -163,7 +208,7 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
     @Override
     public int ingest(List<Document> documents, String indexName, String idField) {
-        if (client == null) {
+        if (!hasClient()) {
             logger.error("Elasticsearch client not initialized");
             return 0;
         }
@@ -195,7 +240,7 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
                 count++;
             }
 
-            BulkResponse response = client.bulk(bulkBuilder.build());
+            BulkResponse response = bulkOperation(bulkBuilder.build());
 
             if (response.errors()) {
                 int errorCount = 0;
@@ -226,7 +271,7 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
     @Override
     public QueryResponse query(String indexName, String queryName, QueryParams params) {
-        if (client == null) {
+        if (!hasClient()) {
             logger.error("Elasticsearch client not initialized");
             return new QueryResponse(List.of(), null, null);
         }
@@ -250,11 +295,7 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
             }
 
             long startTime = System.nanoTime();
-            SearchResponse<Map> response = client.search(s -> s
-                    .index(indexName)
-                    .withJson(new StringReader(queryJson)),
-                    Map.class
-            );
+            SearchResponse<Map> response = searchOperation(indexName, queryJson);
             double clientLatencyMs = (System.nanoTime() - startTime) / 1_000_000.0;
 
             // Extract document IDs
@@ -277,11 +318,11 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
     @Override
     public long getDocumentCount(String indexName) {
-        if (client == null) {
+        if (!hasClient()) {
             return 0;
         }
         try {
-            return client.count(c -> c.index(indexName)).count();
+            return countOperation(indexName);
         } catch (Exception e) {
             logger.error("Failed to get document count", e);
             return 0;
@@ -300,11 +341,11 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
     @Override
     public String getVersion() {
-        if (client == null) {
+        if (!hasClient()) {
             return "unknown";
         }
         try {
-            return client.info().version().number();
+            return versionOperation();
         } catch (Exception e) {
             logger.error("Failed to get version", e);
             return "unknown";
@@ -323,8 +364,9 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
     /**
      * Format JSON for pretty-printed console display.
+     * Package-private for tests in the same package.
      */
-    private String formatJsonForDisplay(String json) {
+    String formatJsonForDisplay(String json) {
         try {
             ObjectMapper prettyMapper = new ObjectMapper();
             Object jsonObject = prettyMapper.readValue(json, Object.class);
@@ -335,21 +377,37 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
         }
     }
 
+    private static String firstElasticsearchDenseVectorType(TypeMapping mapping) {
+        if (mapping == null || mapping.properties() == null) {
+            return null;
+        }
+        for (Property p : mapping.properties().values()) {
+            if (p.isDenseVector()) {
+                return "dense_vector";
+            }
+        }
+        return null;
+    }
+
     @Override
     public Map<String, String> getIndexMetadata(String indexName) {
         Map<String, String> metadata = new HashMap<>();
 
-        if (client == null) {
+        if (!hasClient()) {
             return metadata;
         }
 
         try {
-            var indexResponse = client.indices().get(GetIndexRequest.of(b -> b.index(indexName)));
+            var indexResponse = getIndexResponseOperation(indexName);
             var indexInfo = indexResponse.get(indexName);
 
             if (indexInfo != null && indexInfo.mappings() != null) {
-                JsonNode mappingTree = objectMapper.valueToTree(indexInfo.mappings());
-                String vt = VectorTypeInference.firstElasticsearchVectorType(mappingTree);
+                TypeMapping tm = indexInfo.mappings();
+                String vt = firstElasticsearchDenseVectorType(tm);
+                if (vt == null) {
+                    JsonNode mappingTree = objectMapper.valueToTree(tm);
+                    vt = VectorTypeInference.firstElasticsearchVectorType(mappingTree);
+                }
                 if (vt != null) {
                     metadata.put("vector_type", vt);
                 }
