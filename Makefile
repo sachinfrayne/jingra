@@ -32,7 +32,7 @@ test:
 	@echo "\n::: Validating engine version consistency"
 	@./validate-engine-versions.sh
 	@echo "\n::: Running tests with fail-fast enabled"
-	mvn clean test -Dsurefire.skipAfterFailureCount=1
+	mvn clean verify -Dsurefire.skipAfterFailureCount=1
 
 # Run all tests regardless of failures (useful for seeing all issues at once)
 test-all:
@@ -41,7 +41,7 @@ test-all:
 	@echo "\n::: Validating engine version consistency"
 	@./validate-engine-versions.sh
 	@echo "\n::: Running all tests with coverage enforcement"
-	mvn clean test
+	mvn clean verify
 
 # Build Docker image (tests must pass first)
 build: test
