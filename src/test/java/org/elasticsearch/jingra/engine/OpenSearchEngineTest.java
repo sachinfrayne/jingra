@@ -36,6 +36,8 @@ class OpenSearchEngineTest {
             .withEnv("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "Admin123!@#")
             .withEnv("OPENSEARCH_JAVA_OPTS", "-Xms512m -Xmx512m")
             .withExposedPorts(9200)
+            // Launcher uses /tmp for bootstrap; host Docker disk can be full while RAM is available.
+            .withTmpFs(Map.of("/tmp", "rw,size=512m"))
             .waitingFor(new HttpWaitStrategy()
                     .forPort(9200)
                     .forStatusCodeMatching(status -> status >= 200 && status < 300)

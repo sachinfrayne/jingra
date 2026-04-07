@@ -29,7 +29,10 @@ class QdrantEngineTest {
     static GenericContainer<?> qdrant = new GenericContainer<>(
             DockerImageName.parse("qdrant/qdrant:" + QDRANT_VERSION)
     )
-            .withExposedPorts(6333, 6334); // HTTP and gRPC ports
+            .withExposedPorts(6333, 6334) // HTTP and gRPC ports
+            // Store Qdrant data on tmpfs so long test runs do not exhaust Docker's thin pool / VM disk
+            // ("No space left on device: WAL buffer size exceeds available disk space").
+            .withTmpFs(Map.of("/qdrant/storage", "rw,size=768m"));
 
     private static QdrantEngine engine;
 
@@ -1154,25 +1157,28 @@ class QdrantEngineTest {
     @Order(15)
     void testCreateIndex_payloadIndexesDirectFormat() throws Exception {
         String col = uniqueCollectionName("ci_direct_payload");
-        writeQdrantSchemaFile("test-schema-ci-payload-direct", """
-                {
-                  "template": {
-                    "vectors": { "size": 128, "distance": "Cosine" },
-                    "payload_indexes": [
-                    { "field_name": "d_kw", "field_schema": "keyword" },
-                    { "field_name": "d_int", "field_schema": "integer" },
-                    { "field_name": "d_flt", "field_schema": "float" },
-                    { "field_name": "d_bool", "field_schema": "bool" },
-                    { "field_name": "d_bool2", "field_schema": "boolean" },
-                    { "field_name": "d_geo", "field_schema": "geo" },
-                    { "field_name": "d_txt", "field_schema": "text" },
-                    { "field_name": "d_def", "field_schema": "unknown_custom" }
-                  ]
-                  }
-                }
-                """);
-        assertTrue(engine.createIndex(col, "test-schema-ci-payload-direct"));
-        engine.deleteIndex(col);
+        try {
+            writeQdrantSchemaFile("test-schema-ci-payload-direct", """
+                    {
+                      "template": {
+                        "vectors": { "size": 128, "distance": "Cosine" },
+                        "payload_indexes": [
+                        { "field_name": "d_kw", "field_schema": "keyword" },
+                        { "field_name": "d_int", "field_schema": "integer" },
+                        { "field_name": "d_flt", "field_schema": "float" },
+                        { "field_name": "d_bool", "field_schema": "bool" },
+                        { "field_name": "d_bool2", "field_schema": "boolean" },
+                        { "field_name": "d_geo", "field_schema": "geo" },
+                        { "field_name": "d_txt", "field_schema": "text" },
+                        { "field_name": "d_def", "field_schema": "unknown_custom" }
+                      ]
+                      }
+                    }
+                    """);
+            assertTrue(engine.createIndex(col, "test-schema-ci-payload-direct"));
+        } finally {
+            engine.deleteIndex(col);
+        }
     }
 
     @Test
