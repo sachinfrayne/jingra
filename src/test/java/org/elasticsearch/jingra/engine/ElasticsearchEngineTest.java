@@ -30,7 +30,8 @@ class ElasticsearchEngineTest {
     )
             .withEnv("xpack.security.enabled", "false")
             .withEnv("xpack.security.http.ssl.enabled", "false")
-            .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m");
+            .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m")
+            .withTmpFs(Map.of("/tmp", "rw,size=512m"));
 
     private static ElasticsearchEngine engine;
 
