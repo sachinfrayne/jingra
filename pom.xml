@@ -359,12 +359,13 @@
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>0.8.12</version>
                 <configuration>
-                    <!-- Engine impls are covered by Testcontainers when Docker is available -->
-                    <excludes>
-                        <exclude>org/elasticsearch/jingra/engine/ElasticsearchEngine.class</exclude>
-                        <exclude>org/elasticsearch/jingra/engine/OpenSearchEngine.class</exclude>
-                        <exclude>org/elasticsearch/jingra/engine/QdrantEngine.class</exclude>
-                    </excludes>
+                    <!--
+                      All production classes participate in coverage. Engine implementations
+                      (ElasticsearchEngine, OpenSearchEngine, QdrantEngine) are core product code and
+                      must appear in the report and check—no blanket exclusions for integration-heavy
+                      code. Use Testcontainers tests when Docker is available; use offline/unit-style
+                      tests for null-client branches, connection failures, and template gaps.
+                    -->
                 </configuration>
                 <executions>
                     <!-- Prepare agent for coverage -->
@@ -397,13 +398,17 @@
                                         <limit>
                                             <counter>INSTRUCTION</counter>
                                             <value>COVEREDRATIO</value>
-                                            <!-- Engine impl classes excluded above; remaining gaps are mostly HTTP download, ES sink IO, and parallel ingest paths. -->
-                                            <minimum>0.805</minimum>
+                                            <!--
+                                              Bundle includes full engine implementations; ratio is lower than
+                                              when those classes were excluded. Increase this floor as offline and
+                                              container tests add coverage (target: approach 0.9+).
+                                            -->
+                                            <minimum>0.62</minimum>
                                         </limit>
                                         <limit>
                                             <counter>BRANCH</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.705</minimum>
+                                            <minimum>0.55</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
