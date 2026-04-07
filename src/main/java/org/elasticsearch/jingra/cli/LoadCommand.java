@@ -183,9 +183,14 @@ public final class LoadCommand {
 
             ExecutorService executor = loadExecutorFactory.apply(numThreads, queueCapacity);
 
-            logger.info("Starting parallel ingestion with {} threads (queue capacity: {})...", numThreads, queueCapacity);
+            // Use same number of threads for Parquet conversion as for ES ingestion
+            // This ensures conversion keeps pace with ingestion without excessive thread contention
+            int conversionThreads = numThreads;
 
-            reader.readInBatches(batchSize, batch -> {
+            logger.info("Starting parallel ingestion with {} threads (queue capacity: {})...", numThreads, queueCapacity);
+            logger.info("Using {} threads for parallel Parquet conversion", conversionThreads);
+
+            reader.readInBatches(batchSize, conversionThreads, batch -> {
                 while (true) {
                     try {
                         executor.submit(() -> {
@@ -209,7 +214,9 @@ public final class LoadCommand {
                                     double overallRate = total / elapsedSec;
                                     double recentRate = recentElapsedSec > 0.1 ? step / recentElapsedSec : overallRate;
                                     double progress = 100.0 * total / rowCount;
-                                    double remainingSec = (rowCount - total) / overallRate;
+                                    // Use recent rate for ETA since it better reflects current throughput
+                                    // when performance degrades over time (GC pressure, index growth, etc.)
+                                    double remainingSec = (rowCount - total) / recentRate;
 
                                     logger.info("Progress: {}/{} docs ({}%) | Rate: {} docs/sec (recent: {}) | ETA: {} min",
                                             total, rowCount,
