@@ -13,6 +13,9 @@ public class LoggingConfigurator {
 
     private static final org.slf4j.Logger logger = LoggerFactory.getLogger(LoggingConfigurator.class);
 
+    private LoggingConfigurator() {
+    }
+
     /**
      * Apply logging configuration from JingraConfig.
      */

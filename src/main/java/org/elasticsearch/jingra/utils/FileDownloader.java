@@ -17,6 +17,20 @@ import java.nio.charset.StandardCharsets;
 public class FileDownloader {
     private static final Logger logger = LoggerFactory.getLogger(FileDownloader.class);
 
+    private FileDownloader() {
+    }
+
+    /**
+     * When set (same-package tests only), used instead of {@link System#getenv(String)} for the download URL.
+     */
+    static final ThreadLocal<String> downloadUrlOverrideForTests = new ThreadLocal<>();
+
+    /**
+     * When set (same-package tests only), minimum milliseconds between download progress log lines.
+     * Default production behavior uses 10000 ms.
+     */
+    static final ThreadLocal<Long> progressLogIntervalMsForTests = new ThreadLocal<>();
+
     /**
      * Ensure a file exists locally, downloading from URL if needed.
      * Validates Parquet files by checking magic bytes.
@@ -36,7 +50,10 @@ public class FileDownloader {
         }
 
         // File doesn't exist or is corrupted, download from URL
-        String url = System.getenv(urlEnvVar);
+        String url = downloadUrlOverrideForTests.get();
+        if (url == null) {
+            url = System.getenv(urlEnvVar);
+        }
         if (url == null || url.isEmpty()) {
             throw new RuntimeException("File not found: " + filePath + " and no URL provided in env var: " + urlEnvVar);
         }
@@ -52,16 +69,14 @@ public class FileDownloader {
 
         file.getParentFile().mkdirs();
 
-        Exception last = null;
-        for (int attempt = 1; attempt <= 3; attempt++) {
+        int attempt = 0;
+        while (true) {
             try {
                 downloadOnce(url, file);
                 return;
             } catch (Exception e) {
-                last = e;
-                String msg = e.getMessage() != null ? e.getMessage() : "";
-                boolean retryable = msg.contains("HTTP 5") || msg.contains(" 502 ") || msg.contains(" 503 ")
-                        || msg.contains(" 504 ");
+                attempt++;
+                boolean retryable = retryableDownloadFailureMessage(e.getMessage());
                 if (!retryable || attempt == 3) {
                     throw e;
                 }
@@ -70,7 +85,24 @@ public class FileDownloader {
                 Thread.sleep(backoff);
             }
         }
-        throw new RuntimeException("Download failed after retries", last);
+    }
+
+    /**
+     * Whether a download failure message should be retried (transient HTTP 5xx and related patterns).
+     * Package-private for unit tests in the same package.
+     */
+    static boolean retryableDownloadFailureMessage(String rawMessage) {
+        String msg = rawMessage != null ? rawMessage : "";
+        return msg.contains("HTTP 5") || msg.contains(" 502 ") || msg.contains(" 503 ")
+                || msg.contains(" 504 ");
+    }
+
+    private static long progressLogIntervalMs() {
+        Long v = progressLogIntervalMsForTests.get();
+        if (v != null && v < 0) {
+            return Long.MIN_VALUE;
+        }
+        return v != null ? v : 10_000L;
     }
 
     private static void downloadOnce(String url, File file) throws Exception {
@@ -101,7 +133,7 @@ public class FileDownloader {
                 totalBytesRead += bytesRead;
 
                 long currentTime = System.currentTimeMillis();
-                if (currentTime - lastLogTime > 10000) {
+                if (currentTime - lastLogTime > progressLogIntervalMs()) {
                     if (contentLength > 0) {
                         double progress = (totalBytesRead * 100.0) / contentLength;
                         logger.info("Download progress: {} / {} bytes ({}%)",
