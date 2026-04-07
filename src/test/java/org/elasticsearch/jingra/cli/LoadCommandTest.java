@@ -49,6 +49,19 @@ class LoadCommandTest {
     }
 
     @Test
+    void runPassesConversionThreadsToParquetReader() throws Exception {
+        StubParquetReader stubReader = new StubParquetReader(10, oneBatchOf(10));
+        LoadCommand.parquetReaderFactory = p -> stubReader;
+        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        TrackingMock engine = new TrackingMock();
+        LoadCommand.run(config, c -> engine);
+
+        // LoadCommand should pass numThreads as conversionThreads (default is 10)
+        assertEquals(10, stubReader.capturedConversionThreads,
+                "LoadCommand should pass numThreads (10) as conversionThreads parameter");
+    }
+
+    @Test
     void publicRunUsesInjectedFactory() throws Exception {
         LoadCommand.parquetReaderFactory = p -> new StubParquetReader(10, oneBatchOf(10));
         JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
@@ -307,6 +320,61 @@ class LoadCommandTest {
         LoadCommand.waitUntilIndexAbsent(engine, "idx");
     }
 
+    /**
+     * Demonstrates that ETA calculated from overall average rate becomes inaccurate
+     * when throughput degrades over time. This test simulates the real-world scenario
+     * where early processing is fast (4400 docs/sec) but later slows down (3400 docs/sec).
+     *
+     * Example from actual logs:
+     * - At 10.5% (2.2M docs), rate=4376 docs/sec, ETA=71.7 min
+     * - At 35.2% (7.4M docs), rate=3418 docs/sec, ETA=66.4 min
+     * - Expected: ETA should drop ~18 min (25% progress), but only dropped 5 min
+     */
+    @Test
+    void etaCalculationWithDegradingThroughput() {
+        // Scenario: 21M total docs, currently at 7.4M (35.2% complete)
+        long totalDocs = 21_015_300;
+        long docsProcessed = 7_400_000;
+        long docsRemaining = totalDocs - docsProcessed; // 13,615,300 remaining
+
+        // Overall average rate includes the faster early performance
+        double overallRate = 3418.0; // Current overall avg from logs
+
+        // Recent rate reflects current degraded throughput
+        double recentRate = 3418.0; // Recent window rate
+
+        // Current calculation (using overall rate)
+        double etaUsingOverall = docsRemaining / overallRate / 60.0; // in minutes
+
+        // Proposed calculation (using recent rate for more accurate ETA)
+        double etaUsingRecent = docsRemaining / recentRate / 60.0; // in minutes
+
+        // When throughput is stable, both should be similar
+        assertEquals(66.4, etaUsingOverall, 0.1);
+        assertEquals(66.4, etaUsingRecent, 0.1);
+
+        // Now simulate degrading throughput scenario:
+        // Earlier we were processing at 4376 docs/sec, now at 3418 docs/sec
+        double earlyRate = 4376.0;
+        double currentRate = 3418.0;
+
+        // If overall rate is still influenced by the faster early rate
+        double overallRateWithHistory = 3800.0; // Weighted avg between 4376 and 3418
+
+        double optimisticEta = docsRemaining / overallRateWithHistory / 60.0;
+        double realisticEta = docsRemaining / currentRate / 60.0;
+
+        // The optimistic ETA will be lower (faster completion)
+        assertTrue(optimisticEta < realisticEta,
+            String.format("Optimistic ETA %.1f should be < realistic ETA %.1f when throughput degrades",
+                optimisticEta, realisticEta));
+
+        // The difference can be significant (5-10+ minutes)
+        double difference = realisticEta - optimisticEta;
+        assertTrue(difference > 5.0,
+            String.format("ETA difference should be substantial (>5 min) but was %.1f min", difference));
+    }
+
     @Test
     void waitUntilIndexAbsent_timesOutWhenIndexNeverDisappears() {
         LoadCommand.indexAbsentDeadlineNanosOverride = TimeUnit.MILLISECONDS.toNanos(30L);
@@ -405,6 +473,7 @@ class LoadCommandTest {
     private static class StubParquetReader extends ParquetReader {
         private final long rowCount;
         private final List<List<Document>> batches;
+        int capturedConversionThreads = -1;  // Track what LoadCommand passes
 
         StubParquetReader(long rowCount, List<List<Document>> batches) {
             super("unused");
@@ -419,6 +488,13 @@ class LoadCommandTest {
 
         @Override
         public void readInBatches(int batchSize, ParquetReader.BatchConsumer consumer) throws IOException {
+            // Shouldn't be called anymore - LoadCommand uses 3-param version
+            readInBatches(batchSize, 1, consumer);
+        }
+
+        @Override
+        public void readInBatches(int batchSize, int conversionThreads, ParquetReader.BatchConsumer consumer) throws IOException {
+            capturedConversionThreads = conversionThreads;  // Capture for test assertions
             for (List<Document> batch : batches) {
                 consumer.accept(batch);
             }

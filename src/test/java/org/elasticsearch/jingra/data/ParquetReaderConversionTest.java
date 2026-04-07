@@ -9,11 +9,19 @@ import org.elasticsearch.jingra.model.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -25,6 +33,7 @@ class ParquetReaderConversionTest {
     private ParquetReader reader;
     private Method convertAvroValue;
     private Method convertAvroRecordToDocument;
+    private Method convertBatch;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -34,6 +43,8 @@ class ParquetReaderConversionTest {
         convertAvroRecordToDocument = ParquetReader.class.getDeclaredMethod(
                 "convertAvroRecordToDocument", GenericRecord.class);
         convertAvroRecordToDocument.setAccessible(true);
+        convertBatch = ParquetReader.class.getDeclaredMethod("convertBatch", List.class, ExecutorService.class);
+        convertBatch.setAccessible(true);
     }
 
     private Object cv(Object value) throws Exception {
@@ -277,5 +288,85 @@ class ParquetReaderConversionTest {
         Map<String, Object> out = (Map<String, Object>) cv(m);
         assertEquals(1, out.size());
         assertEquals(7, out.get("item"));
+    }
+
+    @Test
+    void convertBatch_parallel_futureGetFailure_wrapsIOException() throws Exception {
+        Schema s = new Schema.Parser().parse(
+                "{\"type\":\"record\",\"name\":\"R\",\"fields\":[{\"name\":\"x\",\"type\":\"int\"}]}");
+        GenericRecord rec = new GenericRecordBuilder(s).set("x", 1).build();
+
+        ExecutorService pool = new AbstractExecutorService() {
+            @Override
+            public void shutdown() {
+            }
+
+            @Override
+            public List<Runnable> shutdownNow() {
+                return List.of();
+            }
+
+            @Override
+            public boolean isShutdown() {
+                return false;
+            }
+
+            @Override
+            public boolean isTerminated() {
+                return false;
+            }
+
+            @Override
+            public boolean awaitTermination(long timeout, TimeUnit unit) {
+                return true;
+            }
+
+            @Override
+            public void execute(Runnable command) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public <T> Future<T> submit(Callable<T> task) {
+                return new Future<T>() {
+                    @Override
+                    public boolean cancel(boolean mayInterruptIfRunning) {
+                        return false;
+                    }
+
+                    @Override
+                    public boolean isCancelled() {
+                        return false;
+                    }
+
+                    @Override
+                    public boolean isDone() {
+                        return true;
+                    }
+
+                    @Override
+                    public T get() throws ExecutionException {
+                        throw new ExecutionException(new IllegalStateException("boom"));
+                    }
+
+                    @Override
+                    public T get(long timeout, TimeUnit unit) throws ExecutionException {
+                        return get();
+                    }
+                };
+            }
+        };
+
+        try {
+            InvocationTargetException wrap = assertThrows(InvocationTargetException.class,
+                    () -> convertBatch.invoke(reader, List.of(rec), pool));
+            assertInstanceOf(IOException.class, wrap.getCause());
+            IOException ioe = (IOException) wrap.getCause();
+            assertEquals("Failed to convert Avro records in parallel", ioe.getMessage());
+            assertInstanceOf(ExecutionException.class, ioe.getCause());
+            assertInstanceOf(IllegalStateException.class, ioe.getCause().getCause());
+        } finally {
+            pool.shutdown();
+        }
     }
 }
