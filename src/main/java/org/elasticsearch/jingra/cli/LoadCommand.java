@@ -12,6 +12,7 @@ import org.elasticsearch.jingra.utils.RetryHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -38,11 +39,71 @@ public final class LoadCommand {
     static Function<JingraConfig, BenchmarkEngine> engineFactory = EngineFactory::create;
 
     /**
+     * Constructs the {@link ParquetReader} for the dataset path. Tests may substitute a stub to avoid filesystem I/O.
+     */
+    static Function<String, ParquetReader> parquetReaderFactory = ParquetReader::new;
+
+    /**
+     * Default executor for parallel ingest; tests may replace to simulate termination failure.
+     * Signature: (threads, queueCapacity) to match {@link LoadCommand#run} pool sizing.
+     */
+    static BiFunction<Integer, Integer, ExecutorService> loadExecutorFactory = LoadCommand::newDefaultLoadExecutor;
+
+    /**
+     * When non-negative, overrides {@link #INDEX_ABSENT_DEADLINE_NS} in {@link #waitUntilIndexAbsent} for bounded tests.
+     */
+    static volatile long indexAbsentDeadlineNanosOverride = -1L;
+
+    /**
+     * When non-negative, overrides {@link #INDEX_ABSENT_POLL_NS} in {@link #waitUntilIndexAbsent} for bounded tests.
+     */
+    static volatile long indexAbsentPollNanosOverride = -1L;
+
+    /**
+     * Documents ingested per progress milestone log line. Production default matches the hard-coded milestone width.
+     */
+    static volatile int ingestMilestoneDocStep = 100_000;
+
+    /**
+     * Wait after a full executor queue before retrying submit. Tests may throw {@link InterruptedException} to cover
+     * the interrupt path; default is {@link Thread#sleep(long)}.
+     */
+    @FunctionalInterface
+    interface SleepAfterRejectedMs {
+        void sleep(long ms) throws InterruptedException;
+    }
+
+    static SleepAfterRejectedMs sleepAfterRejectedMs = Thread::sleep;
+
+    static ExecutorService newDefaultLoadExecutor(int numThreads, int queueCapacity) {
+        return new ThreadPoolExecutor(
+                numThreads, numThreads,
+                0L, TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<>(queueCapacity)
+        );
+    }
+
+    /**
+     * Whether to run milestone progress logging for this ingest step. Uses the same compare-and-set as inline code:
+     * another concurrent ingest may advance {@code lastLoggedMilestone} between {@link AtomicInteger#get} and
+     * {@link AtomicInteger#compareAndSet}, so the CAS can fail even when {@code currentMilestone > lastMilestone}.
+     */
+    static boolean shouldLogMilestoneProgress(AtomicInteger lastLoggedMilestone, int currentMilestone, int lastMilestone) {
+        return currentMilestone > lastMilestone && lastLoggedMilestone.compareAndSet(lastMilestone, currentMilestone);
+    }
+
+    /**
      * Blocks until {@code indexName} is no longer reported by the engine, or throws if the deadline passes.
      * OpenSearch/Elasticsearch can return from delete before all nodes agree the index is gone.
      */
     static void waitUntilIndexAbsent(BenchmarkEngine engine, String indexName) {
-        long deadline = System.nanoTime() + INDEX_ABSENT_DEADLINE_NS;
+        long deadlineNs = indexAbsentDeadlineNanosOverride >= 0
+                ? indexAbsentDeadlineNanosOverride
+                : INDEX_ABSENT_DEADLINE_NS;
+        long pollNs = indexAbsentPollNanosOverride >= 0
+                ? indexAbsentPollNanosOverride
+                : INDEX_ABSENT_POLL_NS;
+        long deadline = System.nanoTime() + deadlineNs;
         int polls = 0;
         while (engine.indexExists(indexName)) {
             if (System.nanoTime() > deadline) {
@@ -53,7 +114,7 @@ public final class LoadCommand {
             if ((polls++ % 20) == 0) {
                 logger.info("Waiting for index '{}' to be fully removed from the cluster...", indexName);
             }
-            LockSupport.parkNanos(INDEX_ABSENT_POLL_NS);
+            LockSupport.parkNanos(pollNs);
         }
     }
 
@@ -99,7 +160,7 @@ public final class LoadCommand {
             FileDownloader.ensureFileExists(dataPath, dataUrlEnv);
             logger.info("Loading data from: {}", dataPath);
 
-            ParquetReader reader = new ParquetReader(dataPath);
+            ParquetReader reader = parquetReaderFactory.apply(dataPath);
             long rowCount = reader.getRowCount();
             logger.info("Parquet file contains {} documents", rowCount);
 
@@ -120,11 +181,7 @@ public final class LoadCommand {
             long startTime = System.currentTimeMillis();
             long[] lastLogTime = {startTime};
 
-            ExecutorService executor = new ThreadPoolExecutor(
-                    numThreads, numThreads,
-                    0L, TimeUnit.MILLISECONDS,
-                    new LinkedBlockingQueue<>(queueCapacity)
-            );
+            ExecutorService executor = loadExecutorFactory.apply(numThreads, queueCapacity);
 
             logger.info("Starting parallel ingestion with {} threads (queue capacity: {})...", numThreads, queueCapacity);
 
@@ -141,15 +198,16 @@ public final class LoadCommand {
                                 );
                                 int total = totalIngested.addAndGet(ingested);
 
-                                int currentMilestone = total / 100000;
+                                int step = ingestMilestoneDocStep > 0 ? ingestMilestoneDocStep : 100_000;
+                                int currentMilestone = total / step;
                                 int lastMilestone = lastLoggedMilestone.get();
 
-                                if (currentMilestone > lastMilestone && lastLoggedMilestone.compareAndSet(lastMilestone, currentMilestone)) {
+                                if (shouldLogMilestoneProgress(lastLoggedMilestone, currentMilestone, lastMilestone)) {
                                     long now = System.currentTimeMillis();
                                     double elapsedSec = (now - startTime) / 1000.0;
                                     double recentElapsedSec = (now - lastLogTime[0]) / 1000.0;
                                     double overallRate = total / elapsedSec;
-                                    double recentRate = recentElapsedSec > 0.1 ? 100000 / recentElapsedSec : overallRate;
+                                    double recentRate = recentElapsedSec > 0.1 ? step / recentElapsedSec : overallRate;
                                     double progress = 100.0 * total / rowCount;
                                     double remainingSec = (rowCount - total) / overallRate;
 
@@ -169,7 +227,7 @@ public final class LoadCommand {
                         break;
                     } catch (java.util.concurrent.RejectedExecutionException e) {
                         try {
-                            Thread.sleep(100);
+                            sleepAfterRejectedMs.sleep(100);
                         } catch (InterruptedException ie) {
                             Thread.currentThread().interrupt();
                             throw new RuntimeException("Interrupted while waiting for executor queue", ie);

@@ -70,10 +70,6 @@ public class ParquetReader {
                 if (limit > 0 && count >= limit) {
                     break;
                 }
-
-                if (count % 10000 == 0) {
-                    logger.info("Read {} documents...", count);
-                }
             }
 
             logger.info("Finished reading {} documents from Parquet file", count);
