@@ -1,4 +1,4 @@
-package org.elasticsearch.jingra.utils;
+package org.elasticsearch.jingra.engine;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.json.jackson.JacksonJsonpMapper;
@@ -16,8 +16,10 @@ import org.apache.hc.core5.http.HttpHost;
 import org.apache.hc.core5.http2.HttpVersionPolicy;
 import org.apache.hc.core5.http2.config.H2Config;
 import org.apache.hc.core5.ssl.SSLContextBuilder;
+import org.apache.hc.core5.ssl.TrustStrategy;
 import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
+import org.elasticsearch.jingra.utils.TlsSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,6 +30,16 @@ import org.slf4j.LoggerFactory;
  */
 public class ElasticsearchClientFactory {
     private static final Logger logger = LoggerFactory.getLogger(ElasticsearchClientFactory.class);
+
+    private ElasticsearchClientFactory() {}
+
+    /**
+     * Trust-all strategy for insecure TLS mode. Package-private so tests can invoke
+     * {@link TrustStrategy#isTrusted} and achieve full coverage without a live TLS handshake.
+     */
+    static TrustStrategy insecureTrustAllStrategy() {
+        return (chain, authType) -> true;
+    }
 
     /**
      * Create an Elasticsearch client with standard configuration.
@@ -89,7 +101,7 @@ public class ElasticsearchClientFactory {
         if (https && insecureTls) {
             logger.warn("Insecure TLS is enabled: TLS verification is disabled (unsafe outside controlled environments)");
             javax.net.ssl.SSLContext sslContext = SSLContextBuilder.create()
-                    .loadTrustMaterial((chain, authType) -> true)
+                    .loadTrustMaterial(insecureTrustAllStrategy())
                     .build();
             cmBuilder.setTlsStrategy(ClientTlsStrategyBuilder.create()
                     .setSslContext(sslContext)
