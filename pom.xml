@@ -359,13 +359,7 @@
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>0.8.12</version>
                 <configuration>
-                    <!--
-                      All production classes participate in coverage. Engine implementations
-                      (ElasticsearchEngine, OpenSearchEngine, QdrantEngine) are core product code and
-                      must appear in the report and check—no blanket exclusions for integration-heavy
-                      code. Use Testcontainers tests when Docker is available; use offline/unit-style
-                      tests for null-client branches, connection failures, and template gaps.
-                    -->
+
                 </configuration>
                 <executions>
                     <!-- Prepare agent for coverage -->
@@ -398,17 +392,12 @@
                                         <limit>
                                             <counter>INSTRUCTION</counter>
                                             <value>COVEREDRATIO</value>
-                                            <!--
-                                              Bundle includes full engine implementations; ratio is lower than
-                                              when those classes were excluded. Increase this floor as offline and
-                                              container tests add coverage (target: approach 0.9+).
-                                            -->
-                                            <minimum>0.62</minimum>
+                                            <minimum>0.93</minimum>
                                         </limit>
                                         <limit>
                                             <counter>BRANCH</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.55</minimum>
+                                            <minimum>0.88</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
