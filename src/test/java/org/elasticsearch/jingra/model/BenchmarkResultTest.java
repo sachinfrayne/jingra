@@ -30,6 +30,9 @@ class BenchmarkResultTest {
         assertEquals("8.17.0", result.getEngineVersion());
         assertEquals("vector_search", result.getBenchmarkType());
         assertEquals("ecommerce-128", result.getDataset());
+        assertEquals("size=100_k=1000", result.getParamKey());
+        assertEquals(100, result.getParams().get("size"));
+        assertEquals(1000, result.getParams().get("k"));
         assertNotNull(result.getTimestamp());
     }
 
@@ -105,6 +108,9 @@ class BenchmarkResultTest {
         result.addMetric("num_samples", 10000);
 
         assertEquals(10000, result.getMetricAsInteger("num_samples"));
+        assertEquals(10000.0, result.getMetricAsDouble("num_samples"));
+        result.addMetric("ratio", 3.9);
+        assertEquals(3, result.getMetricAsInteger("ratio"));
     }
 
     @Test
@@ -132,6 +138,40 @@ class BenchmarkResultTest {
     @Test
     void getMetric_missingKeyReturnsNull() {
         assertNull(createTestResult().getMetric("no_such_metric"));
+    }
+
+    @Test
+    void constructor_defensivelyCopiesParamsMap() {
+        Map<String, Object> params = new HashMap<>();
+        params.put("size", 100);
+        BenchmarkResult result = new BenchmarkResult(
+                "r", "e", "1", "vector_search", "d", "pk", params);
+        params.put("injected", true);
+        assertFalse(result.getParams().containsKey("injected"));
+    }
+
+    @Test
+    void getParams_getMetrics_getMetadata_returnDefensiveCopies() {
+        BenchmarkResult result = createTestResult()
+                .addMetric("m", 1)
+                .addMetadata("mk", "mv");
+
+        result.getParams().put("x", 1);
+        result.getMetrics().put("y", 2);
+        result.getMetadata().put("z", "w");
+
+        assertEquals(1, result.getParams().size());
+        assertNull(result.getMetric("y"));
+        assertEquals(1, result.getMetadata().size());
+        assertEquals("mv", result.getMetadata().get("mk"));
+    }
+
+    @Test
+    void toMap_returnedMapMutationsDoNotAddMetrics() {
+        BenchmarkResult result = createTestResult().addMetric("m", 1);
+        Map<String, Object> map = result.toMap();
+        map.put("extra_metric", 99);
+        assertNull(result.getMetric("extra_metric"));
     }
 
     private BenchmarkResult createTestResult() {

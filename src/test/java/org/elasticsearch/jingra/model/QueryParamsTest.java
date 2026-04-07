@@ -104,4 +104,58 @@ class QueryParamsTest {
         QueryParams params = new QueryParams().put("size", 10);
         assertTrue(params.toString().contains("size"));
     }
+
+    @Test
+    void get_returnsStoredValueOrNull() {
+        QueryParams p = new QueryParams().put("x", "raw");
+        assertEquals("raw", p.get("x"));
+        assertNull(p.get("missing"));
+    }
+
+    @Test
+    void getString_missingKeyReturnsNull() {
+        assertNull(new QueryParams().getString("none"));
+    }
+
+    @Test
+    void getString_nullStoredValueReturnsNull() {
+        QueryParams p = new QueryParams();
+        p.put("n", null);
+        assertNull(p.getString("n"));
+    }
+
+    @Test
+    void getInteger_fromNonIntegerNumber_andNonNumberReturnsNull() {
+        QueryParams p = new QueryParams();
+        p.put("long", 12L);
+        assertEquals(12, p.getInteger("long"));
+        p.put("dbl", 3.7);
+        assertEquals(3, p.getInteger("dbl"));
+        p.put("bad", "7");
+        assertNull(p.getInteger("bad"));
+    }
+
+    @Test
+    void getLong_directLong_andNonNumberReturnsNull() {
+        QueryParams p = new QueryParams();
+        p.put("l", 99L);
+        assertEquals(99L, p.getLong("l"));
+        p.put("bad", "99");
+        assertNull(p.getLong("bad"));
+    }
+
+    @Test
+    void getFloatList_nonListReturnsNull() {
+        QueryParams p = new QueryParams();
+        p.put("v", "nope");
+        assertNull(p.getFloatList("v"));
+    }
+
+    @Test
+    void getAll_isDefensiveCopy() {
+        QueryParams p = new QueryParams().put("a", 1);
+        p.getAll().put("b", 2);
+        assertEquals(1, p.getAll().size());
+        assertFalse(p.getAll().containsKey("b"));
+    }
 }
