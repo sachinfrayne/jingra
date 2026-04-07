@@ -1,0 +1,570 @@
+package org.elasticsearch.jingra.engine;
+
+import co.elastic.clients.elasticsearch._types.ElasticsearchException;
+import co.elastic.clients.elasticsearch._types.ErrorCause;
+import co.elastic.clients.elasticsearch._types.ErrorResponse;
+import co.elastic.clients.elasticsearch._types.ShardStatistics;
+import co.elastic.clients.elasticsearch.core.BulkRequest;
+import co.elastic.clients.elasticsearch.core.BulkResponse;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
+import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
+import co.elastic.clients.elasticsearch.core.bulk.OperationType;
+import co.elastic.clients.elasticsearch.core.search.Hit;
+import co.elastic.clients.elasticsearch.core.search.HitsMetadata;
+import co.elastic.clients.elasticsearch.core.search.TotalHits;
+import co.elastic.clients.elasticsearch.core.search.TotalHitsRelation;
+import co.elastic.clients.elasticsearch.indices.GetIndexResponse;
+import co.elastic.clients.transport.rest5_client.low_level.Rest5Client;
+import org.apache.hc.core5.http.HttpHost;
+import org.elasticsearch.jingra.model.Document;
+import org.elasticsearch.jingra.model.QueryParams;
+import org.elasticsearch.jingra.model.QueryResponse;
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Offline tests for {@link ElasticsearchEngine} branches not covered efficiently by Testcontainers.
+ * Uses same-package subclasses ({@link ElasticsearchEngine#hasClient()} and operation hooks) because
+ * {@code ElasticsearchClient} cannot be mocked on recent JDKs with Mockito inline.
+ */
+class ElasticsearchEngineBehaviorTest {
+
+    private static final String BOGUS_URL_ENV = "__JINGRA_ES_OFFLINE_URL_ENV__";
+
+    abstract static class ConnectedHarness extends ElasticsearchEngine {
+        ConnectedHarness(Map<String, Object> cfg) {
+            super(cfg);
+        }
+
+        @Override
+        protected boolean hasClient() {
+            return true;
+        }
+    }
+
+    private static void injectRestClient(ElasticsearchEngine engine, Rest5Client rest) throws Exception {
+        Field fr = ElasticsearchEngine.class.getDeclaredField("restClient");
+        fr.setAccessible(true);
+        fr.set(engine, rest);
+    }
+
+    private static SearchResponse<Map> searchHitsWithIds(String... ids) {
+        if (ids.length == 0) {
+            return SearchResponse.of(s -> s
+                    .timedOut(false)
+                    .took(3L)
+                    .shards(ShardStatistics.of(sh -> sh.total(1).successful(1).failed(0)))
+                    .hits(HitsMetadata.of(h -> h
+                            .hits(List.of())
+                            .total(TotalHits.of(t -> t.value(0).relation(TotalHitsRelation.Eq))))));
+        }
+        Hit<Map> first = Hit.<Map>of(h -> h.id(ids[0]).index("idx").source(Map.of()));
+        if (ids.length == 1) {
+            return SearchResponse.of(s -> s
+                    .timedOut(false)
+                    .took(3L)
+                    .shards(ShardStatistics.of(sh -> sh.total(1).successful(1).failed(0)))
+                    .hits(HitsMetadata.of(h -> h
+                            .hits(first)
+                            .total(TotalHits.of(t -> t.value(1).relation(TotalHitsRelation.Eq))))));
+        }
+        List<Hit<Map>> tail = new ArrayList<>();
+        for (int i = 1; i < ids.length; i++) {
+            String id = ids[i];
+            tail.add(Hit.<Map>of(h -> h.id(id).index("idx").source(Map.of())));
+        }
+        @SuppressWarnings("unchecked")
+        Hit<Map>[] rest = tail.toArray(new Hit[0]);
+        return SearchResponse.of(s -> s
+                .timedOut(false)
+                .took(3L)
+                .shards(ShardStatistics.of(sh -> sh.total(1).successful(1).failed(0)))
+                .hits(HitsMetadata.of(h -> h
+                        .hits(first, rest)
+                        .total(TotalHits.of(t -> t.value(ids.length).relation(TotalHitsRelation.Eq))))));
+    }
+
+    @Test
+    void connectReturnsFalseWhenUrlMissing() {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("url_env", BOGUS_URL_ENV);
+        assertFalse(new ElasticsearchEngine(cfg).connect());
+    }
+
+    @Test
+    void connectReturnsFalseWhenUrlMalformed() {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("url", "http://[");
+        assertFalse(new ElasticsearchEngine(cfg).connect());
+    }
+
+    @Test
+    void connectReturnsFalseWhenUnreachable() {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("url", "http://127.0.0.1:1");
+        assertFalse(new ElasticsearchEngine(cfg).connect());
+    }
+
+    @Test
+    void connectAppliesBasicAuthWhenUserAndPasswordSet() {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("url", "http://127.0.0.1:1");
+        cfg.put("user", "test-user");
+        cfg.put("password", "test-secret");
+        assertFalse(new ElasticsearchEngine(cfg).connect());
+    }
+
+    @Test
+    void gettersWhenNeverConnected() {
+        ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+        assertFalse(e.connect());
+        assertEquals("elasticsearch", e.getEngineName());
+        assertEquals("es", e.getShortName());
+        assertEquals("unknown", e.getVersion());
+        assertNull(e.getLastQueryJson());
+        assertNull(e.getLastIndexName());
+    }
+
+    @Test
+    void formatJsonForDisplay_prettyPrintsValidJson() {
+        ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+        String out = e.formatJsonForDisplay("{\"x\":1}");
+        assertTrue(out.contains("\n"));
+        assertTrue(out.contains("\"x\""));
+    }
+
+    @Test
+    void formatJsonForDisplay_returnsOriginalWhenInvalid() {
+        ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+        String bad = "{ not valid json";
+        assertEquals(bad, e.formatJsonForDisplay(bad));
+    }
+
+    @Test
+    void createIndexReturnsFalseWhenClientNull() {
+        assertFalse(new ElasticsearchEngine(new HashMap<>()).createIndex("i", "any"));
+    }
+
+    @Test
+    void indexExistsReturnsFalseWhenClientNull() {
+        assertFalse(new ElasticsearchEngine(new HashMap<>()).indexExists("i"));
+    }
+
+    @Test
+    void deleteIndexReturnsFalseWhenClientNull() {
+        assertFalse(new ElasticsearchEngine(new HashMap<>()).deleteIndex("i"));
+    }
+
+    @Test
+    void ingestReturnsZeroWhenClientNull() {
+        assertEquals(0, new ElasticsearchEngine(new HashMap<>()).ingest(List.of(new Document(Map.of("a", 1))), "i", null));
+    }
+
+    @Test
+    void queryReturnsEmptyWhenClientNull() {
+        QueryResponse r = new ElasticsearchEngine(new HashMap<>()).query("i", "q", new QueryParams());
+        assertTrue(r.getDocumentIds().isEmpty());
+        assertNull(r.getClientLatencyMs());
+        assertNull(r.getServerLatencyMs());
+    }
+
+    @Test
+    void getDocumentCountZeroWhenClientNull() {
+        assertEquals(0L, new ElasticsearchEngine(new HashMap<>()).getDocumentCount("i"));
+    }
+
+    @Test
+    void getIndexMetadataEmptyWhenClientNull() {
+        assertTrue(new ElasticsearchEngine(new HashMap<>()).getIndexMetadata("i").isEmpty());
+    }
+
+    @Test
+    void closeSafeWhenRestClientNull() throws Exception {
+        new ElasticsearchEngine(new HashMap<>()).close();
+    }
+
+    @Test
+    void closeClosesRestClientWhenPresent() throws Exception {
+        Rest5Client rc = Rest5Client.builder(new HttpHost("http", "127.0.0.1", 1)).build();
+        try {
+            ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+            injectRestClient(e, rc);
+            e.close();
+            assertFalse(rc.isRunning(), "Rest5Client should be closed");
+        } finally {
+            if (rc.isRunning()) {
+                rc.close();
+            }
+        }
+    }
+
+    @Test
+    void indexExistsReturnsFalseWhenOperationThrows() {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected boolean indexExistsOperation(String indexName) {
+                throw new RuntimeException("boom");
+            }
+        };
+        assertFalse(e.indexExists("x"));
+    }
+
+    @Test
+    void getDocumentCountReturnsZeroWhenCountThrows() {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected long countOperation(String indexName) throws Exception {
+                throw new IOException("count failed");
+            }
+        };
+        assertEquals(0L, e.getDocumentCount("x"));
+    }
+
+    @Test
+    void getVersionUnknownWhenInfoThrows() {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected String versionOperation() throws Exception {
+                throw new IOException("info failed");
+            }
+        };
+        assertEquals("unknown", e.getVersion());
+    }
+
+    @Test
+    void deleteIndexTrueOn404() {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected void deleteIndexOperation(String indexName) {
+                ErrorResponse er = ErrorResponse.of(b -> b.status(404)
+                        .error(ErrorCause.of(x -> x.type("index_not_found_exception").reason("nf"))));
+                throw new ElasticsearchException("failed", er);
+            }
+        };
+        assertTrue(e.deleteIndex("missing"));
+    }
+
+    @Test
+    void deleteIndexFalseOnNon404ElasticsearchException() {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected void deleteIndexOperation(String indexName) {
+                ErrorResponse er = ErrorResponse.of(b -> b.status(500)
+                        .error(ErrorCause.of(x -> x.type("internal_server_error").reason("err"))));
+                throw new ElasticsearchException("failed", er);
+            }
+        };
+        assertFalse(e.deleteIndex("x"));
+    }
+
+    @Test
+    void deleteIndexFalseOnGenericException() {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected void deleteIndexOperation(String indexName) throws Exception {
+                throw new IOException("io");
+            }
+        };
+        assertFalse(e.deleteIndex("x"));
+    }
+
+    @Test
+    void createIndexFalseWhenIndexAlreadyExists() {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected boolean indexExistsOperation(String indexName) {
+                return true;
+            }
+        };
+        assertFalse(e.createIndex("exists", "any"));
+    }
+
+    @Test
+    void createIndexFalseWhenSchemaMissing() {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected boolean indexExistsOperation(String indexName) {
+                return false;
+            }
+        };
+        assertFalse(e.createIndex("i", "__schema_file_does_not_exist__"));
+    }
+
+    @Test
+    void createIndexFalseWhenSchemaHasNoTemplateField() throws Exception {
+        Path dir = Path.of("jingra-config/schemas/elasticsearch");
+        Files.createDirectories(dir);
+        Path f = dir.resolve("behavior-es-no-template-key.json");
+        Files.writeString(f, "{\"not_template\": {}}");
+        try {
+            ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+                @Override
+                protected boolean indexExistsOperation(String indexName) {
+                    return false;
+                }
+            };
+            assertFalse(e.createIndex("i", "behavior-es-no-template-key"));
+        } finally {
+            Files.deleteIfExists(f);
+        }
+    }
+
+    @Test
+    void createIndexFalseWhenCreateThrows() throws Exception {
+        Path dir = Path.of("jingra-config/schemas/elasticsearch");
+        Files.createDirectories(dir);
+        Path f = dir.resolve("behavior-es-create-fail.json");
+        Files.writeString(f, "{\"template\": {\"mappings\": {\"properties\": {\"f\": {\"type\": \"keyword\"}}}}}");
+        try {
+            ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+                @Override
+                protected boolean indexExistsOperation(String indexName) {
+                    return false;
+                }
+
+                @Override
+                protected void createIndexOperation(String indexName, String schemaJson) throws Exception {
+                    throw new IOException("create failed");
+                }
+            };
+            assertFalse(e.createIndex("i", "behavior-es-create-fail"));
+        } finally {
+            Files.deleteIfExists(f);
+        }
+    }
+
+    @Test
+    void queryReturnsEmptyWhenTemplateMissing() {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {};
+        QueryResponse r = e.query("idx", "__no_query_template__", new QueryParams());
+        assertTrue(r.getDocumentIds().isEmpty());
+        assertNull(r.getClientLatencyMs());
+        assertNull(r.getServerLatencyMs());
+    }
+
+    @Test
+    void queryRethrowsIllegalStateFromRender() throws Exception {
+        Path dir = Path.of("jingra-config/queries/elasticsearch");
+        Files.createDirectories(dir);
+        Path f = dir.resolve("behavior-es-bad-render.json");
+        Files.writeString(f, "{\"no_template\": true}");
+        try {
+            ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {};
+            assertThrows(IllegalStateException.class,
+                    () -> e.query("idx", "behavior-es-bad-render", new QueryParams()));
+        } finally {
+            Files.deleteIfExists(f);
+        }
+    }
+
+    @Test
+    void queryIncludesEmptyStringIdsInOrder() throws Exception {
+        Path dir = Path.of("jingra-config/queries/elasticsearch");
+        Files.createDirectories(dir);
+        Path f = dir.resolve("behavior-es-query-empty-id.json");
+        Files.writeString(f, """
+                {"template": {"query": {"match_all": {}}, "size": 2}}
+                """);
+        try {
+            ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+                @Override
+                protected SearchResponse<Map> searchOperation(String indexName, String queryJson) {
+                    return searchHitsWithIds("", "real");
+                }
+            };
+            QueryResponse r = e.query("idx", "behavior-es-query-empty-id", new QueryParams());
+            assertEquals(List.of("", "real"), r.getDocumentIds());
+        } finally {
+            Files.deleteIfExists(f);
+        }
+    }
+
+    @Test
+    void queryStoresLastQueryJsonOnceAndReturnsHits() throws Exception {
+        Path dir = Path.of("jingra-config/queries/elasticsearch");
+        Files.createDirectories(dir);
+        Path f = dir.resolve("behavior-es-query.json");
+        Files.writeString(f, """
+                {"template": {"query": {"match_all": {}}, "size": 1}}
+                """);
+        try {
+            AtomicBoolean second = new AtomicBoolean(false);
+            ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+                @Override
+                protected SearchResponse<Map> searchOperation(String indexName, String queryJson) {
+                    if (!second.get()) {
+                        return searchHitsWithIds("doc1");
+                    }
+                    return searchHitsWithIds("doc2");
+                }
+            };
+
+            QueryResponse r1 = e.query("my-index", "behavior-es-query", new QueryParams());
+            assertEquals(List.of("doc1"), r1.getDocumentIds());
+            assertNotNull(r1.getClientLatencyMs());
+            assertEquals(3L, r1.getServerLatencyMs().longValue());
+
+            String firstJson = e.getLastQueryJson();
+            assertNotNull(firstJson);
+            assertEquals("my-index", e.getLastIndexName());
+
+            second.set(true);
+            e.query("other", "behavior-es-query", new QueryParams());
+            assertEquals(firstJson, e.getLastQueryJson());
+            assertEquals("my-index", e.getLastIndexName());
+        } finally {
+            Files.deleteIfExists(f);
+        }
+    }
+
+    @Test
+    void queryReturnsEmptyOnGenericFailure() throws Exception {
+        Path dir = Path.of("jingra-config/queries/elasticsearch");
+        Files.createDirectories(dir);
+        Path f = dir.resolve("behavior-es-query-fail.json");
+        Files.writeString(f, """
+                {"template": {"query": {"match_all": {}}, "size": 1}}
+                """);
+        try {
+            ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+                @Override
+                protected SearchResponse<Map> searchOperation(String indexName, String queryJson) throws Exception {
+                    throw new IOException("search failed");
+                }
+            };
+            QueryResponse r = e.query("idx", "behavior-es-query-fail", new QueryParams());
+            assertTrue(r.getDocumentIds().isEmpty());
+            assertNull(r.getClientLatencyMs());
+            assertNull(r.getServerLatencyMs());
+        } finally {
+            Files.deleteIfExists(f);
+        }
+    }
+
+    @Test
+    void ingestThrowsWhenPartialErrorsAndFailOnPartialTrue() throws Exception {
+        BulkResponseItem item = BulkResponseItem.of(b -> b.operationType(OperationType.Index).index("idx").error(
+                ErrorCause.of(e -> e.type("mapper_parsing_exception").reason("bad"))).status(400));
+        BulkResponse br = BulkResponse.of(b -> b.errors(true).took(1).items(List.of(item)));
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                return br;
+            }
+        };
+        List<Document> docs = List.of(new Document(Map.of("f", "v")));
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> e.ingest(docs, "idx", null));
+        assertEquals("Bulk ingest failed", ex.getMessage());
+        assertInstanceOf(IllegalStateException.class, ex.getCause());
+        assertTrue(ex.getCause().getMessage().contains("errors"));
+    }
+
+    @Test
+    void ingestReturnsSuccessCountMinusErrorsWhenFailOnPartialFalse() throws Exception {
+        BulkResponseItem item = BulkResponseItem.of(b -> b.operationType(OperationType.Index).index("idx").error(
+                ErrorCause.of(e -> e.type("mapper_parsing_exception").reason("bad"))).status(400));
+        BulkResponse br = BulkResponse.of(b -> b.errors(true).took(1).items(List.of(item)));
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("ingest_fail_on_partial_errors", false);
+        ConnectedHarness e = new ConnectedHarness(cfg) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                return br;
+            }
+        };
+        assertEquals(0, e.ingest(List.of(new Document(Map.of("f", "v"))), "idx", null));
+    }
+
+    @Test
+    void ingestLogsAtMostFivePerItemErrorsWhenManyDocumentsFail() throws Exception {
+        List<BulkResponseItem> items = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            int n = i;
+            items.add(BulkResponseItem.of(b -> b.operationType(OperationType.Index).index("idx").error(
+                    ErrorCause.of(e -> e.type("mapper_parsing_exception").reason("err-" + n))).status(400)));
+        }
+        BulkResponse br = BulkResponse.of(b -> b.errors(true).took(1).items(items));
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("ingest_fail_on_partial_errors", false);
+        ConnectedHarness e = new ConnectedHarness(cfg) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                return br;
+            }
+        };
+        List<Document> docs = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            docs.add(new Document(Map.of("f", i)));
+        }
+        assertEquals(0, e.ingest(docs, "idx", null));
+    }
+
+    @Test
+    void ingestWrapsBulkFailureInRuntimeException() {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) throws Exception {
+                throw new IOException("bulk io");
+            }
+        };
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> e.ingest(List.of(new Document(Map.of("f", "v"))), "idx", null));
+        assertEquals("Bulk ingest failed", ex.getMessage());
+        assertInstanceOf(IOException.class, ex.getCause());
+    }
+
+    @Test
+    void getIndexMetadataSwallowsGetFailure() {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected GetIndexResponse getIndexResponseOperation(String indexName) throws Exception {
+                throw new IOException("get idx failed");
+            }
+        };
+        assertTrue(e.getIndexMetadata("x").isEmpty());
+    }
+
+    @Test
+    void getVersionReadsFromInfo() {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected String versionOperation() {
+                return "9.9.9";
+            }
+        };
+        assertEquals("9.9.9", e.getVersion());
+    }
+
+    @Test
+    void getLastQueryJsonGetterAfterQuery() throws Exception {
+        Path dir = Path.of("jingra-config/queries/elasticsearch");
+        Files.createDirectories(dir);
+        Path f = dir.resolve("behavior-es-getters.json");
+        Files.writeString(f, "{\"template\": {\"query\": {\"match_all\": {}}}}");
+        try {
+            ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+                @Override
+                protected SearchResponse<Map> searchOperation(String indexName, String queryJson) {
+                    return searchHitsWithIds();
+                }
+            };
+            e.query("getter-idx", "behavior-es-getters", new QueryParams());
+            assertNotNull(e.getLastQueryJson());
+            assertEquals("getter-idx", e.getLastIndexName());
+        } finally {
+            Files.deleteIfExists(f);
+        }
+    }
+}

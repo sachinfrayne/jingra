@@ -24,15 +24,19 @@ import org.opensearch.client.opensearch.core.BulkRequest;
 import org.opensearch.client.opensearch.core.BulkResponse;
 import org.opensearch.client.opensearch.core.bulk.BulkResponseItem;
 import org.opensearch.client.opensearch._types.OpenSearchException;
+import org.opensearch.client.opensearch._types.mapping.Property;
+import org.opensearch.client.opensearch._types.mapping.TypeMapping;
 import org.opensearch.client.opensearch.indices.DeleteIndexRequest;
 import org.opensearch.client.opensearch.indices.ExistsRequest;
 import org.opensearch.client.opensearch.indices.GetIndexRequest;
+import org.opensearch.client.opensearch.indices.GetIndexResponse;
 import org.opensearch.client.json.jackson.JacksonJsonpMapper;
 import org.opensearch.client.transport.rest_client.RestClientTransport;
 import org.opensearch.client.RestClient;
 import org.opensearch.client.RestClientBuilder;
 
 import javax.net.ssl.SSLContext;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -50,6 +54,42 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
 
     public OpenSearchEngine(Map<String, Object> config) {
         super(config);
+    }
+
+    /**
+     * Whether API methods that require an initialized client may run.
+     * Overridden in same-package tests to exercise branches without a real {@link OpenSearchClient}.
+     */
+    protected boolean hasClient() {
+        return client != null;
+    }
+
+    protected boolean indexExistsOperation(String indexName) throws Exception {
+        return client.indices().exists(ExistsRequest.of(b -> b.index(indexName))).value();
+    }
+
+    protected void deleteIndexOperation(String indexName) throws Exception {
+        client.indices().delete(DeleteIndexRequest.of(b -> b.index(indexName)));
+    }
+
+    protected BulkResponse bulkOperation(BulkRequest request) throws Exception {
+        return client.bulk(request);
+    }
+
+    protected long countOperation(String indexName) throws Exception {
+        return client.count(c -> c.index(indexName)).count();
+    }
+
+    protected String versionOperation() throws Exception {
+        return client.info().version().number();
+    }
+
+    protected GetIndexResponse getIndexResponseOperation(String indexName) throws Exception {
+        return client.indices().get(GetIndexRequest.of(b -> b.index(indexName)));
+    }
+
+    protected Response performRestRequest(Request request) throws IOException {
+        return restClient.performRequest(request);
     }
 
     @Override
@@ -150,7 +190,7 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
 
     @Override
     public boolean createIndex(String indexName, String schemaName) {
-        if (client == null) {
+        if (!hasClient()) {
             logger.error("OpenSearch client not initialized");
             return false;
         }
@@ -181,7 +221,7 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
 
             Request request = new Request("PUT", "/" + indexName);
             request.setJsonEntity(schemaJson);
-            restClient.performRequest(request);
+            performRestRequest(request);
             logger.info("Created OpenSearch index '{}' with schema '{}'", indexName, schemaName);
             return true;
         } catch (Exception e) {
@@ -192,11 +232,11 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
 
     @Override
     public boolean indexExists(String indexName) {
-        if (client == null) {
+        if (!hasClient()) {
             return false;
         }
         try {
-            return client.indices().exists(ExistsRequest.of(b -> b.index(indexName))).value();
+            return indexExistsOperation(indexName);
         } catch (Exception e) {
             logger.error("Failed to check if index exists", e);
             return false;
@@ -205,13 +245,13 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
 
     @Override
     public boolean deleteIndex(String indexName) {
-        if (client == null) {
+        if (!hasClient()) {
             logger.error("OpenSearch client not initialized");
             return false;
         }
 
         try {
-            client.indices().delete(DeleteIndexRequest.of(b -> b.index(indexName)));
+            deleteIndexOperation(indexName);
             logger.info("Deleted OpenSearch index '{}'", indexName);
             return true;
         } catch (OpenSearchException e) {
@@ -229,7 +269,7 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
 
     @Override
     public int ingest(List<Document> documents, String indexName, String idField) {
-        if (client == null) {
+        if (!hasClient()) {
             logger.error("OpenSearch client not initialized");
             return 0;
         }
@@ -261,7 +301,7 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
                 count++;
             }
 
-            BulkResponse response = client.bulk(bulkBuilder.build());
+            BulkResponse response = bulkOperation(bulkBuilder.build());
 
             if (response.errors()) {
                 int errorCount = 0;
@@ -291,7 +331,7 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
 
     @Override
     public QueryResponse query(String indexName, String queryName, QueryParams params) {
-        if (client == null) {
+        if (!hasClient()) {
             logger.error("OpenSearch client not initialized");
             return new QueryResponse(List.of(), null, null);
         }
@@ -317,7 +357,7 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
             long startTime = System.nanoTime();
             Request request = new Request("POST", "/" + indexName + "/_search");
             request.setJsonEntity(queryJson);
-            Response response = restClient.performRequest(request);
+            Response response = performRestRequest(request);
             double clientLatencyMs = (System.nanoTime() - startTime) / 1_000_000.0;
 
             // Parse response
@@ -349,11 +389,11 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
 
     @Override
     public long getDocumentCount(String indexName) {
-        if (client == null) {
+        if (!hasClient()) {
             return 0;
         }
         try {
-            return client.count(c -> c.index(indexName)).count();
+            return countOperation(indexName);
         } catch (Exception e) {
             logger.error("Failed to get document count", e);
             return 0;
@@ -372,11 +412,11 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
 
     @Override
     public String getVersion() {
-        if (client == null) {
+        if (!hasClient()) {
             return "unknown";
         }
         try {
-            return client.info().version().number();
+            return versionOperation();
         } catch (Exception e) {
             logger.error("Failed to get version", e);
             return "unknown";
@@ -395,8 +435,21 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
 
     /**
      * Format JSON for pretty-printed console display.
+     * Package-private for tests in the same package.
      */
-    private String formatJsonForDisplay(String json) {
+    private static String firstOpenSearchVectorType(TypeMapping mapping) {
+        if (mapping == null || mapping.properties() == null) {
+            return null;
+        }
+        for (Property p : mapping.properties().values()) {
+            if (p.isKnnVector()) {
+                return "knn_vector";
+            }
+        }
+        return null;
+    }
+
+    String formatJsonForDisplay(String json) {
         try {
             ObjectMapper prettyMapper = new ObjectMapper();
             Object jsonObject = prettyMapper.readValue(json, Object.class);
@@ -411,17 +464,21 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
     public Map<String, String> getIndexMetadata(String indexName) {
         Map<String, String> metadata = new HashMap<>();
 
-        if (client == null) {
+        if (!hasClient()) {
             return metadata;
         }
 
         try {
-            var indexResponse = client.indices().get(GetIndexRequest.of(b -> b.index(indexName)));
+            var indexResponse = getIndexResponseOperation(indexName);
             var indexInfo = indexResponse.get(indexName);
 
             if (indexInfo != null && indexInfo.mappings() != null) {
-                JsonNode mappingTree = objectMapper.valueToTree(indexInfo.mappings());
-                String vt = VectorTypeInference.firstElasticsearchVectorType(mappingTree);
+                TypeMapping tm = indexInfo.mappings();
+                String vt = firstOpenSearchVectorType(tm);
+                if (vt == null) {
+                    JsonNode mappingTree = objectMapper.valueToTree(tm);
+                    vt = VectorTypeInference.firstElasticsearchVectorType(mappingTree);
+                }
                 if (vt != null) {
                     metadata.put("vector_type", vt);
                 }
