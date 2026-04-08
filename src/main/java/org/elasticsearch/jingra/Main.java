@@ -1,7 +1,6 @@
 package org.elasticsearch.jingra;
 
-import java.util.Objects;
-
+import org.elasticsearch.jingra.bootstrap.JvmShutdown;
 import org.elasticsearch.jingra.cli.EvalCommand;
 import org.elasticsearch.jingra.cli.LoadCommand;
 import org.elasticsearch.jingra.config.ConfigLoader;
@@ -10,6 +9,8 @@ import org.elasticsearch.jingra.utils.LoggingConfigurator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.function.IntConsumer;
+
 /**
  * Entry point: parses CLI args, loads config, dispatches to commands.
  */
@@ -17,7 +18,8 @@ public class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
 
     /**
-     * Logs a banner line with {@code JINGRA_VERSION} (or {@code unknown}) and the command title.
+     * Logs a banner line with {@code JINGRA_VERSION} (or {@code unknown}) and the
+     * command title.
      */
     private static void logHeader() {
         String line = "=".repeat(80);
@@ -40,10 +42,18 @@ public class Main {
         void run(JingraConfig config) throws Exception;
     }
 
+    /**
+     * Invoked when {@link #runMain(String[])} returns non-zero. Default delegates
+     * to {@link JvmShutdown#exit(int)};
+     * same-package tests replace this to record the code without terminating the
+     * JVM.
+     */
+    static IntConsumer nonZeroExitAction = JvmShutdown::exit;
+
     public static void main(String[] args) {
         int code = runMain(args);
         if (code != 0) {
-            System.exit(code);
+            nonZeroExitAction.accept(code);
         }
     }
 
