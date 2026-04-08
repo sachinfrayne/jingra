@@ -97,13 +97,6 @@
             <version>3.25.5</version>
         </dependency>
 
-        <!-- exp4j for arithmetic expression evaluation -->
-        <dependency>
-            <groupId>net.objecthunter</groupId>
-            <artifactId>exp4j</artifactId>
-            <version>0.4.8</version>
-        </dependency>
-
         <!-- Apache Parquet for reading data files -->
         <dependency>
             <groupId>org.apache.parquet</groupId>
