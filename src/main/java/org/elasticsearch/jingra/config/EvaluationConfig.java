@@ -19,6 +19,9 @@ public class EvaluationConfig {
     @JsonProperty("measurement_rounds")
     private Integer measurementRounds = 1;
 
+    @JsonProperty("run_id")
+    private String runId;
+
     public Integer getWarmupWorkers() {
         return warmupWorkers;
     }
@@ -49,5 +52,13 @@ public class EvaluationConfig {
 
     public void setMeasurementRounds(Integer measurementRounds) {
         this.measurementRounds = measurementRounds;
+    }
+
+    public String getRunId() {
+        return runId;
+    }
+
+    public void setRunId(String runId) {
+        this.runId = runId;
     }
 }

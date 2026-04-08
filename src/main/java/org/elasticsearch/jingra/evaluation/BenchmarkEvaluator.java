@@ -38,7 +38,11 @@ public class BenchmarkEvaluator {
         this.config = config;
         this.engine = engine;
         this.sinks = sinks;
-        this.runId = generateRunId();
+        // Use configured run_id if provided, otherwise generate timestamp-based one
+        EvaluationConfig evalConfig = config.getEvaluation();
+        this.runId = (evalConfig != null && evalConfig.getRunId() != null)
+                ? evalConfig.getRunId()
+                : generateRunId();
     }
 
     /**
