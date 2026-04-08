@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -31,6 +32,20 @@ class ConsoleResultsSinkTest {
     void teardown() {
         // Restore original stdout
         System.setOut(originalOut);
+    }
+
+    private static String invokeFormatQueryEndpoint(ConsoleResultsSink sink, String engineName, String indexName)
+            throws Exception {
+        Method m = ConsoleResultsSink.class.getDeclaredMethod("formatQueryEndpoint", String.class, String.class);
+        m.setAccessible(true);
+        return (String) m.invoke(sink, engineName, indexName);
+    }
+
+    private static String invokeFormatMetricValue(ConsoleResultsSink sink, String metricName, Object value)
+            throws Exception {
+        Method m = ConsoleResultsSink.class.getDeclaredMethod("formatMetricValue", String.class, Object.class);
+        m.setAccessible(true);
+        return (String) m.invoke(sink, metricName, value);
     }
 
     private BenchmarkResult createTestResult(String runId, String engine, String engineVersion,
@@ -235,5 +250,84 @@ class ConsoleResultsSinkTest {
         };
         RuntimeException ex = assertThrows(RuntimeException.class, () -> sink.writeResult(bad));
         assertTrue(ex.getMessage().contains("Failed to write result to console"));
+    }
+
+    @Test
+    void writeResult_printsConsoleQueryBlock_whenQueryMetadataComplete() {
+        ConsoleResultsSink sink = new ConsoleResultsSink();
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put("query_json", "{\"query\":{\"match_all\":{}}}");
+        metadata.put("index_name", "bench-idx");
+        metadata.put("engine_name", "elasticsearch");
+
+        BenchmarkResult result = createTestResult("q1", "elasticsearch", "8.0", Map.of("mrr", 1.0), metadata);
+        sink.writeResult(result);
+
+        String output = outputStreamCaptor.toString();
+        assertThat(output).contains("Console query");
+        assertThat(output).contains("POST /bench-idx/_search");
+        assertThat(output).contains("{\"query\":{\"match_all\":{}}}");
+    }
+
+    @Test
+    void writeResult_omitsConsoleQueryBlock_whenQueryJsonNull() {
+        ConsoleResultsSink sink = new ConsoleResultsSink();
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put("index_name", "i");
+        metadata.put("engine_name", "elasticsearch");
+
+        sink.writeResult(createTestResult("a", "e", "1.0", Map.of(), metadata));
+        assertThat(outputStreamCaptor.toString()).doesNotContain("Console query");
+    }
+
+    @Test
+    void writeResult_omitsConsoleQueryBlock_whenIndexNameNull() {
+        ConsoleResultsSink sink = new ConsoleResultsSink();
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put("query_json", "{}");
+        metadata.put("engine_name", "elasticsearch");
+
+        sink.writeResult(createTestResult("a", "e", "1.0", Map.of(), metadata));
+        assertThat(outputStreamCaptor.toString()).doesNotContain("Console query");
+    }
+
+    @Test
+    void writeResult_omitsConsoleQueryBlock_whenEngineNameNull() {
+        ConsoleResultsSink sink = new ConsoleResultsSink();
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put("query_json", "{}");
+        metadata.put("index_name", "i");
+
+        sink.writeResult(createTestResult("a", "e", "1.0", Map.of(), metadata));
+        assertThat(outputStreamCaptor.toString()).doesNotContain("Console query");
+    }
+
+    @Test
+    void formatQueryEndpoint_elasticsearchOpenSearchQdrantDefaultAndCase() throws Exception {
+        ConsoleResultsSink sink = new ConsoleResultsSink();
+        String idx = "my-index";
+
+        assertEquals("POST /" + idx + "/_search", invokeFormatQueryEndpoint(sink, "elasticsearch", idx));
+        assertEquals("POST /" + idx + "/_search", invokeFormatQueryEndpoint(sink, "OpenSearch", idx));
+        assertEquals("POST /collections/" + idx + "/points/search", invokeFormatQueryEndpoint(sink, "qdrant", idx));
+        assertEquals("POST /" + idx + "/search", invokeFormatQueryEndpoint(sink, "custom-engine", idx));
+        assertEquals("POST /" + idx + "/_search", invokeFormatQueryEndpoint(sink, "ElasticSearch", idx));
+    }
+
+    @Test
+    void formatMetricValue_mrrBranchUsesFourDecimals() throws Exception {
+        ConsoleResultsSink sink = new ConsoleResultsSink();
+        assertEquals("0.1235", invokeFormatMetricValue(sink, "mrr", 0.123456));
+        assertEquals("0.1235", invokeFormatMetricValue(sink, "score_mrr", 0.123456));
+    }
+
+    @Test
+    void formatMetricValue_numericBranchesExact() throws Exception {
+        ConsoleResultsSink sink = new ConsoleResultsSink();
+        assertEquals("0.1235", invokeFormatMetricValue(sink, "precision", 0.123456));
+        assertEquals("123.46", invokeFormatMetricValue(sink, "latency_avg", 123.456));
+        assertEquals("999.9990", invokeFormatMetricValue(sink, "other_num", 999.999));
+        assertEquals("0.5000", invokeFormatMetricValue(sink, "x", 0.5f));
+        assertEquals("42", invokeFormatMetricValue(sink, "k", 42));
     }
 }
