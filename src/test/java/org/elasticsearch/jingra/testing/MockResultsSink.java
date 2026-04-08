@@ -11,10 +11,12 @@ import java.util.Map;
  */
 public class MockResultsSink implements ResultsSink {
     public int resultCount = 0;
+    public BenchmarkResult lastResult = null;
 
     @Override
     public void writeResult(BenchmarkResult result) {
         resultCount++;
+        lastResult = result;
     }
 
     @Override

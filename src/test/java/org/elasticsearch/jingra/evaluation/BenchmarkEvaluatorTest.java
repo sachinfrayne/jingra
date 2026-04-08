@@ -543,6 +543,56 @@ class BenchmarkEvaluatorTest {
     }
 
     @Test
+    void testConstructor_usesCustomRunIdFromConfig() throws Exception {
+        // Configure custom run_id
+        jingraConfig.getEvaluation().setRunId("my-custom-run-2026");
+
+        evaluator = new BenchmarkEvaluator(jingraConfig, mockEngine, List.of(mockSink));
+        evaluator.runEvaluation();
+
+        // Verify custom run_id is used in results
+        assertTrue(mockSink.resultCount > 0);
+        BenchmarkResult result = mockSink.lastResult;
+        assertNotNull(result);
+        assertEquals("my-custom-run-2026", result.getRunId());
+    }
+
+    @Test
+    void testConstructor_generatesRunIdWhenNotConfigured() throws Exception {
+        // Do not set run_id in config
+        evaluator = new BenchmarkEvaluator(jingraConfig, mockEngine, List.of(mockSink));
+        evaluator.runEvaluation();
+
+        // Verify generated run_id matches timestamp pattern
+        assertTrue(mockSink.resultCount > 0);
+        BenchmarkResult result = mockSink.lastResult;
+        assertNotNull(result);
+        String runId = result.getRunId();
+        assertNotNull(runId);
+        // Pattern: yyyyMMdd-HHmmss (e.g., 20260408-143022)
+        assertTrue(runId.matches("\\d{8}-\\d{6}"),
+            "Generated run_id should match timestamp pattern, got: " + runId);
+    }
+
+    @Test
+    void testConstructor_generatesRunIdWhenEvaluationConfigIsNull() throws Exception {
+        // Set evaluation config to null
+        jingraConfig.setEvaluation(null);
+
+        // Verify constructor doesn't throw NPE when evalConfig is null
+        evaluator = new BenchmarkEvaluator(jingraConfig, mockEngine, List.of(mockSink));
+
+        // Use reflection to verify run_id was generated
+        Field runIdField = BenchmarkEvaluator.class.getDeclaredField("runId");
+        runIdField.setAccessible(true);
+        String runId = (String) runIdField.get(evaluator);
+
+        assertNotNull(runId);
+        assertTrue(runId.matches("\\d{8}-\\d{6}"),
+            "Generated run_id should match timestamp pattern even when evalConfig is null, got: " + runId);
+    }
+
+    @Test
     void executeQuery_skipsMetaConditionsWhenNull() throws Exception {
         Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
         Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, List.class, Map.class);
