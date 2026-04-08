@@ -3,7 +3,6 @@ package org.elasticsearch.jingra.utils;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
@@ -34,13 +33,6 @@ class FileDownloaderTest {
 
     @TempDir
     Path tempDir;
-
-    private String testEnvVar;
-
-    @BeforeEach
-    void setup() {
-        testEnvVar = "TEST_DOWNLOAD_URL";
-    }
 
     @AfterEach
     void cleanup() {
@@ -151,6 +143,9 @@ class FileDownloaderTest {
         Exception exception = assertThrows(RuntimeException.class, () ->
             FileDownloader.ensureFileExists(tinyFile.getAbsolutePath(), "MISSING_VAR")
         );
+        assertThat(exception.getMessage())
+            .contains("File not found")
+            .contains("MISSING_VAR");
 
         // File should be deleted as invalid
         assertFalse(tinyFile.exists());
@@ -164,14 +159,17 @@ class FileDownloaderTest {
             // Wrong header
             fos.write("ABCD".getBytes(StandardCharsets.US_ASCII));
             fos.write(new byte[100]);
-            // Wrong footer
-            fos.write("EFGH".getBytes(StandardCharsets.US_ASCII));
+            // Wrong footer (arbitrary bytes, not PAR1)
+            fos.write(new byte[] {0x01, 0x02, 0x03, 0x04});
         }
 
         // Act & Assert
         Exception exception = assertThrows(RuntimeException.class, () ->
             FileDownloader.ensureFileExists(invalidFile.getAbsolutePath(), "MISSING_VAR")
         );
+        assertThat(exception.getMessage())
+            .contains("File not found")
+            .contains("MISSING_VAR");
 
         // File should be deleted as invalid
         assertFalse(invalidFile.exists());
@@ -191,6 +189,9 @@ class FileDownloaderTest {
         Exception exception = assertThrows(RuntimeException.class, () ->
             FileDownloader.ensureFileExists(partialFile.getAbsolutePath(), "MISSING_VAR")
         );
+        assertThat(exception.getMessage())
+            .contains("File not found")
+            .contains("MISSING_VAR");
 
         // File should be deleted as invalid
         assertFalse(partialFile.exists());
