@@ -144,6 +144,8 @@ class MetricsCalculatorTest {
         assertEquals(0.0, calc.calculateF1());
         assertEquals(0.0, calc.calculateMRR());
         assertEquals(0.0, calc.calculateLatencyAvg());
+        assertEquals(0.0, calc.calculateThroughput());
+        assertEquals(0.0, calc.calculateThroughputAggregateLatencyModel());
     }
 
     @Test
@@ -265,8 +267,7 @@ class MetricsCalculatorTest {
 
     @Test
     void testThroughput_withZeroLatencies() {
-        // Edge case: all latencies are 0.0
-        // Throughput calculation should handle division by zero
+        // Sum of client latencies is 0 -> totalTimeMs == 0 -> 0.0 (no division)
         List<MetricsCalculator.QueryResult> results = Arrays.asList(
                 createResult(0.0, null),
                 createResult(0.0, null),
@@ -275,11 +276,7 @@ class MetricsCalculatorTest {
 
         MetricsCalculator calc = new MetricsCalculator(results);
 
-        // With zero total latency, throughput is undefined
-        // Implementation might return Infinity or 0.0
-        double throughput = calc.calculateThroughput();
-        assertTrue(Double.isInfinite(throughput) || throughput == 0.0,
-                "Throughput with zero latencies should be Infinity or 0.0, was: " + throughput);
+        assertEquals(0.0, calc.calculateThroughput(), 0.001);
     }
 
     @Test
@@ -360,6 +357,81 @@ class MetricsCalculatorTest {
                 )
         );
         assertEquals(0.0, new MetricsCalculator(results).calculateMRR(), 0.001);
+    }
+
+    @Test
+    void mrr_rrShortCircuit_whenRetrievedEmptyAndGroundTruthNonEmpty() {
+        List<MetricsCalculator.QueryResult> results = List.of(
+                new MetricsCalculator.QueryResult(
+                        Arrays.asList("a", "b"),
+                        List.of(),
+                        1.0,
+                        null
+                )
+        );
+        assertEquals(0.0, new MetricsCalculator(results).calculateMRR(), 0.001);
+    }
+
+    @Test
+    void mrr_rrShortCircuit_whenRetrievedNonEmptyAndGroundTruthEmpty() {
+        List<MetricsCalculator.QueryResult> results = List.of(
+                new MetricsCalculator.QueryResult(
+                        List.of(),
+                        Arrays.asList("x", "y"),
+                        1.0,
+                        null
+                )
+        );
+        assertEquals(0.0, new MetricsCalculator(results).calculateMRR(), 0.001);
+    }
+
+    @Test
+    void latencyAvgMedianPercentile_ignoreNullClientLatencies() {
+        List<MetricsCalculator.QueryResult> results = Arrays.asList(
+                new MetricsCalculator.QueryResult(
+                        Arrays.asList("1", "2", "3"),
+                        Arrays.asList("1", "2", "3"),
+                        100.0,
+                        null),
+                new MetricsCalculator.QueryResult(
+                        Arrays.asList("1", "2", "3"),
+                        Arrays.asList("1", "2", "3"),
+                        null,
+                        null),
+                new MetricsCalculator.QueryResult(
+                        Arrays.asList("1", "2", "3"),
+                        Arrays.asList("1", "2", "3"),
+                        300.0,
+                        null)
+        );
+        MetricsCalculator calc = new MetricsCalculator(results);
+        assertEquals(200.0, calc.calculateLatencyAvg(), 0.001);
+        assertEquals(200.0, calc.calculateLatencyMedian(), 0.001);
+        assertEquals(280.0, calc.calculateLatencyPercentile(90), 0.001);
+    }
+
+    @Test
+    void throughput_withMixedNullAndNonNullClientLatencies_sumsOnlyNonNull() {
+        List<MetricsCalculator.QueryResult> results = Arrays.asList(
+                new MetricsCalculator.QueryResult(
+                        Arrays.asList("1", "2", "3"),
+                        Arrays.asList("1", "2", "3"),
+                        100.0,
+                        null),
+                new MetricsCalculator.QueryResult(
+                        Arrays.asList("1", "2", "3"),
+                        Arrays.asList("1", "2", "3"),
+                        null,
+                        null),
+                new MetricsCalculator.QueryResult(
+                        Arrays.asList("1", "2", "3"),
+                        Arrays.asList("1", "2", "3"),
+                        200.0,
+                        null)
+        );
+        MetricsCalculator calc = new MetricsCalculator(results);
+        assertEquals(10.0, calc.calculateThroughput(), 0.001);
+        assertEquals(10.0, calc.calculateThroughputAggregateLatencyModel(), 0.001);
     }
 
     private MetricsCalculator.QueryResult createResult(Double clientLatency, Long serverLatency) {
