@@ -35,8 +35,6 @@ import io.qdrant.client.grpc.Points.Vector;
 import io.qdrant.client.grpc.Points.Vectors;
 import io.qdrant.client.grpc.Points.WithPayloadSelector;
 import io.qdrant.client.grpc.Points.WriteOrderingType;
-import net.objecthunter.exp4j.Expression;
-import net.objecthunter.exp4j.ExpressionBuilder;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -528,7 +526,8 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
             SearchPoints.Builder searchBuilder = SearchPoints.newBuilder()
                     .setCollectionName(indexName)
                     .addAllVector(queryVector)
-                    .setLimit(limit);
+                    .setLimit(limit)
+                    .setTimeout(grpcTimeoutSeconds);
 
             // Apply search params from template (hnsw_ef, quantization, etc.)
             JsonNode templateParams = template.path("template").path("params");
@@ -549,13 +548,12 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
                     }
                 }
 
-                // Handle quantization oversampling (rescoring)
-                // Supports expressions like "{{rescore}} * ({{k}} / {{size}})"
+                // Handle quantization oversampling (rescoring): literal or single "{{param}}" (e.g. "{{rescore}}")
                 if (templateParams.has("quantization")) {
                     JsonNode quantParams = templateParams.get("quantization");
                     if (quantParams.has("oversampling")) {
                         String oversamplingExpr = quantParams.get("oversampling").asText();
-                        Double oversampling = resolveNumericExpression(oversamplingExpr, params);
+                        Double oversampling = resolveDoubleParam(oversamplingExpr, params);
                         if (oversampling != null) {
                             paramsBuilder.setQuantization(
                                     QuantizationSearchParams.newBuilder()
@@ -890,49 +888,26 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
     }
 
     /**
-     * Resolve a numeric expression with template variables and arithmetic operations.
-     * Supports expressions like "{{rescore}} * ({{k}} / {{size}})".
-     * Uses exp4j library for expression evaluation.
+     * Resolve oversampling and similar values: a numeric literal or a single {@code {{param}}} placeholder.
      */
-    private Double resolveNumericExpression(String expression, QueryParams params) {
+    private Double resolveDoubleParam(String expression, QueryParams params) {
         if (expression == null) {
             return null;
         }
-
+        String trimmed = expression.trim();
+        if (trimmed.startsWith("{{") && trimmed.endsWith("}}")) {
+            String paramName = trimmed.substring(2, trimmed.length() - 2).trim();
+            Object v = params.getAll().get(paramName);
+            if (v instanceof Number) {
+                return ((Number) v).doubleValue();
+            }
+            logger.warn("Parameter '{}' not found or not numeric in query params", paramName);
+            return null;
+        }
         try {
-            // First, substitute all {{param}} placeholders with actual values
-            String substituted = expression;
-            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\{\\{([^}]+)\\}\\}");
-            java.util.regex.Matcher matcher = pattern.matcher(expression);
-
-            while (matcher.find()) {
-                String paramName = matcher.group(1).trim();
-                Integer value = params.getInteger(paramName);
-                if (value == null) {
-                    logger.warn("Parameter '{}' not found in query params", paramName);
-                    return null;
-                }
-                substituted = substituted.replace("{{" + matcher.group(1) + "}}", String.valueOf(value));
-            }
-
-            // Evaluate the arithmetic expression using exp4j
-            Expression exp = new ExpressionBuilder(substituted).build();
-            double result = exp.evaluate();
-
-            // Check for division by zero or invalid results
-            if (Double.isInfinite(result)) {
-                logger.error("Division by zero in expression: {}", expression);
-                return null;
-            }
-            if (Double.isNaN(result)) {
-                logger.error("Invalid arithmetic operation in expression: {}", expression);
-                return null;
-            }
-
-            return result;
-
-        } catch (Exception e) {
-            logger.error("Failed to evaluate numeric expression: {}", expression, e);
+            return Double.parseDouble(trimmed);
+        } catch (NumberFormatException e) {
+            logger.warn("Could not parse double parameter: {}", expression);
             return null;
         }
     }

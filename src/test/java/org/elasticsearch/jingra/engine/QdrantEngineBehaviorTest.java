@@ -323,9 +323,9 @@ class QdrantEngineBehaviorTest {
     @Test
     void resolveIntParamTemplateAndLiteral() throws Exception {
         QdrantEngine e = new QdrantEngine(new HashMap<>());
-        QueryParams p = new QueryParams(Map.of("k", 9));
+        QueryParams p = new QueryParams(Map.of("num_candidates", 9));
         assertEquals(9, (Integer) invokePrivate(e, "resolveIntParam", new Class[]{String.class, QueryParams.class},
-                "{{k}}", p));
+                "{{num_candidates}}", p));
         assertEquals(3, (Integer) invokePrivate(e, "resolveIntParam", new Class[]{String.class, QueryParams.class},
                 "3", p));
     }
@@ -349,50 +349,24 @@ class QdrantEngineBehaviorTest {
     }
 
     @Test
-    void resolveNumericExpressionSubstitutesAndEvaluates() throws Exception {
+    void resolveDoubleParamTemplateAndLiteral() throws Exception {
         QdrantEngine e = new QdrantEngine(new HashMap<>());
-        QueryParams p = new QueryParams(Map.of("a", 2, "b", 3));
-        Double r = (Double) invokePrivate(e, "resolveNumericExpression", new Class[]{String.class, QueryParams.class},
-                "{{a}} + {{b}}", p);
-        assertEquals(5.0, r, 0.0001);
+        QueryParams p = new QueryParams(Map.of("rescore", 3));
+        assertEquals(3.0, (Double) invokePrivate(e, "resolveDoubleParam", new Class[]{String.class, QueryParams.class},
+                "{{rescore}}", p), 0.0);
+        assertEquals(2.5, (Double) invokePrivate(e, "resolveDoubleParam", new Class[]{String.class, QueryParams.class},
+                "2.5", p), 0.0);
     }
 
     @Test
-    void resolveNumericExpressionNullMissingParamInfinityNaN() throws Exception {
-        QdrantEngine e = new QdrantEngine(new HashMap<>());
-        QueryParams p = new QueryParams(Map.of("a", 1, "b", 0));
-        assertNull(invokePrivate(e, "resolveNumericExpression", new Class[]{String.class, QueryParams.class}, null, p));
-        assertNull(invokePrivate(e, "resolveNumericExpression", new Class[]{String.class, QueryParams.class},
-                "{{a}} / {{b}}", p));
-        assertNull(invokePrivate(e, "resolveNumericExpression", new Class[]{String.class, QueryParams.class},
-                "{{missing}}", new QueryParams(Map.of())));
-        assertNull(invokePrivate(e, "resolveNumericExpression", new Class[]{String.class, QueryParams.class},
-                "0/0", new QueryParams(Map.of())));
-    }
-
-    @Test
-    void resolveNumericExpressionOverflowYieldsInfinityBranch() throws Exception {
+    void resolveDoubleParamNullMissingOrInvalid() throws Exception {
         QdrantEngine e = new QdrantEngine(new HashMap<>());
         QueryParams p = new QueryParams(Map.of());
-        // exp4j throws ArithmeticException on 1/0; overflow yields Infinity without throwing
-        assertNull(invokePrivate(e, "resolveNumericExpression", new Class[]{String.class, QueryParams.class},
-                "1e308*1e308", p));
-    }
-
-    @Test
-    void resolveNumericExpressionSqrtNegativeYieldsNaNBranch() throws Exception {
-        QdrantEngine e = new QdrantEngine(new HashMap<>());
-        QueryParams p = new QueryParams(Map.of());
-        assertNull(invokePrivate(e, "resolveNumericExpression", new Class[]{String.class, QueryParams.class},
-                "sqrt(-1)", p));
-    }
-
-    @Test
-    void resolveNumericExpressionInvalidExpressionReturnsNullFromCatch() throws Exception {
-        QdrantEngine e = new QdrantEngine(new HashMap<>());
-        QueryParams p = new QueryParams(Map.of());
-        assertNull(invokePrivate(e, "resolveNumericExpression", new Class[]{String.class, QueryParams.class},
-                "((", p));
+        assertNull(invokePrivate(e, "resolveDoubleParam", new Class[]{String.class, QueryParams.class}, null, p));
+        assertNull(invokePrivate(e, "resolveDoubleParam", new Class[]{String.class, QueryParams.class},
+                "{{missing}}", p));
+        assertNull(invokePrivate(e, "resolveDoubleParam", new Class[]{String.class, QueryParams.class},
+                "not-a-number", p));
     }
 
     @Test
