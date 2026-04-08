@@ -95,6 +95,51 @@ class ElasticsearchEngineBehaviorTest {
                         .total(TotalHits.of(t -> t.value(ids.length).relation(TotalHitsRelation.Eq))))));
     }
 
+    static final class InsecureTlsProbe extends ElasticsearchEngine {
+        InsecureTlsProbe(Map<String, Object> cfg) {
+            super(cfg);
+        }
+
+        boolean probe() {
+            return resolveInsecureTls();
+        }
+    }
+
+    @Test
+    void resolveInsecureTls_explicitFalseOverridesGlobalProperty() {
+        System.setProperty("jingra.insecure.tls", "true");
+        try {
+            Map<String, Object> cfg = new HashMap<>();
+            cfg.put("insecure_tls", false);
+            assertFalse(new InsecureTlsProbe(cfg).probe());
+        } finally {
+            System.clearProperty("jingra.insecure.tls");
+        }
+    }
+
+    @Test
+    void resolveInsecureTls_explicitTrueOverridesGlobalProperty() {
+        System.setProperty("jingra.insecure.tls", "false");
+        try {
+            Map<String, Object> cfg = new HashMap<>();
+            cfg.put("insecure_tls", true);
+            assertTrue(new InsecureTlsProbe(cfg).probe());
+        } finally {
+            System.clearProperty("jingra.insecure.tls");
+        }
+    }
+
+    @Test
+    void resolveInsecureTls_absentKeyUsesGlobalProperty() {
+        System.setProperty("jingra.insecure.tls", "true");
+        try {
+            Map<String, Object> cfg = new HashMap<>();
+            assertTrue(new InsecureTlsProbe(cfg).probe());
+        } finally {
+            System.clearProperty("jingra.insecure.tls");
+        }
+    }
+
     @Test
     void connectReturnsFalseWhenUrlMissing() {
         Map<String, Object> cfg = new HashMap<>();

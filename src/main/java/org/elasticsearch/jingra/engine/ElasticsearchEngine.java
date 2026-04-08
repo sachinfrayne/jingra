@@ -1,7 +1,6 @@
 package org.elasticsearch.jingra.engine;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
@@ -20,6 +19,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.elasticsearch.jingra.model.Document;
 import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
+import org.elasticsearch.jingra.utils.TlsSettings;
 
 import java.io.StringReader;
 import java.util.ArrayList;
@@ -61,6 +61,21 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
         return client.bulk(request);
     }
 
+    /**
+     * Bulk-index arbitrary maps (e.g. query metrics from {@link org.elasticsearch.jingra.output.ElasticsearchResultsSink}).
+     * Same transport as {@link #ingest}; callers apply {@link org.elasticsearch.jingra.utils.RetryHelper} at the edge if needed.
+     */
+    public BulkResponse bulkIndexMaps(String indexName, List<Map<String, Object>> documents) throws Exception {
+        if (!hasClient()) {
+            throw new IllegalStateException("Elasticsearch client not initialized");
+        }
+        BulkRequest.Builder bulkBuilder = new BulkRequest.Builder();
+        for (Map<String, Object> doc : documents) {
+            bulkBuilder.operations(op -> op.index(idx -> idx.index(indexName).document(doc)));
+        }
+        return bulkOperation(bulkBuilder.build());
+    }
+
     protected long countOperation(String indexName) throws Exception {
         return client.count(c -> c.index(indexName)).count();
     }
@@ -89,6 +104,18 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
         );
     }
 
+    /**
+     * If {@code insecure_tls} is present in config, that value alone applies (so sinks can force
+     * verified TLS even when {@link TlsSettings#insecureTlsEnabled()} is true). If absent, the
+     * global insecure-TLS flag applies.
+     */
+    protected boolean resolveInsecureTls() {
+        if (config.containsKey("insecure_tls")) {
+            return getConfigBoolean("insecure_tls", false);
+        }
+        return TlsSettings.insecureTlsEnabled();
+    }
+
     @Override
     public boolean connect() {
         // Check for direct config values first (useful for testing), then fall back to env vars
@@ -113,9 +140,10 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
         }
 
         try {
+            boolean insecureTls = resolveInsecureTls();
             // Use shared factory for consistent client configuration
             ElasticsearchClientFactory.ElasticsearchClientWrapper wrapper =
-                    ElasticsearchClientFactory.createClient(url, user, password);
+                    ElasticsearchClientFactory.createClient(url, user, password, insecureTls);
 
             this.client = wrapper.getClient();
             this.restClient = wrapper.getRestClient();
