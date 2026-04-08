@@ -135,6 +135,14 @@ public class BenchmarkEvaluator {
     }
 
     /**
+     * Creates the executor used for parallel query execution.
+     * Same-package tests may override via subclass to inject a controlled pool.
+     */
+    ExecutorService createQueryExecutor(int numWorkers) {
+        return Executors.newFixedThreadPool(numWorkers);
+    }
+
+    /**
      * Executes queries in bounded chunks to avoid retaining one {@link Future} per query for huge suites.
      */
     private ExecuteQueriesOutcome executeQueries(
@@ -144,7 +152,7 @@ public class BenchmarkEvaluator {
             int numWorkers,
             boolean collectResults
     ) {
-        ExecutorService executor = Executors.newFixedThreadPool(numWorkers);
+        ExecutorService executor = createQueryExecutor(numWorkers);
         long startTime = System.currentTimeMillis();
 
         List<MetricsCalculator.QueryResult> results = new ArrayList<>();
@@ -263,7 +271,14 @@ public class BenchmarkEvaluator {
     private List<QueryDocument> loadQueries(String path, DatasetConfig dataset) throws IOException {
         ParquetReader reader = new ParquetReader(path);
         List<Document> documents = reader.readAll();
+        return parseQueryDocumentsFromDocuments(documents, dataset);
+    }
 
+    /**
+     * Parses in-memory query rows using the same rules as {@link #loadQueries(String, DatasetConfig)}.
+     * Same-package tests may invoke via reflection (return type uses private {@link QueryDocument}).
+     */
+    private List<QueryDocument> parseQueryDocumentsFromDocuments(List<Document> documents, DatasetConfig dataset) {
         String vectorField = dataset.getQueriesMapping().getQueryVectorField();
         String groundTruthField = dataset.getQueriesMapping().getGroundTruthField();
         String conditionsField = dataset.getQueriesMapping().getConditionsField();
