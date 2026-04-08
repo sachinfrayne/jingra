@@ -68,6 +68,32 @@ class ResultsSinkFactoryTest {
     }
 
     @Test
+    void create_withOutputPresentButSinksNull_returnsOnlyConsole() {
+        JingraConfig c = new JingraConfig();
+        OutputConfig out = new OutputConfig();
+        out.setSinks(null);
+        c.setOutput(out);
+
+        List<ResultsSink> sinks = ResultsSinkFactory.create(c);
+        assertEquals(1, sinks.size());
+        assertInstanceOf(ConsoleResultsSink.class, sinks.get(0));
+    }
+
+    @Test
+    void elasticsearch_withNullConfig_skipsPutAllThenFailsOnMissingUrl() {
+        JingraConfig c = new JingraConfig();
+        OutputConfig out = new OutputConfig();
+        OutputConfig.ResultsSinkConfig esc = new OutputConfig.ResultsSinkConfig();
+        esc.setType("elasticsearch");
+        esc.setConfig(null);
+        out.setSinks(List.of(esc));
+        c.setOutput(out);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> ResultsSinkFactory.create(c));
+        assertTrue(ex.getMessage().contains("Elasticsearch URL not provided"));
+    }
+
+    @Test
     void privateCtor() throws Exception {
         var cl = Class.forName("org.elasticsearch.jingra.output.ResultsSinkFactory");
         var ctor = cl.getDeclaredConstructor();

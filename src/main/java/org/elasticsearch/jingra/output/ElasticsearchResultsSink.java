@@ -1,28 +1,49 @@
 package org.elasticsearch.jingra.output;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
-import co.elastic.clients.elasticsearch.core.IndexRequest;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
+import org.elasticsearch.jingra.engine.ElasticsearchEngine;
 import org.elasticsearch.jingra.model.BenchmarkResult;
-import org.elasticsearch.jingra.engine.ElasticsearchClientFactory;
+import org.elasticsearch.jingra.model.Document;
+import org.elasticsearch.jingra.utils.RetryHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Outputs benchmark results to an Elasticsearch cluster.
+ * Outputs benchmark results to an Elasticsearch cluster via {@link ElasticsearchEngine}
+ * configured with the sink's URL and credentials (same write path as load ingest).
  */
 public class ElasticsearchResultsSink implements ResultsSink {
     private static final String DEFAULT_METRICS_INDEX = "jingra-metrics";
 
+    /**
+     * Same defaults as {@link org.elasticsearch.jingra.cli.LoadCommand} ingest loop
+     * ({@code maxIngestRetries} / {@code ingestRetryBackoffMs}).
+     */
+    private static final int DEFAULT_METRICS_BULK_ROUNDS = 10;
+
+    /** Documents per bulk request for query metrics (keeps request size bounded). */
+    private static final int QUERY_METRICS_BATCH_SIZE = 100;
+
+    /**
+     * Max transport-layer retries per Elasticsearch call ({@link RetryHelper#executeWithRetry}).
+     * Load ingest uses unlimited retries for data integrity; the sink uses a bounded default so transient
+     * HTTP/2 issues (e.g. stream reset) cannot stall the benchmark for minutes on a single bulk.
+     * Override with config key {@link #CONFIG_SINK_TRANSPORT_MAX_RETRIES}.
+     */
+    private static final int DEFAULT_SINK_TRANSPORT_MAX_RETRIES = 9;
+
+    static final String CONFIG_SINK_TRANSPORT_MAX_RETRIES = "sink_transport_max_retries";
+
     private static final Logger logger = LoggerFactory.getLogger(ElasticsearchResultsSink.class);
-    private ElasticsearchClient client;
-    private co.elastic.clients.transport.rest5_client.low_level.Rest5Client restClient;
+
+    private ElasticsearchEngine engine;
+
     private final String url;
     private final String user;
     private final String password;
@@ -30,9 +51,9 @@ public class ElasticsearchResultsSink implements ResultsSink {
     private final String metricsIndexName;
     private final boolean writeQueryMetrics;
     private final boolean insecureTls;
+    private final int sinkTransportMaxRetries;
 
     public ElasticsearchResultsSink(Map<String, Object> config) {
-        // Support both direct values and environment variable references
         String url;
         String user;
         String password;
@@ -42,12 +63,10 @@ public class ElasticsearchResultsSink implements ResultsSink {
         String passwordEnv = getConfigString(config, "password_env", null);
 
         if (urlEnv != null) {
-            // Read from environment variables
             url = System.getenv(urlEnv);
             user = userEnv != null ? System.getenv(userEnv) : null;
             password = passwordEnv != null ? System.getenv(passwordEnv) : null;
         } else {
-            // Read direct values from config
             url = getConfigString(config, "url", null);
             user = getConfigString(config, "user", null);
             password = getConfigString(config, "password", null);
@@ -57,6 +76,7 @@ public class ElasticsearchResultsSink implements ResultsSink {
         this.metricsIndexName = getConfigString(config, "metrics_index", DEFAULT_METRICS_INDEX);
         this.writeQueryMetrics = getConfigBoolean(config, "write_query_metrics", true);
         this.insecureTls = getConfigBoolean(config, "insecure_tls", false);
+        this.sinkTransportMaxRetries = getConfigInt(config, CONFIG_SINK_TRANSPORT_MAX_RETRIES, DEFAULT_SINK_TRANSPORT_MAX_RETRIES);
 
         if (url == null) {
             throw new IllegalArgumentException("Elasticsearch URL not provided in sink config (use 'url' or 'url_env')");
@@ -65,8 +85,6 @@ public class ElasticsearchResultsSink implements ResultsSink {
         this.url = url;
         this.user = user;
         this.password = password;
-        this.client = null;
-        this.restClient = null;
 
         logger.info("Elasticsearch results sink configured: {} -> {}", url, indexName);
         logger.info(
@@ -76,18 +94,34 @@ public class ElasticsearchResultsSink implements ResultsSink {
                 writeQueryMetrics);
     }
 
-    private void ensureClientInitialized() {
-        if (client == null) {
-            initializeClient();
-        }
+    /**
+     * Engine config for this sink's cluster (URL/credentials only; not the benchmark dataset config).
+     */
+    private Map<String, Object> buildEngineConfig() {
+        Map<String, Object> m = new HashMap<>();
+        m.put("url", url);
+        m.put("user", user);
+        m.put("password", password);
+        m.put("insecure_tls", insecureTls);
+        return m;
     }
 
-    private void initializeClient() {
+    /**
+     * Same-package tests may substitute a stub engine (or override this factory).
+     */
+    protected ElasticsearchEngine newEngine(Map<String, Object> engineConfig) {
+        return new ElasticsearchEngine(engineConfig);
+    }
+
+    private void ensureEngineInitialized() {
+        if (engine != null) {
+            return;
+        }
         try {
-            ElasticsearchClientFactory.ElasticsearchClientWrapper wrapper =
-                    ElasticsearchClientFactory.createClient(url, user, password, insecureTls);
-            this.client = wrapper.getClient();
-            this.restClient = wrapper.getRestClient();
+            engine = newEngine(buildEngineConfig());
+            if (!engine.connect()) {
+                throw new RuntimeException("Failed to connect to Elasticsearch results sink");
+            }
         } catch (Exception e) {
             throw new RuntimeException("Failed to create Elasticsearch client", e);
         }
@@ -95,16 +129,13 @@ public class ElasticsearchResultsSink implements ResultsSink {
 
     @Override
     public void writeResult(BenchmarkResult result) {
-        ensureClientInitialized();
-
         try {
-            Map<String, Object> resultMap = result.toMap();
-            IndexRequest<Map<String, Object>> request = IndexRequest.of(i -> i
-                    .index(indexName)
-                    .document(resultMap)
+            ensureEngineInitialized();
+            RetryHelper.executeWithRetry(
+                    () -> engine.ingest(List.of(new Document(result.toMap())), indexName, null),
+                    sinkTransportMaxRetries,
+                    1000L
             );
-
-            client.index(request);
             logger.debug("Wrote result to Elasticsearch: {}/{}", indexName, result.getParamKey());
         } catch (Exception e) {
             logger.error("Failed to write result to Elasticsearch", e);
@@ -124,13 +155,11 @@ public class ElasticsearchResultsSink implements ResultsSink {
             return;
         }
 
-        ensureClientInitialized();
+        ensureEngineInitialized();
 
         final String metricsIndex = metricsIndexName;
         final String timestamp = java.time.Instant.now().toString();
-        final int batchSize = 100;
 
-        // Add timestamp to all metrics
         for (Map<String, Object> queryMetric : queryMetrics) {
             queryMetric.put("@timestamp", timestamp);
         }
@@ -140,14 +169,14 @@ public class ElasticsearchResultsSink implements ResultsSink {
         int totalFailed = 0;
 
         logger.info("Writing {} query metrics to index {} with batch size {}",
-                totalAttempted, metricsIndex, batchSize);
+                totalAttempted, metricsIndex, QUERY_METRICS_BATCH_SIZE);
 
-        for (int start = 0; start < queryMetrics.size(); start += batchSize) {
-            int end = Math.min(start + batchSize, queryMetrics.size());
+        for (int start = 0; start < queryMetrics.size(); start += QUERY_METRICS_BATCH_SIZE) {
+            int end = Math.min(start + QUERY_METRICS_BATCH_SIZE, queryMetrics.size());
             List<Map<String, Object>> batch = new ArrayList<>(queryMetrics.subList(start, end));
 
             try {
-                int writtenThisBatch = writeBatchWithRetries(metricsIndex, batch, 10);
+                int writtenThisBatch = writeBatchWithRetries(metricsIndex, batch, DEFAULT_METRICS_BULK_ROUNDS);
                 totalWritten += writtenThisBatch;
                 int failedThisBatch = batch.size() - writtenThisBatch;
                 totalFailed += failedThisBatch;
@@ -177,36 +206,57 @@ public class ElasticsearchResultsSink implements ResultsSink {
     }
 
     /**
-     * Bulk-indexes query metrics; {@link Thread#sleep} for backoff runs on the calling thread (eval completion path).
+     * Matches {@link org.elasticsearch.jingra.cli.LoadCommand#run}'s {@code ingestRetryBackoffMs} (1000).
      */
+    long ingestRetryBackoffMs() {
+        return 1000L;
+    }
+
+    /**
+     * Transport retry budget for {@link RetryHelper} around bulk / ingest (see {@link #DEFAULT_SINK_TRANSPORT_MAX_RETRIES}).
+     */
+    int bulkTransportMaxRetries() {
+        return sinkTransportMaxRetries;
+    }
+
+    /**
+     * Delegates to {@link ElasticsearchEngine#bulkIndexMaps(String, List)} with {@link RetryHelper} (bounded by {@link #sinkTransportMaxRetries}).
+     */
+    private BulkResponse bulkOnceWithTransportRetry(String indexName, List<Map<String, Object>> docs) throws Exception {
+        return RetryHelper.executeWithRetry(
+                () -> engine.bulkIndexMaps(indexName, docs),
+                bulkTransportMaxRetries(),
+                ingestRetryBackoffMs()
+        );
+    }
+
     private int writeBatchWithRetries(String indexName,
-                                      List<Map<String, Object>> batch,
-                                      int maxAttempts) throws Exception {
+                                    List<Map<String, Object>> batch,
+                                    int maxRounds) throws Exception {
+        if (batch.isEmpty()) {
+            return 0;
+        }
+        if (maxRounds < 1) {
+            throw new IllegalArgumentException("maxRounds must be >= 1");
+        }
+
         List<Map<String, Object>> remaining = new ArrayList<>(batch);
         int successCount = 0;
 
-        for (int attempt = 1; attempt <= maxAttempts && !remaining.isEmpty(); attempt++) {
-            if (attempt > 1) {
-                long backoffMs = 500L * attempt;
-                logger.warn("Retrying {} failed query metrics, attempt {}/{} after {} ms",
-                        remaining.size(), attempt, maxAttempts, backoffMs);
-                Thread.sleep(backoffMs);
-            }
-
-            BulkRequest request = buildBulkRequest(indexName, remaining);
-            BulkResponse response;
-
-            try {
-                response = client.bulk(request);
-            } catch (Exception e) {
-                logger.error("Bulk request failed on attempt {}/{}: {}",
-                        attempt, maxAttempts, e.getMessage());
-
-                if (attempt == maxAttempts) {
-                    throw e;
+        for (int round = 0; round < maxRounds && !remaining.isEmpty(); round++) {
+            if (round > 0) {
+                long delayMs = RetryHelper.computeRetryDelayMs(round - 1, ingestRetryBackoffMs());
+                logger.warn("Retrying {} failed query metrics, round {}/{} after {} ms",
+                        remaining.size(), round + 1, maxRounds, delayMs);
+                try {
+                    Thread.sleep(Math.max(0L, delayMs));
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Interrupted during metrics bulk backoff", ie);
                 }
-                continue;
             }
+
+            BulkResponse response = bulkOnceWithTransportRetry(indexName, remaining);
 
             if (!response.errors()) {
                 successCount += remaining.size();
@@ -241,8 +291,7 @@ public class ElasticsearchResultsSink implements ResultsSink {
             remaining = retryableDocs;
 
             if (!remaining.isEmpty()) {
-                logger.warn("Bulk attempt {}/{} had {} retryable item failures",
-                        attempt, maxAttempts, remaining.size());
+                logger.warn("Bulk round {} had {} retryable item failures", round + 1, remaining.size());
             }
         }
 
@@ -251,19 +300,6 @@ public class ElasticsearchResultsSink implements ResultsSink {
         }
 
         return successCount;
-    }
-
-    private BulkRequest buildBulkRequest(String indexName, List<Map<String, Object>> docs) {
-        BulkRequest.Builder bulkBuilder = new BulkRequest.Builder();
-
-        for (Map<String, Object> doc : docs) {
-            bulkBuilder.operations(op -> op.index(idx -> idx
-                    .index(indexName)
-                    .document(doc)
-            ));
-        }
-
-        return bulkBuilder.build();
     }
 
     private boolean isRetryableBulkStatus(int status) {
@@ -289,8 +325,8 @@ public class ElasticsearchResultsSink implements ResultsSink {
 
     @Override
     public void close() throws Exception {
-        if (restClient != null) {
-            restClient.close();
+        if (engine != null) {
+            engine.close();
         }
     }
 
@@ -308,5 +344,16 @@ public class ElasticsearchResultsSink implements ResultsSink {
             return (Boolean) value;
         }
         return Boolean.parseBoolean(value.toString());
+    }
+
+    private static int getConfigInt(Map<String, Object> config, String key, int defaultValue) {
+        Object value = config.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        return Integer.parseInt(value.toString().trim());
     }
 }

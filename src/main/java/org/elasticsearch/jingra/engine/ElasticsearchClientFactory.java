@@ -25,8 +25,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Factory for creating Elasticsearch clients with consistent configuration.
- * Used by both ElasticsearchEngine and ElasticsearchResultsSink to ensure
- * identical client settings (connection pools, SSL, HTTP/2 handling, etc.)
+ * Used by {@link ElasticsearchEngine} (including the results sink, which runs an engine against the sink URL).
  */
 public class ElasticsearchClientFactory {
     private static final Logger logger = LoggerFactory.getLogger(ElasticsearchClientFactory.class);

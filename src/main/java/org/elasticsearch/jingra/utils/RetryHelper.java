@@ -30,11 +30,21 @@ public final class RetryHelper {
 
     /**
      * Computes delay before the next retry (exponential growth capped at {@code 2^6} and {@link #MAX_BACKOFF_MS}).
-     * Package-private for unit tests; same formula as {@link #executeWithRetry}.
+     * Same formula as {@link #executeWithRetry}. {@code attempt} is 0-based (first wait after first failure uses {@code 0}).
+     * Public for callers that need the same delay between steps without nesting {@link #executeWithRetry}.
      */
-    static long computeRetryDelayMs(int attempt, long backoffMs) {
+    public static long computeRetryDelayMs(int attempt, long backoffMs) {
         long exponentialDelay = backoffMs * (1L << Math.min(attempt, 6));
         return Math.min(exponentialDelay, MAX_BACKOFF_MS);
+    }
+
+    private static void pauseMillis(long delayMs) {
+        try {
+            Thread.sleep(Math.max(0L, delayMs));
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted during retry backoff", ie);
+        }
     }
 
     /**
@@ -73,12 +83,7 @@ public final class RetryHelper {
                 logger.warn("Transient failure on attempt {} (max: {}): {}. Retrying in {}ms...",
                         attempt + 1, retryMessage, e.getMessage(), delay);
 
-                try {
-                    Thread.sleep(delay);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new RuntimeException("Interrupted during retry backoff", ie);
-                }
+                pauseMillis(delay);
 
                 attempt++;
 
