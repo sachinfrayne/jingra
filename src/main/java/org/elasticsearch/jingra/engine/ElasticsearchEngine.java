@@ -34,8 +34,6 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
     private ElasticsearchClient client;
     private co.elastic.clients.transport.rest5_client.low_level.Rest5Client restClient;
-    private String lastQueryJson = null;  // Store last query for reporting
-    private String lastIndexName = null;
 
     public ElasticsearchEngine(Map<String, Object> config) {
         super(config);
@@ -102,6 +100,19 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
                         .withJson(new StringReader(queryJson)),
                 Map.class
         );
+    }
+
+    /**
+     * Execute a search query against the specified index.
+     * Public wrapper for searchOperation to support external querying (e.g., for analysis).
+     *
+     * @param indexName the index to search
+     * @param queryJson the query in JSON format
+     * @return search response
+     * @throws Exception if search fails
+     */
+    public SearchResponse<Map> search(String indexName, String queryJson) throws Exception {
+        return searchOperation(indexName, queryJson);
     }
 
     /**
@@ -314,14 +325,6 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
             String queryJson = renderTemplate(template, params.getAll());
 
-            // Store query for reporting (only first query)
-            synchronized (this) {
-                if (lastQueryJson == null) {
-                    lastQueryJson = formatJsonForDisplay(queryJson);
-                    lastIndexName = indexName;
-                }
-            }
-
             long startTime = System.nanoTime();
             SearchResponse<Map> response = searchOperation(indexName, queryJson);
             double clientLatencyMs = (System.nanoTime() - startTime) / 1_000_000.0;
@@ -377,31 +380,6 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
         } catch (Exception e) {
             logger.error("Failed to get version", e);
             return "unknown";
-        }
-    }
-
-    @Override
-    public String getLastQueryJson() {
-        return lastQueryJson;
-    }
-
-    @Override
-    public String getLastIndexName() {
-        return lastIndexName;
-    }
-
-    /**
-     * Format JSON for pretty-printed console display.
-     * Package-private for tests in the same package.
-     */
-    String formatJsonForDisplay(String json) {
-        try {
-            ObjectMapper prettyMapper = new ObjectMapper();
-            Object jsonObject = prettyMapper.readValue(json, Object.class);
-            return prettyMapper.writerWithDefaultPrettyPrinter().writeValueAsString(jsonObject);
-        } catch (Exception e) {
-            logger.warn("Failed to format query JSON for display", e);
-            return json;
         }
     }
 

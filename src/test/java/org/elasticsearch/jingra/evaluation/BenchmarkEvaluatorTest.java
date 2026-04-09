@@ -474,28 +474,6 @@ class BenchmarkEvaluatorTest {
         assertNotNull(br.getMetrics().get("throughput_aggregate_latency_model"));
     }
 
-    @Test
-    void calculateMetrics_addsQueryMetadataWhenLastQueryJsonPresent() throws Exception {
-        MockBenchmarkEngine engine = new MockBenchmarkEngine() {
-            @Override
-            public String getLastQueryJson() {
-                return "{\"x\":1}";
-            }
-
-            @Override
-            public String getLastIndexName() {
-                return "my-index";
-            }
-        };
-        BenchmarkEvaluator ev = new BenchmarkEvaluator(jingraConfig, engine, List.of(mockSink));
-        MetricsCalculator.QueryResult res = new MetricsCalculator.QueryResult(
-                List.of("a"), List.of("a"), 10.0, null);
-        BenchmarkResult br = invokeCalculateMetrics(ev, List.of(res), 1L);
-        assertEquals("{\"x\":1}", br.getMetadata().get("query_json"));
-        assertEquals("my-index", br.getMetadata().get("index_name"));
-        assertEquals("mock", br.getMetadata().get("engine_name"));
-    }
-
     @SuppressWarnings("unchecked")
     private List<Object> invokeParse(List<Document> docs) throws Exception {
         Method m = BenchmarkEvaluator.class.getDeclaredMethod("parseQueryDocumentsFromDocuments", List.class, DatasetConfig.class);

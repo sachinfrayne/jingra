@@ -177,23 +177,6 @@ class ElasticsearchEngineBehaviorTest {
         assertEquals("elasticsearch", e.getEngineName());
         assertEquals("es", e.getShortName());
         assertEquals("unknown", e.getVersion());
-        assertNull(e.getLastQueryJson());
-        assertNull(e.getLastIndexName());
-    }
-
-    @Test
-    void formatJsonForDisplay_prettyPrintsValidJson() {
-        ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
-        String out = e.formatJsonForDisplay("{\"x\":1}");
-        assertTrue(out.contains("\n"));
-        assertTrue(out.contains("\"x\""));
-    }
-
-    @Test
-    void formatJsonForDisplay_returnsOriginalWhenInvalid() {
-        ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
-        String bad = "{ not valid json";
-        assertEquals(bad, e.formatJsonForDisplay(bad));
     }
 
     @Test
@@ -460,14 +443,8 @@ class ElasticsearchEngineBehaviorTest {
             assertNotNull(r1.getClientLatencyMs());
             assertEquals(3L, r1.getServerLatencyMs().longValue());
 
-            String firstJson = e.getLastQueryJson();
-            assertNotNull(firstJson);
-            assertEquals("my-index", e.getLastIndexName());
-
             second.set(true);
             e.query("other", "behavior-es-query", new QueryParams());
-            assertEquals(firstJson, e.getLastQueryJson());
-            assertEquals("my-index", e.getLastIndexName());
         } finally {
             Files.deleteIfExists(f);
         }
@@ -592,24 +569,4 @@ class ElasticsearchEngineBehaviorTest {
         assertEquals("9.9.9", e.getVersion());
     }
 
-    @Test
-    void getLastQueryJsonGetterAfterQuery() throws Exception {
-        Path dir = Path.of("jingra-config/queries/elasticsearch");
-        Files.createDirectories(dir);
-        Path f = dir.resolve("behavior-es-getters.json");
-        Files.writeString(f, "{\"template\": {\"query\": {\"match_all\": {}}}}");
-        try {
-            ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
-                @Override
-                protected SearchResponse<Map> searchOperation(String indexName, String queryJson) {
-                    return searchHitsWithIds();
-                }
-            };
-            e.query("getter-idx", "behavior-es-getters", new QueryParams());
-            assertNotNull(e.getLastQueryJson());
-            assertEquals("getter-idx", e.getLastIndexName());
-        } finally {
-            Files.deleteIfExists(f);
-        }
-    }
 }

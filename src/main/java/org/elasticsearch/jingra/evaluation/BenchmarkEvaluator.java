@@ -409,13 +409,6 @@ public class BenchmarkEvaluator {
             result.addMetadata("vector_type", vt);
         }
 
-        // Add query info from engine
-        if (engine.getLastQueryJson() != null) {
-            result.addMetadata("query_json", engine.getLastQueryJson());
-            result.addMetadata("index_name", engine.getLastIndexName());
-            result.addMetadata("engine_name", engine.getEngineName());
-        }
-
         return result;
     }
 

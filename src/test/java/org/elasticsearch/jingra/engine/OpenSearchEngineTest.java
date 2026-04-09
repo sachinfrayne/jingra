@@ -425,33 +425,6 @@ class OpenSearchEngineTest {
 
     @Test
     @Order(18)
-    void testQuery_lastQueryJsonAndIndexNameSetOnce() throws Exception {
-        Map<String, Object> config = new HashMap<>();
-        config.put("url", "http://" + opensearch.getHost() + ":" + opensearch.getMappedPort(9200));
-        OpenSearchEngine fresh = new OpenSearchEngine(config);
-        assertTrue(fresh.connect());
-        try {
-            Map<String, Object> params = new HashMap<>();
-            params.put("query_vector", generateRandomVector(128));
-            params.put("k", 5);
-            params.put("size", 5);
-            QueryParams qp = new QueryParams(params);
-            fresh.query(TEST_INDEX, "test-query-basic", qp);
-            String firstJson = fresh.getLastQueryJson();
-            assertNotNull(firstJson);
-            assertTrue(firstJson.contains("knn"), "pretty-printed query should contain knn clause");
-            assertEquals(TEST_INDEX, fresh.getLastIndexName());
-
-            fresh.query("other-index-name", "test-query-basic", qp);
-            assertEquals(firstJson, fresh.getLastQueryJson());
-            assertEquals(TEST_INDEX, fresh.getLastIndexName());
-        } finally {
-            fresh.close();
-        }
-    }
-
-    @Test
-    @Order(19)
     void testConnect_withInsecureTls() {
         // Enable insecure TLS for this test
         System.setProperty("jingra.insecure.tls", "true");

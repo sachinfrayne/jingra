@@ -49,8 +49,6 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
 
     private OpenSearchClient client;
     private RestClient restClient;
-    private String lastQueryJson = null;  // Store last query for reporting
-    private String lastIndexName = null;
 
     public OpenSearchEngine(Map<String, Object> config) {
         super(config);
@@ -346,14 +344,6 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
 
             String queryJson = renderTemplate(template, params.getAll());
 
-            // Store query for reporting (only first query)
-            synchronized (this) {
-                if (lastQueryJson == null) {
-                    lastQueryJson = formatJsonForDisplay(queryJson);
-                    lastIndexName = indexName;
-                }
-            }
-
             long startTime = System.nanoTime();
             Request request = new Request("POST", "/" + indexName + "/_search");
             request.setJsonEntity(queryJson);
@@ -423,15 +413,6 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
         }
     }
 
-    @Override
-    public String getLastQueryJson() {
-        return lastQueryJson;
-    }
-
-    @Override
-    public String getLastIndexName() {
-        return lastIndexName;
-    }
 
     /**
      * Format JSON for pretty-printed console display.
@@ -449,16 +430,6 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
         return null;
     }
 
-    String formatJsonForDisplay(String json) {
-        try {
-            ObjectMapper prettyMapper = new ObjectMapper();
-            Object jsonObject = prettyMapper.readValue(json, Object.class);
-            return prettyMapper.writerWithDefaultPrettyPrinter().writeValueAsString(jsonObject);
-        } catch (Exception e) {
-            logger.warn("Failed to format query JSON for display", e);
-            return json;
-        }
-    }
 
     @Override
     public Map<String, String> getIndexMetadata(String indexName) {

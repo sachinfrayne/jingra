@@ -102,22 +102,4 @@ public interface BenchmarkEngine extends AutoCloseable {
      * @return metadata map (e.g., vector type, compression, etc.)
      */
     Map<String, String> getIndexMetadata(String indexName);
-
-    /**
-     * Get the last query JSON for console display.
-     *
-     * @return JSON representation of the last query, or null if not available
-     */
-    default String getLastQueryJson() {
-        return null;
-    }
-
-    /**
-     * Get the index name for the last query.
-     *
-     * @return index/collection name for the last query, or null if not available
-     */
-    default String getLastIndexName() {
-        return null;
-    }
 }
