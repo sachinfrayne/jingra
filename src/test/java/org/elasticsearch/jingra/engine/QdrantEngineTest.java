@@ -242,6 +242,9 @@ class QdrantEngineTest {
         assertEquals(5, response.getDocumentIds().size());
         assertNotNull(response.getClientLatencyMs());
         assertTrue(response.getClientLatencyMs() > 0);
+        // Qdrant should return server latency from the SearchResponse.time field
+        assertNotNull(response.getServerLatencyMs(), "Server latency should be captured from Qdrant SearchResponse");
+        assertTrue(response.getServerLatencyMs() > 0, "Server latency should be positive");
     }
 
     @Test
@@ -445,37 +448,6 @@ class QdrantEngineTest {
 
     @Test
     @Order(37)
-    void testQuery_lastQueryJsonAndIndexNameSetOnce() throws Exception {
-        String host = qdrant.getHost();
-        Integer grpcPort = qdrant.getMappedPort(6334);
-        String url = host + ":" + grpcPort;
-
-        Map<String, Object> config = new HashMap<>();
-        config.put("url", url);
-        config.put("vector_field", "embedding");
-
-        QdrantEngine fresh = new QdrantEngine(config);
-        assertTrue(fresh.connect());
-        try {
-            Map<String, Object> params = new HashMap<>();
-            params.put("query_vector", generateRandomVector(128));
-            params.put("size", 5);
-
-            fresh.query(TEST_INDEX, "test-query-basic", new QueryParams(params));
-            String firstJson = fresh.getLastQueryJson();
-            assertNotNull(firstJson);
-            assertEquals(TEST_INDEX, fresh.getLastIndexName());
-
-            fresh.query("other-collection", "test-query-basic", new QueryParams(params));
-            assertEquals(firstJson, fresh.getLastQueryJson());
-            assertEquals(TEST_INDEX, fresh.getLastIndexName());
-        } finally {
-            fresh.close();
-        }
-    }
-
-    @Test
-    @Order(38)
     void testQuery_returnsEmptyWhenTemplateMissing() {
         Map<String, Object> p = new HashMap<>();
         p.put("query_vector", generateRandomVector(128));

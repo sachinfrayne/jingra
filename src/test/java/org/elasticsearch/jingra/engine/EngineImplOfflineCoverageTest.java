@@ -57,8 +57,6 @@ class EngineImplOfflineCoverageTest {
             assertTrue(e.query("i", "q", new QueryParams()).getDocumentIds().isEmpty());
             assertEquals(0L, e.getDocumentCount("i"));
             assertTrue(e.getIndexMetadata("i").isEmpty());
-            assertNull(e.getLastQueryJson());
-            assertNull(e.getLastIndexName());
             assertDoesNotThrow(() -> e.close());
         }
     }
@@ -97,8 +95,6 @@ class EngineImplOfflineCoverageTest {
             assertTrue(e.query("i", "q", new QueryParams()).getDocumentIds().isEmpty());
             assertEquals(0L, e.getDocumentCount("i"));
             assertTrue(e.getIndexMetadata("i").isEmpty());
-            assertNull(e.getLastQueryJson());
-            assertNull(e.getLastIndexName());
             assertDoesNotThrow(() -> e.close());
         }
     }
@@ -146,8 +142,6 @@ class EngineImplOfflineCoverageTest {
             assertTrue(e.query("c", "q", new QueryParams()).getDocumentIds().isEmpty());
             assertEquals(0L, e.getDocumentCount("c"));
             assertTrue(e.getIndexMetadata("c").isEmpty());
-            assertNull(e.getLastQueryJson());
-            assertNull(e.getLastIndexName());
             assertDoesNotThrow(() -> e.close());
         }
     }

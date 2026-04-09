@@ -53,8 +53,6 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
     private QdrantClient client;
     private ManagedChannel customChannel;  // Track custom channel for cleanup
     private final long grpcTimeoutSeconds;
-    private String lastQueryJson = null;  // Store last query for reporting
-    private String lastIndexName = null;
 
     public QdrantEngine(Map<String, Object> config) {
         super(config);
@@ -584,23 +582,21 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
 
             SearchPoints searchRequest = searchBuilder.build();
 
-            // Store query for later reporting (thread-safe, only first query)
-            synchronized (this) {
-                if (lastQueryJson == null) {
-                    lastQueryJson = buildQueryJson(searchRequest, queryVector);
-                    lastIndexName = indexName;
-                }
-            }
-
-            // Execute search
+            // Execute search using raw gRPC client to get full SearchResponse with timing
             long startTime = System.nanoTime();
-            var searchResponse = client.searchAsync(searchRequest)
+            io.qdrant.client.grpc.Points.SearchResponse fullResponse = client.grpcClient()
+                    .points()
+                    .search(searchRequest)
                     .get(grpcTimeoutSeconds, TimeUnit.SECONDS);
             double clientLatencyMs = (System.nanoTime() - startTime) / 1_000_000.0;
 
+            // Extract server latency (time is in seconds, convert to milliseconds)
+            // Round to nearest millisecond instead of truncating
+            Long serverLatencyMs = Math.round(fullResponse.getTime() * 1000.0);
+
             // Extract document IDs (handle both UUID and numeric IDs)
             List<String> documentIds = new ArrayList<>();
-            for (var scoredPoint : searchResponse) {
+            for (var scoredPoint : fullResponse.getResultList()) {
                 PointId id = scoredPoint.getId();
                 String docId;
                 switch (id.getPointIdOptionsCase()) {
@@ -614,7 +610,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
                 documentIds.add(docId);
             }
 
-            return new QueryResponse(documentIds, clientLatencyMs, null);
+            return new QueryResponse(documentIds, clientLatencyMs, serverLatencyMs);
         } catch (Exception e) {
             logger.error("Query execution failed", e);
             return new QueryResponse(List.of(), null, null);
@@ -657,20 +653,6 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
             logger.error("Failed to get version", e);
             return "unknown";
         }
-    }
-
-    /**
-     * Get the last executed query in Qdrant REST API format.
-     * Used for reporting/debugging.
-     */
-    @Override
-    public String getLastQueryJson() {
-        return lastQueryJson;
-    }
-
-    @Override
-    public String getLastIndexName() {
-        return lastIndexName;
     }
 
     @Override
@@ -775,93 +757,6 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
         }
 
         return matchBuilder.build();
-    }
-
-    /**
-     * Build a JSON representation of the Qdrant search query for logging.
-     * Format matches the REST API so it can be run in Qdrant console.
-     */
-    private String buildQueryJson(SearchPoints searchRequest, List<Float> queryVector) {
-        try {
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            com.fasterxml.jackson.databind.node.ObjectNode queryJson = mapper.createObjectNode();
-
-            // Vector (truncated for readability)
-            com.fasterxml.jackson.databind.node.ArrayNode vectorArray = mapper.createArrayNode();
-            for (int i = 0; i < Math.min(3, queryVector.size()); i++) {
-                vectorArray.add(queryVector.get(i));
-            }
-            if (queryVector.size() > 3) {
-                queryJson.put("vector", String.format("[%s, %s, %s, ... %d more]",
-                        queryVector.get(0), queryVector.get(1), queryVector.get(2), queryVector.size() - 3));
-            } else {
-                queryJson.set("vector", vectorArray);
-            }
-
-            // Filter
-            if (searchRequest.hasFilter()) {
-                com.fasterxml.jackson.databind.node.ObjectNode filterNode = mapper.createObjectNode();
-                com.fasterxml.jackson.databind.node.ArrayNode mustArray = mapper.createArrayNode();
-
-                for (int i = 0; i < searchRequest.getFilter().getMustCount(); i++) {
-                    var condition = searchRequest.getFilter().getMust(i);
-                    if (condition.hasField()) {
-                        com.fasterxml.jackson.databind.node.ObjectNode condNode = mapper.createObjectNode();
-                        var field = condition.getField();
-                        condNode.put("key", field.getKey());
-
-                        if (field.hasMatch()) {
-                            com.fasterxml.jackson.databind.node.ObjectNode matchNode = mapper.createObjectNode();
-                            var match = field.getMatch();
-
-                            // Get the match value based on type
-                            switch (match.getMatchValueCase()) {
-                                case BOOLEAN -> matchNode.put("value", match.getBoolean());
-                                case INTEGER -> matchNode.put("value", match.getInteger());
-                                case KEYWORD -> matchNode.put("value", match.getKeyword());
-                                default -> matchNode.put("value", match.toString());
-                            }
-
-                            condNode.set("match", matchNode);
-                        }
-                        mustArray.add(condNode);
-                    }
-                }
-
-                if (mustArray.size() > 0) {
-                    filterNode.set("must", mustArray);
-                    queryJson.set("filter", filterNode);
-                }
-            }
-
-            // Params
-            if (searchRequest.hasParams()) {
-                com.fasterxml.jackson.databind.node.ObjectNode paramsNode = mapper.createObjectNode();
-
-                if (searchRequest.getParams().getHnswEf() > 0) {
-                    paramsNode.put("hnsw_ef", searchRequest.getParams().getHnswEf());
-                }
-
-                if (searchRequest.getParams().hasQuantization()) {
-                    com.fasterxml.jackson.databind.node.ObjectNode quantNode = mapper.createObjectNode();
-                    quantNode.put("oversampling", searchRequest.getParams().getQuantization().getOversampling());
-                    paramsNode.set("quantization", quantNode);
-                }
-
-                queryJson.set("params", paramsNode);
-            }
-
-            // Limit
-            queryJson.put("limit", searchRequest.getLimit());
-
-            // Payload and vector settings
-            queryJson.put("with_payload", searchRequest.hasWithPayload() && searchRequest.getWithPayload().getEnable());
-            queryJson.put("with_vector", false);
-
-            return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(queryJson);
-        } catch (Exception e) {
-            return "Error building query JSON: " + e.getMessage();
-        }
     }
 
     /**

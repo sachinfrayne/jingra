@@ -82,18 +82,6 @@ class BenchmarkEngineTest {
     }
 
     @Test
-    void defaultGetLastQueryJson_returnsNull() {
-        BenchmarkEngine engine = new StubEngine();
-        assertNull(engine.getLastQueryJson());
-    }
-
-    @Test
-    void defaultGetLastIndexName_returnsNull() {
-        BenchmarkEngine engine = new StubEngine();
-        assertNull(engine.getLastIndexName());
-    }
-
-    @Test
     void stubIsUsableAsBenchmarkEngine() {
         assertInstanceOf(BenchmarkEngine.class, new StubEngine());
     }

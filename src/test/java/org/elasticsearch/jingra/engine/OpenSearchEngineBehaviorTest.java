@@ -115,23 +115,6 @@ class OpenSearchEngineBehaviorTest {
         assertEquals("opensearch", e.getEngineName());
         assertEquals("os", e.getShortName());
         assertEquals("unknown", e.getVersion());
-        assertNull(e.getLastQueryJson());
-        assertNull(e.getLastIndexName());
-    }
-
-    @Test
-    void formatJsonForDisplay_prettyPrintsValidJson() {
-        OpenSearchEngine e = new OpenSearchEngine(new HashMap<>());
-        String out = e.formatJsonForDisplay("{\"x\":1}");
-        assertTrue(out.contains("\n"));
-        assertTrue(out.contains("\"x\""));
-    }
-
-    @Test
-    void formatJsonForDisplay_returnsOriginalWhenInvalid() {
-        OpenSearchEngine e = new OpenSearchEngine(new HashMap<>());
-        String bad = "{ not valid json";
-        assertEquals(bad, e.formatJsonForDisplay(bad));
     }
 
     @Test
@@ -400,15 +383,8 @@ class OpenSearchEngineBehaviorTest {
             assertNotNull(r1.getClientLatencyMs());
             assertEquals(3L, r1.getServerLatencyMs().longValue());
 
-            String firstJson = e.getLastQueryJson();
-            String firstIdx = e.getLastIndexName();
-            assertNotNull(firstJson);
-            assertEquals("my-index", firstIdx);
-
             secondRound.set(true);
             e.query("other", "behavior-os-query", new QueryParams());
-            assertEquals(firstJson, e.getLastQueryJson());
-            assertEquals("my-index", e.getLastIndexName());
         } finally {
             Files.deleteIfExists(f);
         }
@@ -533,24 +509,4 @@ class OpenSearchEngineBehaviorTest {
         assertEquals("3.9.9", e.getVersion());
     }
 
-    @Test
-    void getLastQueryJsonAndLastIndexNameGetters() throws Exception {
-        Path dir = Path.of("jingra-config/queries/opensearch");
-        Files.createDirectories(dir);
-        Path f = dir.resolve("behavior-os-getters.json");
-        Files.writeString(f, "{\"template\": {\"query\": {\"match_all\": {}}}}");
-        try {
-            ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
-                @Override
-                protected Response performRestRequest(Request request) throws IOException {
-                    return jsonResponse("{\"hits\":{\"hits\":[]},\"took\":0}");
-                }
-            };
-            e.query("getter-idx", "behavior-os-getters", new QueryParams());
-            assertNotNull(e.getLastQueryJson());
-            assertEquals("getter-idx", e.getLastIndexName());
-        } finally {
-            Files.deleteIfExists(f);
-        }
-    }
 }
