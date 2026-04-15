@@ -5,6 +5,7 @@ import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
 import org.elasticsearch.jingra.utils.TlsSettings;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.QdrantGrpcClient;
 import io.qdrant.client.grpc.Collections.BinaryQuantization;
@@ -587,7 +588,9 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
 
             SearchPoints searchRequest = searchBuilder.build();
             try {
-                writeFirstQueryDumpIfConfigured(getShortName(), JsonFormat.printer().print(searchRequest));
+                writeFirstQueryDumpIfConfigured(
+                        getShortName(),
+                        formatSearchPointsJsonForDump(JsonFormat.printer().print(searchRequest)));
             } catch (InvalidProtocolBufferException e) {
                 logger.warn("Could not serialize SearchPoints for query dump", e);
             }
@@ -842,6 +845,43 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
         ).get();
 
         logger.info("Created payload index on '{}' (type: {})", fieldName, fieldType);
+    }
+
+    /**
+     * Protobuf {@link JsonFormat} emits int64/uint64 as JSON strings and always includes
+     * {@code collectionName}. For dumps we omit the collection (caller already knows it), and
+     * coerce integer fields to JSON numbers for readability.
+     */
+    private String formatSearchPointsJsonForDump(String protoJson) {
+        try {
+            JsonNode rootNode = objectMapper.readTree(protoJson);
+            if (!(rootNode instanceof ObjectNode root)) {
+                return protoJson;
+            }
+            root.remove("collectionName");
+            coerceQuotedIntegral(root, "limit");
+            coerceQuotedIntegral(root, "timeout");
+            JsonNode params = root.get("params");
+            if (params instanceof ObjectNode paramsObj) {
+                coerceQuotedIntegral(paramsObj, "hnswEf");
+            }
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception e) {
+            logger.warn("Could not normalize SearchPoints JSON for dump: {}", e.toString());
+            return protoJson;
+        }
+    }
+
+    private static void coerceQuotedIntegral(ObjectNode node, String field) {
+        JsonNode v = node.get(field);
+        if (v == null || !v.isTextual()) {
+            return;
+        }
+        try {
+            node.put(field, Long.parseLong(v.asText()));
+        } catch (NumberFormatException ignored) {
+            // leave as-is
+        }
     }
 
     private static boolean isNotFound(Throwable e) {
