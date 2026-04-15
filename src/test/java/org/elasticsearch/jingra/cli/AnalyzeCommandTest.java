@@ -140,14 +140,14 @@ class AnalyzeCommandTest {
         config.getAnalysis().setLatencyMetrics(List.of("latency_median", "latency_avg"));
 
         MockResultsEngine mockEngine = new MockResultsEngine();
-        // Different recall values: 0.95 for ES, 0.83 for Qdrant
-        mockEngine.addResult(createResult("elasticsearch", "k=100", 0.95, 5.0, "recall@100"));
-        mockEngine.addResult(createResult("qdrant", "k=50", 0.83, 2.0, "recall@10"));
+        // Both engines with overlapping recall values in 0.7-0.9 range
+        mockEngine.addResult(createResult("elasticsearch", "k=100", 0.851, 5.0, "recall@100"));
+        mockEngine.addResult(createResult("qdrant", "k=50", 0.849, 2.0, "recall@10"));
 
         AnalyzeCommand.run(config, cfg -> mockEngine);
 
         assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().startsWith("recall_vs_")));
-        // Overview should be generated with separate recall values (0.83 and 0.95)
+        // Overview should be generated with overlapping recall values that round to 0.85
         assertTrue(Files.exists(tempDir.resolve("throughput_overview.png")));
     }
 
