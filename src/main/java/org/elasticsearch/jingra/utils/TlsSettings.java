@@ -1,5 +1,8 @@
 package org.elasticsearch.jingra.utils;
 
+import javax.net.ssl.X509TrustManager;
+import java.security.cert.X509Certificate;
+
 /**
  * TLS behavior for Elasticsearch and OpenSearch HTTP clients.
  * <p>
@@ -23,5 +26,26 @@ public final class TlsSettings {
         }
         String v = System.getenv("JINGRA_INSECURE_TLS");
         return v != null && (v.equalsIgnoreCase("true") || v.equals("1") || v.equalsIgnoreCase("yes"));
+    }
+
+    /**
+     * Trust manager that accepts any certificate chain (insecure). Used by {@code QdrantEngine}
+     * when connecting over TLS with {@link #insecureTlsEnabled()} {@code true}.
+     */
+    public static X509TrustManager insecureTrustAllX509TrustManager() {
+        return new X509TrustManager() {
+            @Override
+            public X509Certificate[] getAcceptedIssuers() {
+                return new X509Certificate[0];
+            }
+
+            @Override
+            public void checkClientTrusted(X509Certificate[] certs, String authType) {
+            }
+
+            @Override
+            public void checkServerTrusted(X509Certificate[] certs, String authType) {
+            }
+        };
     }
 }

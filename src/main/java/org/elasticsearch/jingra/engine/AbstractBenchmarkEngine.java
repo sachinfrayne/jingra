@@ -7,7 +7,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -114,12 +114,13 @@ public abstract class AbstractBenchmarkEngine implements BenchmarkEngine {
 
         // Try loading from classpath (for packaged JAR)
         String resourcePath = "/" + schemasPath + "/" + filename;
-        try (InputStream is = getClass().getResourceAsStream(resourcePath)) {
-            if (is != null) {
-                return objectMapper.readTree(is);
+        URL url = getClass().getResource(resourcePath);
+        if (url != null) {
+            try {
+                return objectMapper.readTree(url);
+            } catch (IOException e) {
+                logger.warn("Failed to load schema from classpath: {}", resourcePath, e);
             }
-        } catch (IOException e) {
-            logger.warn("Failed to load schema from classpath: {}", resourcePath, e);
         }
 
         logger.error("Schema template '{}' not found for engine '{}'", schemaName, getEngineName());
@@ -147,12 +148,13 @@ public abstract class AbstractBenchmarkEngine implements BenchmarkEngine {
 
         // Try loading from classpath (for packaged JAR)
         String resourcePath = "/" + queriesPath + "/" + filename;
-        try (InputStream is = getClass().getResourceAsStream(resourcePath)) {
-            if (is != null) {
-                return objectMapper.readTree(is);
+        URL url = getClass().getResource(resourcePath);
+        if (url != null) {
+            try {
+                return objectMapper.readTree(url);
+            } catch (IOException e) {
+                logger.warn("Failed to load query from classpath: {}", resourcePath, e);
             }
-        } catch (IOException e) {
-            logger.warn("Failed to load query from classpath: {}", resourcePath, e);
         }
 
         logger.error("Query template '{}' not found for engine '{}'", queryName, getEngineName());

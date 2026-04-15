@@ -78,6 +78,28 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
         return grpcTimeoutSeconds;
     }
 
+    /**
+     * Builds the gRPC {@link ManagedChannel} when an {@code https} URL is used together with
+     * {@link TlsSettings#insecureTlsEnabled()}. Subclasses may override to simulate construction failures.
+     */
+    protected ManagedChannel buildInsecureTlsManagedChannel(String host, int port,
+            javax.net.ssl.X509TrustManager trustAll) throws Exception {
+        return Grpc.newChannelBuilder(
+                host + ":" + port,
+                TlsChannelCredentials.newBuilder()
+                        .trustManager(trustAll)
+                        .build()
+        ).build();
+    }
+
+    /**
+     * Serializes {@link SearchPoints} to protobuf JSON for optional first-query dumps.
+     * Subclasses may override to simulate {@link InvalidProtocolBufferException}.
+     */
+    protected String printSearchPointsForDump(SearchPoints searchRequest) throws InvalidProtocolBufferException {
+        return JsonFormat.printer().print(searchRequest);
+    }
+
     @Override
     public boolean connect() {
         // Check for direct config values first (useful for testing), then fall back to env vars
@@ -125,26 +147,9 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
             if (useTls && TlsSettings.insecureTlsEnabled()) {
                 logger.warn("JINGRA_INSECURE_TLS enabled: accepting self-signed certificates (insecure, MITM possible)");
                 try {
-                    // Create a TrustManager that trusts all certificates (similar to Elasticsearch/OpenSearch approach)
-                    javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
-                        new javax.net.ssl.X509TrustManager() {
-                            public java.security.cert.X509Certificate[] getAcceptedIssuers() {
-                                return new java.security.cert.X509Certificate[0];
-                            }
-                            public void checkClientTrusted(java.security.cert.X509Certificate[] certs, String authType) {
-                            }
-                            public void checkServerTrusted(java.security.cert.X509Certificate[] certs, String authType) {
-                            }
-                        }
-                    };
+                    javax.net.ssl.X509TrustManager trustAll = TlsSettings.insecureTrustAllX509TrustManager();
 
-                    // Create a custom ManagedChannel with insecure SSL configuration
-                    customChannel = Grpc.newChannelBuilder(
-                            host + ":" + port,
-                            TlsChannelCredentials.newBuilder()
-                                    .trustManager(trustAllCerts[0])
-                                    .build()
-                    ).build();
+                    customChannel = buildInsecureTlsManagedChannel(host, port, trustAll);
 
                     // Create QdrantGrpcClient with the custom channel
                     builder = QdrantGrpcClient.newBuilder(customChannel);
@@ -157,7 +162,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
                 builder = QdrantGrpcClient.newBuilder(host, port, useTls);
             }
 
-            if (apiKey != null && !apiKey.isEmpty()) {
+            if (!apiKey.isEmpty()) {
                 builder.withApiKey(apiKey);
             }
 
@@ -590,7 +595,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
             try {
                 writeFirstQueryDumpIfConfigured(
                         getShortName(),
-                        formatSearchPointsJsonForDump(JsonFormat.printer().print(searchRequest)));
+                        formatSearchPointsJsonForDump(printSearchPointsForDump(searchRequest)));
             } catch (InvalidProtocolBufferException e) {
                 logger.warn("Could not serialize SearchPoints for query dump", e);
             }

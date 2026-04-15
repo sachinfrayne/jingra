@@ -5,6 +5,11 @@ import org.junit.jupiter.api.Test;
 import org.junitpioneer.jupiter.ClearSystemProperty;
 import org.junitpioneer.jupiter.SetEnvironmentVariable;
 
+import javax.net.ssl.X509TrustManager;
+import java.security.cert.X509Certificate;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -59,5 +64,15 @@ class TlsSettingsTest {
     @SetEnvironmentVariable(key = "JINGRA_INSECURE_TLS", value = "off")
     void envUnrecognized_disables() {
         assertFalse(TlsSettings.insecureTlsEnabled());
+    }
+
+    @Test
+    void insecureTrustAllX509TrustManagerExposesNoIssuersAndAcceptsEmptyChains() {
+        X509TrustManager tm = TlsSettings.insecureTrustAllX509TrustManager();
+        assertEquals(0, tm.getAcceptedIssuers().length);
+        assertDoesNotThrow(() -> {
+            tm.checkClientTrusted(new X509Certificate[0], "RSA");
+            tm.checkServerTrusted(new X509Certificate[0], "RSA");
+        });
     }
 }
