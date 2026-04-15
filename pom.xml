@@ -96,6 +96,12 @@
             <artifactId>protobuf-java</artifactId>
             <version>3.25.5</version>
         </dependency>
+        <!-- JSON print for protobuf (e.g. debug logging of Qdrant gRPC requests) -->
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java-util</artifactId>
+            <version>3.25.5</version>
+        </dependency>
 
         <!-- Apache Parquet for reading data files -->
         <dependency>
@@ -154,6 +160,20 @@
             <groupId>com.fasterxml.jackson.dataformat</groupId>
             <artifactId>jackson-dataformat-yaml</artifactId>
             <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- Apache Commons CSV for exporting analysis results -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-csv</artifactId>
+            <version>1.11.0</version>
+        </dependency>
+
+        <!-- XChart for plot generation -->
+        <dependency>
+            <groupId>org.knowm.xchart</groupId>
+            <artifactId>xchart</artifactId>
+            <version>3.8.7</version>
         </dependency>
 
         <!-- Logging -->
