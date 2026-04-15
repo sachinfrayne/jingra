@@ -67,6 +67,9 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
         if (!hasClient()) {
             throw new IllegalStateException("Elasticsearch client not initialized");
         }
+        if (documents.isEmpty()) {
+            return BulkResponse.of(b -> b.errors(false).took(0).items(List.of()));
+        }
         BulkRequest.Builder bulkBuilder = new BulkRequest.Builder();
         for (Map<String, Object> doc : documents) {
             bulkBuilder.operations(op -> op.index(idx -> idx.index(indexName).document(doc)));
@@ -384,13 +387,34 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
         }
     }
 
-    private static String firstElasticsearchDenseVectorType(TypeMapping mapping) {
+    /** Package-private for unit tests (JaCoCo). */
+    static String firstElasticsearchDenseVectorType(TypeMapping mapping) {
         if (mapping == null || mapping.properties() == null) {
             return null;
         }
-        for (Property p : mapping.properties().values()) {
+        return firstDenseVectorInPropertyMap(mapping.properties());
+    }
+
+    /** Package-private for unit tests (JaCoCo); also used recursively from {@link #firstElasticsearchDenseVectorType}. */
+    static String firstDenseVectorInPropertyMap(Map<String, Property> properties) {
+        if (properties == null) {
+            return null;
+        }
+        for (Property p : properties.values()) {
             if (p.isDenseVector()) {
                 return "dense_vector";
+            }
+            if (p.isObject()) {
+                String inner = firstDenseVectorInPropertyMap(p.object().properties());
+                if (inner != null) {
+                    return inner;
+                }
+            }
+            if (p.isNested()) {
+                String inner = firstDenseVectorInPropertyMap(p.nested().properties());
+                if (inner != null) {
+                    return inner;
+                }
             }
         }
         return null;

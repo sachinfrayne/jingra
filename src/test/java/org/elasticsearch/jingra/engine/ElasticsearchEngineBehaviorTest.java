@@ -13,7 +13,10 @@ import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.elasticsearch.core.search.HitsMetadata;
 import co.elastic.clients.elasticsearch.core.search.TotalHits;
 import co.elastic.clients.elasticsearch.core.search.TotalHitsRelation;
+import co.elastic.clients.elasticsearch._types.mapping.Property;
+import co.elastic.clients.elasticsearch._types.mapping.TypeMapping;
 import co.elastic.clients.elasticsearch.indices.GetIndexResponse;
+import co.elastic.clients.elasticsearch.indices.IndexState;
 import co.elastic.clients.transport.rest5_client.low_level.Rest5Client;
 import org.apache.hc.core5.http.HttpHost;
 import org.elasticsearch.jingra.model.Document;
@@ -30,8 +33,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Offline tests for {@link ElasticsearchEngine} branches not covered efficiently by Testcontainers.
@@ -569,4 +575,212 @@ class ElasticsearchEngineBehaviorTest {
         assertEquals("9.9.9", e.getVersion());
     }
 
+    @Test
+    void firstElasticsearchDenseVectorType_nullMapping() {
+        assertNull(ElasticsearchEngine.firstElasticsearchDenseVectorType(null));
+    }
+
+    @Test
+    void firstElasticsearchDenseVectorType_emptyProperties() {
+        TypeMapping tm = TypeMapping.of(m -> m.properties(Map.of()));
+        assertNull(ElasticsearchEngine.firstElasticsearchDenseVectorType(tm));
+    }
+
+    @Test
+    void firstElasticsearchDenseVectorType_keywordOnly() {
+        TypeMapping tm = TypeMapping.of(m -> m.properties("id", Property.of(p -> p.keyword(k -> k))));
+        assertNull(ElasticsearchEngine.firstElasticsearchDenseVectorType(tm));
+    }
+
+    @Test
+    void firstElasticsearchDenseVectorType_denseTopLevel() {
+        TypeMapping tm = TypeMapping.of(m -> m.properties("emb", Property.of(p -> p.denseVector(d -> d.dims(8)))));
+        assertEquals("dense_vector", ElasticsearchEngine.firstElasticsearchDenseVectorType(tm));
+    }
+
+    @Test
+    void firstElasticsearchDenseVectorType_nestedUnderObject() {
+        TypeMapping tm = TypeMapping.of(m -> m.properties("block", Property.of(p -> p.object(o -> o
+                .properties("vec", Property.of(p2 -> p2.denseVector(d -> d.dims(4))))))));
+        assertEquals("dense_vector", ElasticsearchEngine.firstElasticsearchDenseVectorType(tm));
+    }
+
+    @Test
+    void firstElasticsearchDenseVectorType_nestedFieldWithInnerDenseVector() {
+        TypeMapping tm = TypeMapping.of(m -> m.properties("collapse", Property.of(p -> p.nested(n -> n
+                .properties("vec", Property.of(p2 -> p2.denseVector(d -> d.dims(3))))))));
+        assertEquals("dense_vector", ElasticsearchEngine.firstElasticsearchDenseVectorType(tm));
+    }
+
+    @Test
+    void firstElasticsearchDenseVectorType_emptyObjectThenDenseTopLevel() {
+        TypeMapping tm = TypeMapping.of(m -> m
+                .properties("blank", Property.of(p -> p.object(o -> o)))
+                .properties("emb", Property.of(p -> p.denseVector(d -> d.dims(2)))));
+        assertEquals("dense_vector", ElasticsearchEngine.firstElasticsearchDenseVectorType(tm));
+    }
+
+    @Test
+    void firstElasticsearchDenseVectorType_emptyNestedThenDenseTopLevel() {
+        TypeMapping tm = TypeMapping.of(m -> m
+                .properties("blank", Property.of(p -> p.nested(n -> n)))
+                .properties("emb", Property.of(p -> p.denseVector(d -> d.dims(2)))));
+        assertEquals("dense_vector", ElasticsearchEngine.firstElasticsearchDenseVectorType(tm));
+    }
+
+    @Test
+    void firstElasticsearchDenseVectorType_deepObjectChain() {
+        TypeMapping tm = TypeMapping.of(m -> m.properties("l1", Property.of(p -> p.object(o -> o
+                .properties("l2", Property.of(p2 -> p2.object(o2 -> o2
+                        .properties("vec", Property.of(p3 -> p3.denseVector(d -> d.dims(1)))))))))));
+        assertEquals("dense_vector", ElasticsearchEngine.firstElasticsearchDenseVectorType(tm));
+    }
+
+    @Test
+    void firstElasticsearchDenseVectorType_mappingPropertiesNull() {
+        TypeMapping tm = mock(TypeMapping.class);
+        when(tm.properties()).thenReturn(null);
+        assertNull(ElasticsearchEngine.firstElasticsearchDenseVectorType(tm));
+    }
+
+    @Test
+    void firstDenseVectorInPropertyMap_nullMap() {
+        assertNull(ElasticsearchEngine.firstDenseVectorInPropertyMap(null));
+    }
+
+    @Test
+    void getIndexMetadataWhenIndexKeyMissing() {
+        TypeMapping tm = TypeMapping.of(m -> m.properties("e", Property.of(p -> p.denseVector(d -> d.dims(2)))));
+        GetIndexResponse resp = GetIndexResponse.of(r -> r.indices("other-idx", IndexState.of(is -> is.mappings(tm))));
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected GetIndexResponse getIndexResponseOperation(String indexName) {
+                return resp;
+            }
+        };
+        assertTrue(e.getIndexMetadata("wanted-idx").isEmpty());
+    }
+
+    @Test
+    void getIndexMetadataWhenMappingsAbsent() {
+        GetIndexResponse resp = GetIndexResponse.of(r -> r.indices("x", IndexState.of(is -> is.aliases(Map.of()))));
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected GetIndexResponse getIndexResponseOperation(String indexName) {
+                return resp;
+            }
+        };
+        assertTrue(e.getIndexMetadata("x").isEmpty());
+    }
+
+    @Test
+    void getIndexMetadataFindsDenseVectorNestedUnderObject() {
+        TypeMapping tm = TypeMapping.of(m -> m.properties("block", Property.of(p -> p.object(o -> o
+                .properties("vec", Property.of(p2 -> p2.denseVector(d -> d.dims(4))))))));
+        GetIndexResponse resp = GetIndexResponse.of(r -> r.indices("my-idx", IndexState.of(is -> is.mappings(tm))));
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected GetIndexResponse getIndexResponseOperation(String indexName) {
+                return resp;
+            }
+        };
+        Map<String, String> meta = e.getIndexMetadata("my-idx");
+        assertEquals("dense_vector", meta.get("vector_type"));
+    }
+
+    @Test
+    void getIndexMetadataKeywordOnlyLeavesVectorTypeAbsent() {
+        TypeMapping tm = TypeMapping.of(m -> m.properties("t", Property.of(p -> p.text(t -> t))));
+        GetIndexResponse resp = GetIndexResponse.of(r -> r.indices("plain", IndexState.of(is -> is.mappings(tm))));
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected GetIndexResponse getIndexResponseOperation(String indexName) {
+                return resp;
+            }
+        };
+        assertTrue(e.getIndexMetadata("plain").isEmpty());
+    }
+
+    @Test
+    void bulkIndexMapsThrowsWhenClientNull() {
+        assertThrows(IllegalStateException.class,
+                () -> new ElasticsearchEngine(new HashMap<>()).bulkIndexMaps("i", List.of(Map.of("a", 1))));
+    }
+
+    @Test
+    void bulkIndexMapsBuildsOperationsAndReturnsResponse() throws Exception {
+        BulkResponse ok = BulkResponse.of(b -> b.errors(false).took(1).items(List.of()));
+        AtomicReference<BulkRequest> captured = new AtomicReference<>();
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                captured.set(request);
+                return ok;
+            }
+        };
+        assertSame(ok, e.bulkIndexMaps("target-idx", List.of(Map.of("k", "v"), Map.of("n", 2))));
+        assertNotNull(captured.get());
+        assertEquals(2, captured.get().operations().size());
+    }
+
+    @Test
+    void bulkIndexMapsEmptyDocumentsSkipsBulkRequest() throws Exception {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                throw new AssertionError("bulk should not run for empty document list");
+            }
+        };
+        BulkResponse r = e.bulkIndexMaps("target-idx", List.of());
+        assertFalse(r.errors());
+        assertTrue(r.items().isEmpty());
+    }
+
+    @Test
+    void connectUsesUrlFromEnvWhenConfigUrlMissing() {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("url_env", "JINGRA_TEST_ES_URL");
+        ElasticsearchEngine e = new ElasticsearchEngine(cfg) {
+            @Override
+            protected String getEnv(String name, String fallback) {
+                if ("JINGRA_TEST_ES_URL".equals(name)) {
+                    return "http://127.0.0.1:1";
+                }
+                return super.getEnv(name, fallback);
+            }
+        };
+        assertFalse(e.connect());
+    }
+
+    @Test
+    void ingestOmitsDocumentIdWhenIdFieldMissing() throws Exception {
+        BulkResponse ok = BulkResponse.of(b -> b.errors(false).took(1).items(List.of()));
+        AtomicReference<BulkRequest> captured = new AtomicReference<>();
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                captured.set(request);
+                return ok;
+            }
+        };
+        Document doc = new Document(Map.of("other", "x"));
+        assertEquals(1, e.ingest(List.of(doc), "idx", "id"));
+        assertEquals(1, captured.get().operations().size());
+    }
+
+    @Test
+    void ingestBulkErrorsWithNullItemErrorStillCountsAsFailure() throws Exception {
+        BulkResponseItem okItem = BulkResponseItem.of(b -> b.operationType(OperationType.Index).index("idx").status(201));
+        BulkResponseItem nullErrorItem = BulkResponseItem.of(b -> b.operationType(OperationType.Index).index("idx").status(400));
+        BulkResponse br = BulkResponse.of(b -> b.errors(true).took(1).items(List.of(okItem, nullErrorItem)));
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                return br;
+            }
+        };
+        List<Document> docs = List.of(new Document(Map.of("a", 1)), new Document(Map.of("a", 2)));
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> e.ingest(docs, "idx", null));
+        assertInstanceOf(IllegalStateException.class, ex.getCause());
+    }
 }
