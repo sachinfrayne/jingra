@@ -9,8 +9,11 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
@@ -1216,6 +1219,165 @@ class QdrantEngineTest {
     @Order(21)
     void testCreateIndex_returnsFalseWhenSchemaTemplateFileNotFound() {
         assertFalse(engine.createIndex(uniqueCollectionName("ci_no_schema"), "missing-schema-zzz-42"));
+    }
+
+    @Test
+    @Order(60)
+    void testConnect_explicitHttpSchemeWithNonEmptyApiKey() throws Exception {
+        String host = qdrant.getHost();
+        int grpcPort = qdrant.getMappedPort(6334);
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("url", "http://" + host + ":" + grpcPort);
+        cfg.put("api_key", "integration-nonempty-api-key");
+        cfg.put("grpc_timeout_seconds", 90L);
+        QdrantEngine e = new QdrantEngine(cfg);
+        try {
+            assertTrue(e.connect(), "Qdrant accepts connections with a non-empty api_key in config");
+        } finally {
+            e.close();
+        }
+    }
+
+    @Test
+    @Order(61)
+    void testConnect_urlReadFromEnvironmentWhenAbsentFromConfig() throws Exception {
+        final String host = qdrant.getHost();
+        final int grpcPort = qdrant.getMappedPort(6334);
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("url_env", "TC_JINGRA_QDRANT_URL_INT");
+        cfg.put("grpc_timeout_seconds", 90L);
+        QdrantEngine e = new QdrantEngine(cfg) {
+            @Override
+            protected String getEnv(String name, String fallback) {
+                if ("TC_JINGRA_QDRANT_URL_INT".equals(name)) {
+                    return host + ":" + grpcPort;
+                }
+                return super.getEnv(name, fallback);
+            }
+        };
+        try {
+            assertTrue(e.connect());
+        } finally {
+            e.close();
+        }
+    }
+
+    @Test
+    @Order(62)
+    void testConnect_httpsWithoutInsecureTlsUsesTlsChannelBuilder() throws Exception {
+        System.clearProperty("jingra.insecure.tls");
+        String host = qdrant.getHost();
+        int grpcPort = qdrant.getMappedPort(6334);
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("url", "https://" + host + ":" + grpcPort);
+        cfg.put("api_key", "integration-https-default-tls-api-key");
+        cfg.put("grpc_timeout_seconds", 90L);
+        QdrantEngine e = new QdrantEngine(cfg);
+        try {
+            // Container gRPC is plain TCP; TLS handshake should fail, not crash during client setup
+            assertFalse(e.connect());
+        } finally {
+            e.close();
+        }
+    }
+
+    @Test
+    @Order(63)
+    void testConnect_httpsWithInsecureTlsUsesTrustAllChannelBuilder() throws Exception {
+        System.setProperty("jingra.insecure.tls", "true");
+        String host = qdrant.getHost();
+        int grpcPort = qdrant.getMappedPort(6334);
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("url", "https://" + host + ":" + grpcPort);
+        cfg.put("api_key", "integration-tls-insecure-api-key");
+        cfg.put("grpc_timeout_seconds", 90L);
+        QdrantEngine e = new QdrantEngine(cfg);
+        try {
+            // Custom TLS channel is built; handshake still fails against plain gRPC, handled by outer catch
+            assertFalse(e.connect());
+        } finally {
+            System.clearProperty("jingra.insecure.tls");
+            e.close();
+        }
+    }
+
+    @Test
+    @Order(64)
+    void testQuery_writesFirstQueryDumpWhenDirectoryConfigured() throws Exception {
+        Path dumpDir = Files.createTempDirectory("jingra-qd-dump-it");
+        String col = uniqueCollectionName("qd_dump");
+        String schemaName = "test-schema-qd-dump-query";
+        String queryName = "test-query-dump-it";
+        try {
+            String host = qdrant.getHost();
+            int grpcPort = qdrant.getMappedPort(6334);
+            Map<String, Object> cfg = new HashMap<>();
+            cfg.put("url", host + ":" + grpcPort);
+            cfg.put("vector_field", "embedding");
+            cfg.put("grpc_timeout_seconds", 90L);
+            cfg.put(AbstractBenchmarkEngine.CONFIG_QUERY_DUMP_DIRECTORY, dumpDir.toString());
+            QdrantEngine qe = new QdrantEngine(cfg);
+            assertTrue(qe.connect());
+            writeQdrantSchemaFile(schemaName, SCHEMA_MINIMAL_QDRANT_VECTOR_128);
+            assertTrue(qe.createIndex(col, schemaName));
+            assertEquals(1, qe.ingest(List.of(
+                    new Document(Map.of("id", "dump-1", "embedding", generateRandomVector(128)))), col, "id"));
+            await().atMost(5, TimeUnit.SECONDS)
+                    .pollInterval(100, TimeUnit.MILLISECONDS)
+                    .untilAsserted(() -> assertTrue(qe.getDocumentCount(col) >= 1));
+            writeQdrantQueryFile(queryName, """
+                    {"template": {}}
+                    """);
+            Map<String, Object> params = new HashMap<>();
+            params.put("query_vector", generateRandomVector(128));
+            params.put("size", 1);
+            qe.query(col, queryName, new QueryParams(params));
+            assertTrue(Files.isRegularFile(dumpDir.resolve("qd-first-query.json")));
+            qe.close();
+        } finally {
+            deleteRecursivelyIfExists(dumpDir);
+            engine.deleteIndex(col);
+        }
+    }
+
+    @Test
+    @Order(65)
+    void testCreateIndex_quantizationBinaryAlwaysRamFalse() throws Exception {
+        String col = uniqueCollectionName("ci_quant_ram_false");
+        writeQdrantSchemaFile("test-schema-ci-quant-always-ram-false", """
+                {
+                  "template": {
+                    "vectors": { "size": 128, "distance": "Cosine" },
+                    "settings": {
+                      "quantization_config": {
+                        "binary": { "always_ram": false }
+                      }
+                    }
+                  }
+                }
+                """);
+        try {
+            assertTrue(engine.createIndex(col, "test-schema-ci-quant-always-ram-false"));
+        } finally {
+            engine.deleteIndex(col);
+        }
+    }
+
+    private static void deleteRecursivelyIfExists(Path root) {
+        if (!Files.isDirectory(root)) {
+            return;
+        }
+        try (Stream<Path> walk = Files.walk(root)) {
+            walk.sorted(Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (Exception ignored) {
+                    // best-effort cleanup of temp dump dir
+                }
+            });
+        } catch (Exception ignored) {
+            // ignore
+        }
     }
 
     private static List<Double> generateRandomVector(int dims) {

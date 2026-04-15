@@ -4,7 +4,6 @@ import org.elasticsearch.jingra.model.Document;
 import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.hc.core5.http.HttpHost;
 import org.apache.hc.client5.http.auth.AuthScope;
 import org.apache.hc.client5.http.auth.UsernamePasswordCredentials;
@@ -13,6 +12,7 @@ import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManager;
 import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManagerBuilder;
 import org.apache.hc.client5.http.ssl.ClientTlsStrategyBuilder;
 import org.apache.hc.core5.ssl.SSLContextBuilder;
+import org.apache.hc.core5.ssl.TrustStrategy;
 import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
@@ -37,6 +37,7 @@ import org.opensearch.client.RestClientBuilder;
 
 import javax.net.ssl.SSLContext;
 import java.io.IOException;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -90,6 +91,14 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
         return restClient.performRequest(request);
     }
 
+    /**
+     * Trust strategy used when {@link TlsSettings#insecureTlsEnabled()} is true for HTTPS OpenSearch URLs.
+     * Package-private for tests.
+     */
+    static TrustStrategy openSearchInsecureTrustStrategy() {
+        return (X509Certificate[] chain, String authType) -> true;
+    }
+
     @Override
     public boolean connect() {
         // Check for direct config values first (useful for testing), then fall back to env vars
@@ -137,7 +146,7 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
             if (https && TlsSettings.insecureTlsEnabled()) {
                 logger.warn("JINGRA_INSECURE_TLS is enabled: TLS verification is disabled (unsafe outside controlled environments)");
                 SSLContext sslContext = SSLContextBuilder.create()
-                        .loadTrustMaterial((chain, authType) -> true)
+                        .loadTrustMaterial(openSearchInsecureTrustStrategy())
                         .build();
                 cmBuilder.setTlsStrategy(ClientTlsStrategyBuilder.create()
                         .setSslContext(sslContext)
@@ -416,10 +425,9 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
 
 
     /**
-     * Format JSON for pretty-printed console display.
-     * Package-private for tests in the same package.
+     * First knn_vector field in the mapping, if any. Package-private for tests in the same package.
      */
-    private static String firstOpenSearchVectorType(TypeMapping mapping) {
+    static String firstOpenSearchVectorType(TypeMapping mapping) {
         if (mapping == null || mapping.properties() == null) {
             return null;
         }

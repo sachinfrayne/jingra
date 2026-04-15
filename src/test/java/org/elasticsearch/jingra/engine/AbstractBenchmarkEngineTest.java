@@ -5,12 +5,22 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.elasticsearch.jingra.model.Document;
 import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
@@ -96,6 +106,10 @@ class AbstractBenchmarkEngineTest {
         public JsonNode publicLoadQueryTemplate(String queryName) {
             return loadQueryTemplate(queryName);
         }
+
+        public void publicWriteFirstQueryDump(String engineShortName, String requestJson) {
+            writeFirstQueryDumpIfConfigured(engineShortName, requestJson);
+        }
     }
 
     @BeforeEach
@@ -103,6 +117,28 @@ class AbstractBenchmarkEngineTest {
         Map<String, Object> config = new HashMap<>();
         config.put("url", "http://localhost:9200");
         engine = new TestBenchmarkEngine(config);
+    }
+
+    @AfterEach
+    void cleanupJingraConfigOnDisk() throws IOException {
+        Path root = Paths.get(AbstractBenchmarkEngine.JINGRA_CONFIG_DIR);
+        if (Files.isDirectory(root)) {
+            try (Stream<Path> walk = Files.walk(root)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(p -> {
+                    try {
+                        Files.deleteIfExists(p);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+            }
+        }
+    }
+
+    private void writeJingraFile(String relativeUnderJingraConfig, String content) throws IOException {
+        Path p = Paths.get(AbstractBenchmarkEngine.JINGRA_CONFIG_DIR).resolve(relativeUnderJingraConfig);
+        Files.createDirectories(p.getParent());
+        Files.writeString(p, content, StandardCharsets.UTF_8);
     }
 
     @Test
@@ -233,25 +269,158 @@ class AbstractBenchmarkEngineTest {
     }
 
     @Test
-    void testLoadSchemaTemplate_fromClasspath() {
-        // Act - try to load from classpath (test resources)
-        JsonNode schema = engine.publicLoadSchemaTemplate("test-schema");
-
-        // Assert - should find /schemas/test/test-schema.json
-        // Note: This will be null because we haven't created that path yet
-        // But the method should not throw an exception
-        // For a real test, we'd need to create the file at the expected path
-        // This tests the null return behavior
-        assertNull(schema);
+    void testLoadSchemaTemplate_missingReturnsNull() {
+        assertNull(engine.publicLoadSchemaTemplate("definitely-missing-schema-xyz"));
     }
 
     @Test
-    void testLoadQueryTemplate_success() {
-        // Act
-        JsonNode query = engine.publicLoadQueryTemplate("test-query");
+    void testLoadSchemaTemplate_fromClasspath() {
+        JsonNode schema = engine.publicLoadSchemaTemplate("cp-schema");
+        assertNotNull(schema);
+        assertEquals("classpath", schema.get("from").asText());
+    }
 
-        // Assert - should return null if not found (no exception)
-        assertNull(query);
+    @Test
+    void testLoadSchemaTemplate_fromFilesystemOverridesClasspath() throws Exception {
+        writeJingraFile("schemas/test/winner.json", "{\"winner\":\"disk\"}");
+        JsonNode schema = engine.publicLoadSchemaTemplate("winner");
+        assertEquals("disk", schema.get("winner").asText());
+    }
+
+    @Test
+    void testLoadSchemaTemplate_invalidOnDiskFallsBackToClasspath() throws Exception {
+        writeJingraFile("schemas/test/recover.json", "{ not json");
+        JsonNode schema = engine.publicLoadSchemaTemplate("recover");
+        assertNotNull(schema);
+        assertTrue(schema.get("recoveredFromClasspath").asBoolean());
+    }
+
+    @Test
+    void testLoadSchemaTemplate_invalidClasspathResourceReturnsNull() {
+        assertNull(engine.publicLoadSchemaTemplate("bad-json"));
+    }
+
+    @Test
+    void testLoadSchemaTemplate_invalidOnDiskAndMissingClasspathReturnsNull() throws Exception {
+        writeJingraFile("schemas/test/only-disk-bad.json", "{ not json");
+        assertNull(engine.publicLoadSchemaTemplate("only-disk-bad"));
+    }
+
+    @Test
+    void testLoadSchemaTemplate_fromFilesystemOnly() throws Exception {
+        writeJingraFile("schemas/test/fs-only.json", "{\"fs\":true}");
+        JsonNode schema = engine.publicLoadSchemaTemplate("fs-only");
+        assertTrue(schema.get("fs").asBoolean());
+    }
+
+    @Test
+    void testLoadQueryTemplate_missingReturnsNull() {
+        assertNull(engine.publicLoadQueryTemplate("definitely-missing-query-xyz"));
+    }
+
+    @Test
+    void testLoadQueryTemplate_fromClasspath() {
+        JsonNode query = engine.publicLoadQueryTemplate("cp-query");
+        assertNotNull(query);
+        assertEquals("classpath-query", query.get("from").asText());
+    }
+
+    @Test
+    void testLoadQueryTemplate_invalidClasspathResourceReturnsNull() {
+        assertNull(engine.publicLoadQueryTemplate("bad-query"));
+    }
+
+    @Test
+    void testLoadQueryTemplate_invalidOnDiskFallsBackToClasspath() throws Exception {
+        writeJingraFile("queries/test/recover-query.json", "{ not json");
+        JsonNode query = engine.publicLoadQueryTemplate("recover-query");
+        assertTrue(query.get("recoveredQuery").asBoolean());
+    }
+
+    @Test
+    void testLoadQueryTemplate_fromFilesystemOnly() throws Exception {
+        writeJingraFile("queries/test/fs-only-query.json", "{\"q\":\"disk\"}");
+        JsonNode query = engine.publicLoadQueryTemplate("fs-only-query");
+        assertEquals("disk", query.get("q").asText());
+    }
+
+    @Test
+    void testGetConfigBoolean_nullUsesDefault() {
+        Map<String, Object> cfg = new HashMap<>();
+        engine = new TestBenchmarkEngine(cfg);
+        assertTrue(engine.getConfigBoolean("absent", true));
+        assertFalse(engine.getConfigBoolean("absent", false));
+    }
+
+    @Test
+    void testGetConfigBoolean_booleanValue() {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("flag", Boolean.FALSE);
+        engine = new TestBenchmarkEngine(cfg);
+        assertFalse(engine.getConfigBoolean("flag", true));
+    }
+
+    @Test
+    void testGetConfigBoolean_stringParses() {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("flag", "true");
+        engine = new TestBenchmarkEngine(cfg);
+        assertTrue(engine.getConfigBoolean("flag", false));
+    }
+
+    @Test
+    void testQueryDumpDirectoryBlankTreatedAsDisabled() {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put(AbstractBenchmarkEngine.CONFIG_QUERY_DUMP_DIRECTORY, "   \t ");
+        TestBenchmarkEngine e = new TestBenchmarkEngine(cfg);
+        assertDoesNotThrow(() -> e.publicWriteFirstQueryDump("test", "{\"a\":1}"));
+    }
+
+    @Test
+    void testWriteFirstQueryDump_writesPrettyJsonOnce(@TempDir Path dumpRoot) throws Exception {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put(AbstractBenchmarkEngine.CONFIG_QUERY_DUMP_DIRECTORY, dumpRoot.toString());
+        TestBenchmarkEngine e = new TestBenchmarkEngine(cfg);
+        e.publicWriteFirstQueryDump("ab", "{\"b\":2}");
+        e.publicWriteFirstQueryDump("ab", "{\"c\":3}");
+        Path out = dumpRoot.resolve("ab-first-query.json");
+        assertTrue(Files.isRegularFile(out));
+        String body = Files.readString(out, StandardCharsets.UTF_8);
+        assertThat(body).contains("\"b\"");
+        assertThat(body).doesNotContain("\"c\"");
+    }
+
+    @Test
+    void testWriteFirstQueryDump_nonJsonPayloadWrittenVerbatim(@TempDir Path dumpRoot) throws Exception {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put(AbstractBenchmarkEngine.CONFIG_QUERY_DUMP_DIRECTORY, dumpRoot.toString());
+        TestBenchmarkEngine e = new TestBenchmarkEngine(cfg);
+        String raw = "not-json-at-all";
+        e.publicWriteFirstQueryDump("raw", raw);
+        assertEquals(raw, Files.readString(dumpRoot.resolve("raw-first-query.json"), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void testWriteFirstQueryDump_swallowsIOExceptionWhenDumpPathIsFile(@TempDir Path dir) throws Exception {
+        Path blocker = dir.resolve("blocker");
+        Files.createFile(blocker);
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put(AbstractBenchmarkEngine.CONFIG_QUERY_DUMP_DIRECTORY, blocker.toAbsolutePath().toString());
+        TestBenchmarkEngine e = new TestBenchmarkEngine(cfg);
+        assertDoesNotThrow(() -> e.publicWriteFirstQueryDump("x", "{\"a\":1}"));
+    }
+
+    @Test
+    void testRenderTemplate_wrapsSerializationFailure() throws Exception {
+        String templateJson = "{\"template\": {\"field\": \"{{v}}\"}}";
+        JsonNode template = mapper.readTree(templateJson);
+        List<Object> cyclic = new ArrayList<>();
+        cyclic.add(cyclic);
+        Map<String, Object> params = Map.of("v", cyclic);
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> engine.publicRenderTemplate(template, params));
+        assertEquals("Failed to render query template", ex.getMessage());
+        assertNotNull(ex.getCause());
     }
 
     @Test

@@ -9,7 +9,11 @@ import org.apache.hc.core5.http.message.BasicClassicHttpResponse;
 import org.elasticsearch.jingra.model.Document;
 import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.opensearch.client.opensearch._types.mapping.Property;
+import org.opensearch.client.opensearch._types.mapping.TypeMapping;
+import org.opensearch.client.opensearch.indices.IndexState;
 import org.opensearch.client.Request;
 import org.opensearch.client.Response;
 import org.opensearch.client.RestClient;
@@ -31,9 +35,13 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.security.cert.X509Certificate;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Offline tests for {@link OpenSearchEngine} branches that are hard to hit only via Testcontainers.
@@ -43,6 +51,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class OpenSearchEngineBehaviorTest {
 
     private static final String BOGUS_URL_ENV = "__JINGRA_OS_OFFLINE_URL_ENV__";
+
+    @AfterEach
+    void clearInsecureTlsProperty() {
+        System.clearProperty("jingra.insecure.tls");
+    }
 
     /** Pretends a connected engine so API methods run without a real {@code OpenSearchClient}. */
     abstract static class ConnectedHarness extends OpenSearchEngine {
@@ -450,6 +463,40 @@ class OpenSearchEngineBehaviorTest {
     }
 
     @Test
+    void ingestSkipsDocumentIdWhenIdFieldNotPresentOnDocument() throws Exception {
+        BulkResponse ok = BulkResponse.of(b -> b.errors(false).took(1).items(List.of()));
+        AtomicReference<BulkRequest> captured = new AtomicReference<>();
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                captured.set(request);
+                return ok;
+            }
+        };
+        assertEquals(1, e.ingest(List.of(new Document(Map.of("f", "v"))), "idx", "missing_field"));
+        assertNotNull(captured.get());
+        assertEquals(1, captured.get().operations().size());
+    }
+
+    @Test
+    void ingestCountsOnlyItemsWithErrorsWhenBulkResponseHasMixedItems() throws Exception {
+        BulkResponseItem successItem = BulkResponseItem.of(b -> b.operationType(OperationType.Index).index("idx").status(201));
+        BulkResponseItem failItem = BulkResponseItem.of(b -> b.operationType(OperationType.Index).index("idx").error(
+                ErrorCause.of(e -> e.type("mapper_parsing_exception").reason("bad"))).status(400));
+        BulkResponse br = BulkResponse.of(b -> b.errors(true).took(1).items(List.of(successItem, failItem)));
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("ingest_fail_on_partial_errors", false);
+        ConnectedHarness e = new ConnectedHarness(cfg) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                return br;
+            }
+        };
+        List<Document> docs = List.of(new Document(Map.of("a", 1)), new Document(Map.of("b", 2)));
+        assertEquals(1, e.ingest(docs, "idx", null));
+    }
+
+    @Test
     void ingestLogsAtMostFivePerItemErrorsWhenManyDocumentsFail() throws Exception {
         List<BulkResponseItem> items = new ArrayList<>();
         for (int i = 0; i < 6; i++) {
@@ -507,6 +554,172 @@ class OpenSearchEngineBehaviorTest {
             }
         };
         assertEquals("3.9.9", e.getVersion());
+    }
+
+    @Test
+    void openSearchInsecureTrustStrategyAcceptsChains() throws Exception {
+        assertTrue(OpenSearchEngine.openSearchInsecureTrustStrategy()
+                .isTrusted(new X509Certificate[0], "RSA"));
+    }
+
+    @Test
+    void connectUrlWithoutSchemeDefaultsToHttps() {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("url", "//127.0.0.1:1");
+        assertFalse(new OpenSearchEngine(cfg).connect());
+    }
+
+    @Test
+    void connectHttpUrlWithoutPortUsesDefault9200() {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("url", "http://127.0.0.1");
+        assertFalse(new OpenSearchEngine(cfg).connect());
+    }
+
+    @Test
+    void connectHttpsUrlWithoutPortUsesDefault443() {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("url", "https://127.0.0.1");
+        assertFalse(new OpenSearchEngine(cfg).connect());
+    }
+
+    @Test
+    void connectHttpsWithInsecureTlsConfiguresTrustAll() {
+        System.setProperty("jingra.insecure.tls", "true");
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("url", "https://127.0.0.1:1");
+        assertFalse(new OpenSearchEngine(cfg).connect());
+    }
+
+    @Test
+    void connectReadsUrlFromEnvWhenMissingFromConfig() {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("url_env", "TC_JINGRA_OS_URL_INT");
+        OpenSearchEngine e = new OpenSearchEngine(cfg) {
+            @Override
+            protected String getEnv(String name, String fallback) {
+                if ("TC_JINGRA_OS_URL_INT".equals(name)) {
+                    return "http://127.0.0.1:1";
+                }
+                return super.getEnv(name, fallback);
+            }
+        };
+        assertFalse(e.connect());
+    }
+
+    @Test
+    void connectSkipsBasicAuthWhenOnlyPasswordConfigured() {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("url", "http://127.0.0.1:1");
+        cfg.put("password", "secret-only");
+        assertFalse(new OpenSearchEngine(cfg).connect());
+    }
+
+    @Test
+    void firstOpenSearchVectorType_nullMapping() {
+        assertNull(OpenSearchEngine.firstOpenSearchVectorType(null));
+    }
+
+    @Test
+    void firstOpenSearchVectorType_nullProperties() {
+        TypeMapping tm = mock(TypeMapping.class);
+        when(tm.properties()).thenReturn(null);
+        assertNull(OpenSearchEngine.firstOpenSearchVectorType(tm));
+    }
+
+    @Test
+    void firstOpenSearchVectorType_keywordOnly() {
+        TypeMapping tm = TypeMapping.of(m -> m.properties("id", Property.of(p -> p.keyword(k -> k))));
+        assertNull(OpenSearchEngine.firstOpenSearchVectorType(tm));
+    }
+
+    @Test
+    void firstOpenSearchVectorType_knnVectorField() {
+        TypeMapping tm = TypeMapping.of(m -> m.properties("vec", Property.of(p -> p.knnVector(k -> k.dimension(4)))));
+        assertEquals("knn_vector", OpenSearchEngine.firstOpenSearchVectorType(tm));
+    }
+
+    @Test
+    void firstOpenSearchVectorType_prefersFirstKnnAmongProperties() {
+        TypeMapping tm = TypeMapping.of(m -> m
+                .properties("id", Property.of(p -> p.keyword(k -> k)))
+                .properties("vec", Property.of(p -> p.knnVector(k -> k.dimension(2)))));
+        assertEquals("knn_vector", OpenSearchEngine.firstOpenSearchVectorType(tm));
+    }
+
+    @Test
+    void getIndexMetadataWhenIndexKeyMissing() {
+        TypeMapping tm = TypeMapping.of(m -> m.properties("e", Property.of(p -> p.knnVector(k -> k.dimension(2)))));
+        GetIndexResponse resp = GetIndexResponse.of(r -> r.putResult("other-idx", IndexState.of(is -> is.mappings(tm))));
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected GetIndexResponse getIndexResponseOperation(String indexName) {
+                return resp;
+            }
+        };
+        assertTrue(e.getIndexMetadata("wanted-idx").isEmpty());
+    }
+
+    @Test
+    void getIndexMetadataWhenMappingsAbsent() {
+        GetIndexResponse resp = GetIndexResponse.of(r -> r.putResult("x", IndexState.of(is -> is.aliases(Map.of()))));
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected GetIndexResponse getIndexResponseOperation(String indexName) {
+                return resp;
+            }
+        };
+        assertTrue(e.getIndexMetadata("x").isEmpty());
+    }
+
+    @Test
+    void getIndexMetadataReturnsKnnVectorFromMappings() {
+        TypeMapping tm = TypeMapping.of(m -> m.properties("vec", Property.of(p -> p.knnVector(k -> k.dimension(8)))));
+        GetIndexResponse resp = GetIndexResponse.of(r -> r.putResult("knn-idx", IndexState.of(is -> is.mappings(tm))));
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected GetIndexResponse getIndexResponseOperation(String indexName) {
+                return resp;
+            }
+        };
+        assertEquals("knn_vector", e.getIndexMetadata("knn-idx").get("vector_type"));
+    }
+
+    @Test
+    void getIndexMetadataKeywordOnlyLeavesVectorTypeAbsent() {
+        TypeMapping tm = TypeMapping.of(m -> m.properties("t", Property.of(p -> p.text(t -> t))));
+        GetIndexResponse resp = GetIndexResponse.of(r -> r.putResult("plain", IndexState.of(is -> is.mappings(tm))));
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected GetIndexResponse getIndexResponseOperation(String indexName) {
+                return resp;
+            }
+        };
+        assertTrue(e.getIndexMetadata("plain").isEmpty());
+    }
+
+    @Test
+    void querySkipsDocumentIdsWhenInnerHitsNotArray() throws Exception {
+        Path dir = Path.of("jingra-config/queries/opensearch");
+        Files.createDirectories(dir);
+        Path f = dir.resolve("behavior-os-query-hits-not-array.json");
+        Files.writeString(f, """
+                {"template": {"query": {"match_all": {}}, "size": 1}}
+                """);
+        try {
+            ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+                @Override
+                protected Response performRestRequest(Request request) throws IOException {
+                    return jsonResponse("{\"hits\":{\"hits\":{}},\"took\":1}");
+                }
+            };
+            QueryResponse r = e.query("idx", "behavior-os-query-hits-not-array", new QueryParams());
+            assertTrue(r.getDocumentIds().isEmpty());
+            assertNotNull(r.getClientLatencyMs());
+            assertEquals(1L, r.getServerLatencyMs().longValue());
+        } finally {
+            Files.deleteIfExists(f);
+        }
     }
 
 }
