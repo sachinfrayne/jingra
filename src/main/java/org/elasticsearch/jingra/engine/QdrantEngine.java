@@ -36,6 +36,9 @@ import io.qdrant.client.grpc.Points.Vectors;
 import io.qdrant.client.grpc.Points.WithPayloadSelector;
 import io.qdrant.client.grpc.Points.WriteOrderingType;
 
+import com.google.protobuf.InvalidProtocolBufferException;
+import com.google.protobuf.util.JsonFormat;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -555,6 +558,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
                         if (oversampling != null) {
                             paramsBuilder.setQuantization(
                                     QuantizationSearchParams.newBuilder()
+                                            .setRescore(true)
                                             .setOversampling(oversampling)
                                             .build()
                             );
@@ -579,8 +583,14 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
             }
 
             searchBuilder.setWithPayload(WithPayloadSelector.newBuilder().setEnable(false).build());
+            searchBuilder.setWithVectors(io.qdrant.client.grpc.Points.WithVectorsSelector.newBuilder().setEnable(false).build());
 
             SearchPoints searchRequest = searchBuilder.build();
+            try {
+                writeFirstQueryDumpIfConfigured(getShortName(), JsonFormat.printer().print(searchRequest));
+            } catch (InvalidProtocolBufferException e) {
+                logger.warn("Could not serialize SearchPoints for query dump", e);
+            }
 
             // Execute search using raw gRPC client to get full SearchResponse with timing
             long startTime = System.nanoTime();

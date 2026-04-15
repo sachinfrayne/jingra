@@ -8,7 +8,13 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Abstract base class for benchmark engines providing common functionality.
@@ -22,14 +28,69 @@ public abstract class AbstractBenchmarkEngine implements BenchmarkEngine {
     protected static final Logger logger = LoggerFactory.getLogger(AbstractBenchmarkEngine.class);
     protected static final ObjectMapper objectMapper = new ObjectMapper();
 
+    /**
+     * When set under the active engine block (e.g. {@code opensearch}, {@code qdrant}), the first
+     * materialized search request body is written as pretty-printed JSON to
+     * {@code <query_dump_directory>/<shortName>-first-query.json}. Empty or unset disables dumps.
+     */
+    public static final String CONFIG_QUERY_DUMP_DIRECTORY = "query_dump_directory";
+
     protected final Map<String, Object> config;
     protected final String schemasPath;
     protected final String queriesPath;
+
+    private final Path queryDumpDirectory;
+    private final AtomicBoolean firstQueryDumpWritten = new AtomicBoolean(false);
 
     protected AbstractBenchmarkEngine(Map<String, Object> config) {
         this.config = config;
         this.schemasPath = "schemas/" + getEngineName();
         this.queriesPath = "queries/" + getEngineName();
+        String dumpDir = getConfigString(CONFIG_QUERY_DUMP_DIRECTORY, null);
+        if (dumpDir != null && !dumpDir.isBlank()) {
+            this.queryDumpDirectory = Paths.get(dumpDir).toAbsolutePath().normalize();
+        } else {
+            this.queryDumpDirectory = null;
+        }
+    }
+
+    /**
+     * Writes {@code requestJson} to the configured dump directory once per engine instance, using
+     * filename {@code <engineShortName>-first-query.json}. Intended for the exact payload sent to
+     * the engine (OpenSearch/Elasticsearch: search DSL JSON; Qdrant: {@link com.google.protobuf.util.JsonFormat}
+     * view of the gRPC {@code SearchPoints} message).
+     */
+    protected void writeFirstQueryDumpIfConfigured(String engineShortName, String requestJson) {
+        if (queryDumpDirectory == null) {
+            return;
+        }
+        if (!firstQueryDumpWritten.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            Files.createDirectories(queryDumpDirectory);
+            Path path = queryDumpDirectory.resolve(engineShortName + "-first-query.json");
+            String pretty = prettifyJsonForDump(requestJson);
+            Files.writeString(
+                    path,
+                    pretty,
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            logger.info("Wrote first query payload to {}", path.toAbsolutePath());
+        } catch (IOException e) {
+            logger.warn("Failed to write query dump under {}: {}", queryDumpDirectory, e.toString());
+        }
+    }
+
+    private static String prettifyJsonForDump(String json) {
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(node);
+        } catch (Exception e) {
+            return json;
+        }
     }
 
     /**

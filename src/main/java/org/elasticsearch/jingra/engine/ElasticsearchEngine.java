@@ -324,6 +324,7 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
             }
 
             String queryJson = renderTemplate(template, params.getAll());
+            writeFirstQueryDumpIfConfigured(getShortName(), queryJson);
 
             long startTime = System.nanoTime();
             SearchResponse<Map> response = searchOperation(indexName, queryJson);

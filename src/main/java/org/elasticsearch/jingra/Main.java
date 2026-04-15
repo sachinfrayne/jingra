@@ -1,6 +1,7 @@
 package org.elasticsearch.jingra;
 
 import org.elasticsearch.jingra.bootstrap.JvmShutdown;
+import org.elasticsearch.jingra.cli.AnalyzeCommand;
 import org.elasticsearch.jingra.cli.EvalCommand;
 import org.elasticsearch.jingra.cli.LoadCommand;
 import org.elasticsearch.jingra.config.ConfigLoader;
@@ -62,18 +63,19 @@ public class Main {
      */
     static CommandHandler defaultLoadHandler = LoadCommand::run;
     static CommandHandler defaultEvalHandler = EvalCommand::run;
+    static CommandHandler defaultAnalyzeHandler = AnalyzeCommand::run;
 
     /**
      * @return 0 on success, 1 on usage or runtime error
      */
     static int runMain(String[] args) {
-        return runMain(args, defaultLoadHandler, defaultEvalHandler);
+        return runMain(args, defaultLoadHandler, defaultEvalHandler, defaultAnalyzeHandler);
     }
 
     /**
      * Same as {@link #runMain(String[])} but allows tests to inject no-op handlers.
      */
-    static int runMain(String[] args, CommandHandler loadHandler, CommandHandler evalHandler) {
+    static int runMain(String[] args, CommandHandler loadHandler, CommandHandler evalHandler, CommandHandler analyzeHandler) {
         logHeader();
 
         if (args.length < 2) {
@@ -93,6 +95,7 @@ public class Main {
             switch (command) {
                 case "load" -> loadHandler.run(config);
                 case "eval" -> evalHandler.run(config);
+                case "analyze" -> analyzeHandler.run(config);
                 default -> {
                     logger.error("Unknown command: {}", command);
                     printUsage();
@@ -110,11 +113,13 @@ public class Main {
         System.out.println("Usage: java -jar jingra.jar <command> <config-file>");
         System.out.println();
         System.out.println("Commands:");
-        System.out.println("  load <config>    Load data into the search engine");
-        System.out.println("  eval <config>    Run benchmark evaluation");
+        System.out.println("  load <config>      Load data into the search engine");
+        System.out.println("  eval <config>      Run benchmark evaluation");
+        System.out.println("  analyze <config>   Generate analysis reports and comparison CSVs from benchmark results");
         System.out.println();
         System.out.println("Example:");
         System.out.println("  java -jar jingra.jar load config.yaml");
         System.out.println("  java -jar jingra.jar eval config.yaml");
+        System.out.println("  java -jar jingra.jar analyze config.yaml");
     }
 }

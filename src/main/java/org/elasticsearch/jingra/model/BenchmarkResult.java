@@ -3,6 +3,7 @@ package org.elasticsearch.jingra.model;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Generic benchmark result containing metrics.
@@ -122,5 +123,52 @@ public class BenchmarkResult {
         }
 
         return map;
+    }
+
+    /**
+     * Create a BenchmarkResult from a map (typically from Elasticsearch query results).
+     * Note: The reconstructed BenchmarkResult will have a new timestamp (current time) rather than
+     * preserving the original @timestamp from the map.
+     *
+     * @param map source map containing benchmark result data
+     * @return BenchmarkResult instance
+     */
+    @SuppressWarnings("unchecked")
+    public static BenchmarkResult fromMap(Map<String, Object> map) {
+        // Extract and validate required fields
+        String runId = (String) Objects.requireNonNull(map.get("run_id"), "run_id is required");
+        String engine = (String) Objects.requireNonNull(map.get("engine"), "engine is required");
+        String engineVersion = (String) Objects.requireNonNull(map.get("engine_version"), "engine_version is required");
+        String benchmarkType = (String) Objects.requireNonNull(map.get("benchmark_type"), "benchmark_type is required");
+        String dataset = (String) Objects.requireNonNull(map.get("dataset"), "dataset is required");
+        String paramKey = (String) Objects.requireNonNull(map.get("param_key"), "param_key is required");
+        Map<String, Object> params = (Map<String, Object>) map.getOrDefault("params", new HashMap<>());
+
+        // Create result (timestamp will be set to current time by constructor)
+        BenchmarkResult result = new BenchmarkResult(runId, engine, engineVersion, benchmarkType, dataset, paramKey, params);
+
+        // Extract metadata if present
+        Object metadataObj = map.get("metadata");
+        if (metadataObj instanceof Map) {
+            Map<String, String> metadataMap = (Map<String, String>) metadataObj;
+            for (Map.Entry<String, String> entry : metadataMap.entrySet()) {
+                result.addMetadata(entry.getKey(), entry.getValue());
+            }
+        }
+
+        // All other fields are metrics (flattened at top level)
+        // Standard fields to skip when extracting metrics
+        java.util.Set<String> standardFields = java.util.Set.of(
+                "@timestamp", "run_id", "engine", "engine_version", "benchmark_type",
+                "dataset", "param_key", "params", "metadata"
+        );
+
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            if (!standardFields.contains(entry.getKey())) {
+                result.addMetric(entry.getKey(), entry.getValue());
+            }
+        }
+
+        return result;
     }
 }

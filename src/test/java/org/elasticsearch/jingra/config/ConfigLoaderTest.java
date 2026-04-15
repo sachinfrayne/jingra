@@ -7,6 +7,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -151,6 +153,33 @@ class ConfigLoaderTest {
         IllegalStateException ex = assertThrows(IllegalStateException.class, () -> ConfigLoader.loadFromFile(f.toString()));
         assertEquals("Engine configuration not found for: unknown_engine", ex.getMessage());
         assertEquals("Unknown engine: unknown_engine", ex.getCause().getMessage());
+    }
+
+    @Test
+    void validateForAnalysis_nullConfig() {
+        assertThrows(NullPointerException.class, () -> ConfigLoader.validateForAnalysis(null));
+    }
+
+    @Test
+    void validateForAnalysis_ok() {
+        ConfigLoader.validateForAnalysis(analysisCompleteConfigForAnalyze());
+    }
+
+    /**
+     * Same shape as {@link ConfigValidatorTest} analysis fixture — exercises {@link ConfigLoader#validateForAnalysis}.
+     */
+    private static JingraConfig analysisCompleteConfigForAnalyze() {
+        JingraConfig config = new JingraConfig();
+        config.setEngine("elasticsearch");
+        config.setDataset("test-dataset");
+        config.setElasticsearch(Map.of("url_env", "ES_URL"));
+        config.setDatasets(Map.of("test-dataset", new DatasetConfig()));
+        AnalysisConfig ac = new AnalysisConfig();
+        ac.setRunId("test-run-123");
+        ac.setEngines(List.of("elasticsearch", "qdrant"));
+        ac.setResultsCluster(Map.of("url", "http://localhost:9200"));
+        config.setAnalysis(ac);
+        return config;
     }
 
     @Test

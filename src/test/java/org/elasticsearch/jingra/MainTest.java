@@ -1,5 +1,6 @@
 package org.elasticsearch.jingra;
 
+import org.elasticsearch.jingra.cli.AnalyzeCommand;
 import org.elasticsearch.jingra.cli.EvalCommand;
 import org.elasticsearch.jingra.cli.LoadCommand;
 import org.junit.jupiter.api.AfterEach;
@@ -34,6 +35,7 @@ class MainTest {
     void restoreDefaultHandlers() {
         Main.defaultLoadHandler = LoadCommand::run;
         Main.defaultEvalHandler = EvalCommand::run;
+        Main.defaultAnalyzeHandler = AnalyzeCommand::run;
         Main.nonZeroExitAction = MAIN_DEFAULT_NON_ZERO_EXIT;
     }
 
@@ -75,8 +77,10 @@ class MainTest {
     void runMain_insufficientArgs() {
         assertEquals(1, Main.runMain(new String[] {}, (c) -> {
         }, (c) -> {
+        }, (c) -> {
         }));
         assertEquals(1, Main.runMain(new String[] { "load" }, (c) -> {
+        }, (c) -> {
         }, (c) -> {
         }));
     }
@@ -87,12 +91,14 @@ class MainTest {
         Files.writeString(configFile, minimalValidYaml());
         assertEquals(1, Main.runMain(new String[] { "nope", configFile.toString() }, (c) -> {
         }, (c) -> {
+        }, (c) -> {
         }));
     }
 
     @Test
     void runMain_configMissing() {
         assertEquals(1, Main.runMain(new String[] { "load", "/nonexistent/jingra.yaml" }, (c) -> {
+        }, (c) -> {
         }, (c) -> {
         }));
     }
@@ -103,6 +109,7 @@ class MainTest {
         Files.writeString(configFile, minimalValidYaml());
         assertEquals(0, Main.runMain(new String[] { "load", configFile.toString() }, c -> {
         }, c -> {
+        }, c -> {
         }));
     }
 
@@ -111,6 +118,17 @@ class MainTest {
         Path configFile = tempDir.resolve("config.yaml");
         Files.writeString(configFile, minimalValidYaml());
         assertEquals(0, Main.runMain(new String[] { "eval", configFile.toString() }, c -> {
+        }, c -> {
+        }, c -> {
+        }));
+    }
+
+    @Test
+    void runMain_analyzeSuccessWithNoOpHandlers(@TempDir Path tempDir) throws Exception {
+        Path configFile = tempDir.resolve("config.yaml");
+        Files.writeString(configFile, minimalValidYaml());
+        assertEquals(0, Main.runMain(new String[] { "analyze", configFile.toString() }, c -> {
+        }, c -> {
         }, c -> {
         }));
     }
@@ -129,6 +147,8 @@ class MainTest {
         Main.defaultLoadHandler = c -> {
         };
         Main.defaultEvalHandler = c -> {
+        };
+        Main.defaultAnalyzeHandler = c -> {
         };
         assertEquals(0, Main.runMain(new String[] { "load", configFile.toString() }));
     }
@@ -158,6 +178,8 @@ class MainTest {
         Main.defaultLoadHandler = c -> {
         };
         Main.defaultEvalHandler = c -> {
+        };
+        Main.defaultAnalyzeHandler = c -> {
         };
         int[] lastNonZero = { -1 };
         Main.nonZeroExitAction = c -> lastNonZero[0] = c;
