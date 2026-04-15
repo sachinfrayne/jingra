@@ -141,6 +141,12 @@ class JingraConfigTest {
         logging.setLevel("WARN");
         logging.setLoggers(Map.of("org.example", "DEBUG"));
 
+        AnalysisConfig analysis = new AnalysisConfig();
+        analysis.setRunId("test-run-123");
+        analysis.setEngines(List.of("elasticsearch", "qdrant"));
+        analysis.setResultsCluster(Map.of("url", "http://localhost:9200"));
+        analysis.setOutputDirectory("./test-output");
+
         JingraConfig c = new JingraConfig();
         c.setEngine("elasticsearch");
         c.setDataset("d1");
@@ -152,6 +158,7 @@ class JingraConfigTest {
         c.setOutput(output);
         c.setLoad(load);
         c.setLogging(logging);
+        c.setAnalysis(analysis);
 
         assertEquals("elasticsearch", c.getEngine());
         assertEquals("d1", c.getDataset());
@@ -163,6 +170,7 @@ class JingraConfigTest {
         assertSame(output, c.getOutput());
         assertSame(load, c.getLoad());
         assertSame(logging, c.getLogging());
+        assertSame(analysis, c.getAnalysis());
 
         assertEquals(1, c.getEvaluation().getWarmupWorkers());
         assertEquals(2, c.getEvaluation().getMeasurementWorkers());
@@ -172,6 +180,8 @@ class JingraConfigTest {
         assertEquals(5000, c.getLoad().getBatchSize());
         assertEquals("WARN", c.getLogging().getLevel());
         assertEquals("DEBUG", c.getLogging().getLoggers().get("org.example"));
+        assertEquals("test-run-123", c.getAnalysis().getRunId());
+        assertEquals("./test-output", c.getAnalysis().getOutputDirectory());
     }
 
     @Test
@@ -208,6 +218,14 @@ class JingraConfigTest {
                   level: DEBUG
                   loggers:
                     org.foo: TRACE
+                analysis:
+                  run_id: "test-yaml-run"
+                  engines:
+                    - elasticsearch
+                    - qdrant
+                  results_cluster:
+                    url: "http://results:9200"
+                  output_directory: "./yaml-output"
                 """;
 
         JingraConfig c = YAML_MAPPER.readValue(yaml, JingraConfig.class);
@@ -237,5 +255,11 @@ class JingraConfigTest {
 
         assertEquals("DEBUG", c.getLogging().getLevel());
         assertEquals("TRACE", c.getLogging().getLoggers().get("org.foo"));
+
+        assertNotNull(c.getAnalysis());
+        assertEquals("test-yaml-run", c.getAnalysis().getRunId());
+        assertEquals(List.of("elasticsearch", "qdrant"), c.getAnalysis().getEngines());
+        assertEquals("http://results:9200", c.getAnalysis().getResultsCluster().get("url"));
+        assertEquals("./yaml-output", c.getAnalysis().getOutputDirectory());
     }
 }

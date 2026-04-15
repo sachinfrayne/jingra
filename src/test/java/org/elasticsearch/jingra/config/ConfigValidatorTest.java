@@ -18,6 +18,21 @@ class ConfigValidatorTest {
     }
 
     @Test
+    void validateBase_skipsDatasetValidationWhenAnalysisSectionPresent() {
+        JingraConfig c = new JingraConfig();
+        c.setEngine("elasticsearch");
+        c.setElasticsearch(Map.of("url_env", "ES_URL"));
+        c.setDataset(null);
+        c.setDatasets(null);
+        AnalysisConfig ac = new AnalysisConfig();
+        ac.setRunId("run-1");
+        ac.setEngines(List.of("elasticsearch", "qdrant"));
+        ac.setResultsCluster(Map.of("url", "http://localhost:9200"));
+        c.setAnalysis(ac);
+        ConfigValidator.validateBase(c);
+    }
+
+    @Test
     void validateBase_missingEngine() {
         JingraConfig c = validBaseConfig();
         c.setEngine(null);
@@ -374,6 +389,103 @@ class ConfigValidatorTest {
         dm.setIdField("id");
         ds.setDataMapping(dm);
         config.setDatasets(Map.of("test-dataset", ds));
+        return config;
+    }
+
+    @Test
+    void validateForAnalysis_nullConfig() {
+        assertThrows(NullPointerException.class, () -> ConfigValidator.validateForAnalysis(null));
+    }
+
+    @Test
+    void validateForAnalysis_ok() {
+        ConfigValidator.validateForAnalysis(analysisCompleteConfig());
+    }
+
+    @Test
+    void validateForAnalysis_missingAnalysisBlock() {
+        JingraConfig c = analysisCompleteConfig();
+        c.setAnalysis(null);
+        IllegalStateException ex =
+                assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
+        assertEquals("analysis section is required in jingra.yaml for 'analyze' command", ex.getMessage());
+    }
+
+    @Test
+    void validateForAnalysis_missingRunId() {
+        JingraConfig c = analysisCompleteConfig();
+        c.getAnalysis().setRunId(null);
+        IllegalStateException ex =
+                assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
+        assertEquals("analysis.run_id is required", ex.getMessage());
+    }
+
+    @Test
+    void validateForAnalysis_emptyRunId() {
+        JingraConfig c = analysisCompleteConfig();
+        c.getAnalysis().setRunId("  ");
+        IllegalStateException ex =
+                assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
+        assertEquals("analysis.run_id is required", ex.getMessage());
+    }
+
+    @Test
+    void validateForAnalysis_missingEngines() {
+        JingraConfig c = analysisCompleteConfig();
+        c.getAnalysis().setEngines(null);
+        IllegalStateException ex =
+                assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
+        assertEquals("analysis.engines must have at least 2 engines to compare", ex.getMessage());
+    }
+
+    @Test
+    void validateForAnalysis_enginesTooFewZero() {
+        JingraConfig c = analysisCompleteConfig();
+        c.getAnalysis().setEngines(List.of());
+        IllegalStateException ex =
+                assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
+        assertEquals("analysis.engines must have at least 2 engines to compare", ex.getMessage());
+    }
+
+    @Test
+    void validateForAnalysis_enginesTooFewOne() {
+        JingraConfig c = analysisCompleteConfig();
+        c.getAnalysis().setEngines(List.of("elasticsearch"));
+        IllegalStateException ex =
+                assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
+        assertEquals("analysis.engines must have at least 2 engines to compare", ex.getMessage());
+    }
+
+    @Test
+    void validateForAnalysis_missingResultsCluster() {
+        JingraConfig c = analysisCompleteConfig();
+        c.getAnalysis().setResultsCluster(null);
+        IllegalStateException ex =
+                assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
+        assertEquals("analysis.results_cluster configuration is required", ex.getMessage());
+    }
+
+    @Test
+    void validateForAnalysis_resultsClusterEmpty() {
+        JingraConfig c = analysisCompleteConfig();
+        c.getAnalysis().setResultsCluster(Map.of());
+        IllegalStateException ex =
+                assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
+        assertEquals("analysis.results_cluster configuration is required", ex.getMessage());
+    }
+
+    /** Passes {@link ConfigValidator#validateForAnalysis}. */
+    private static JingraConfig analysisCompleteConfig() {
+        JingraConfig config = new JingraConfig();
+        config.setEngine("elasticsearch");
+        config.setDataset("test-dataset");
+        config.setElasticsearch(Map.of("url_env", "ES_URL"));
+        config.setDatasets(Map.of("test-dataset", new DatasetConfig()));
+        AnalysisConfig ac = new AnalysisConfig();
+        ac.setRunId("test-run-123");
+        ac.setEngines(List.of("elasticsearch", "qdrant"));
+        ac.setResultsCluster(Map.of("url", "http://localhost:9200"));
+        config.setAnalysis(ac);
         return config;
     }
 }

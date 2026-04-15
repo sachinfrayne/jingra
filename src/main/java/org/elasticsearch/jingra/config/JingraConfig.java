@@ -42,6 +42,12 @@ public class JingraConfig {
     @JsonProperty("logging")
     private LoggingConfig logging;
 
+    /**
+     * Optional analysis configuration for the analyze command.
+     */
+    @JsonProperty("analysis")
+    private AnalysisConfig analysis;
+
     // Getters and setters
     public String getEngine() {
         return engine;
@@ -121,6 +127,14 @@ public class JingraConfig {
 
     public void setLogging(LoggingConfig logging) {
         this.logging = logging;
+    }
+
+    public AnalysisConfig getAnalysis() {
+        return analysis;
+    }
+
+    public void setAnalysis(AnalysisConfig analysis) {
+        this.analysis = analysis;
     }
 
     /**

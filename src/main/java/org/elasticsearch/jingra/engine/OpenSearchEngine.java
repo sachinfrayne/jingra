@@ -343,6 +343,7 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
             }
 
             String queryJson = renderTemplate(template, params.getAll());
+            writeFirstQueryDumpIfConfigured(getShortName(), queryJson);
 
             long startTime = System.nanoTime();
             Request request = new Request("POST", "/" + indexName + "/_search");

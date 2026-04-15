@@ -82,4 +82,11 @@ public final class ConfigLoader {
     public static void validateForLoad(JingraConfig config) {
         ConfigValidator.validateForLoad(config);
     }
+
+    /**
+     * Validates fields required for {@code analyze} (benchmark result analysis). Call from {@link org.elasticsearch.jingra.cli.AnalyzeCommand}.
+     */
+    public static void validateForAnalysis(JingraConfig config) {
+        ConfigValidator.validateForAnalysis(config);
+    }
 }

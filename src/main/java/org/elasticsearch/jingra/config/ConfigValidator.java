@@ -18,6 +18,7 @@ public final class ConfigValidator {
 
     /**
      * Base validation applied after loading YAML from a file or resource.
+     * For analyze command (when analysis section is present), datasets are optional.
      */
     public static void validateBase(JingraConfig config) {
         String engine = config.getEngine();
@@ -25,18 +26,23 @@ public final class ConfigValidator {
             throw new IllegalStateException("Engine not specified in configuration");
         }
 
-        String datasetKey = config.getDataset();
-        if (datasetKey == null || datasetKey.isEmpty()) {
-            throw new IllegalStateException("Dataset not specified in configuration");
-        }
+        // Skip dataset validation if this is an analysis-only config
+        boolean isAnalysisOnly = config.getAnalysis() != null;
 
-        Map<String, DatasetConfig> datasets = config.getDatasets();
-        if (datasets == null || datasets.isEmpty()) {
-            throw new IllegalStateException("No datasets configured");
-        }
+        if (!isAnalysisOnly) {
+            String datasetKey = config.getDataset();
+            if (datasetKey == null || datasetKey.isEmpty()) {
+                throw new IllegalStateException("Dataset not specified in configuration");
+            }
 
-        if (!datasets.containsKey(datasetKey)) {
-            throw new IllegalStateException("Dataset '" + datasetKey + "' not found in datasets configuration");
+            Map<String, DatasetConfig> datasets = config.getDatasets();
+            if (datasets == null || datasets.isEmpty()) {
+                throw new IllegalStateException("No datasets configured");
+            }
+
+            if (!datasets.containsKey(datasetKey)) {
+                throw new IllegalStateException("Dataset '" + datasetKey + "' not found in datasets configuration");
+            }
         }
 
         try {
@@ -47,7 +53,9 @@ public final class ConfigValidator {
 
         logger.info("Configuration validated successfully");
         logger.info("  Engine: {}", config.getEngine());
-        logger.info("  Dataset: {}", config.getDataset());
+        if (!isAnalysisOnly) {
+            logger.info("  Dataset: {}", config.getDataset());
+        }
     }
 
     /**
@@ -93,6 +101,25 @@ public final class ConfigValidator {
             throw new IllegalStateException("dataset.data_mapping.id_field is required for load");
         }
         requireNonBlank(dm.getIdField(), "dataset.data_mapping.id_field is required for load");
+    }
+
+    /**
+     * Validates fields required for {@code analyze} (benchmark result analysis).
+     */
+    public static void validateForAnalysis(JingraConfig config) {
+        Objects.requireNonNull(config, "config");
+        if (config.getAnalysis() == null) {
+            throw new IllegalStateException(
+                    "analysis section is required in jingra.yaml for 'analyze' command");
+        }
+        AnalysisConfig ac = config.getAnalysis();
+        requireNonBlank(ac.getRunId(), "analysis.run_id is required");
+        if (ac.getEngines() == null || ac.getEngines().size() < 2) {
+            throw new IllegalStateException("analysis.engines must have at least 2 engines to compare");
+        }
+        if (ac.getResultsCluster() == null || ac.getResultsCluster().isEmpty()) {
+            throw new IllegalStateException("analysis.results_cluster configuration is required");
+        }
     }
 
     private static <T> T requireNonNullState(T value, String message) {

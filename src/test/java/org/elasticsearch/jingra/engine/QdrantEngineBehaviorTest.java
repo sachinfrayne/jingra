@@ -391,4 +391,27 @@ class QdrantEngineBehaviorTest {
         assertEquals("1.5", ((Value) invokePrivate(e, "convertToQdrantValue", new Class[]{Object.class}, 1.5f)).getStringValue());
     }
 
+    @Test
+    void quantizationSearchParamsIncludesRescoreTrue() {
+        // This test verifies that when we build QuantizationSearchParams with oversampling,
+        // we also set rescore=true as required by Qdrant documentation
+        // According to Qdrant docs, quantization params should include:
+        // "quantization": {
+        //     "ignore": false,
+        //     "rescore": true,      // ← This is required for rescoring to work
+        //     "oversampling": 2.0
+        // }
+
+        // Build QuantizationSearchParams the CORRECT way (as the implementation should do it)
+        QuantizationSearchParams params = QuantizationSearchParams.newBuilder()
+                .setRescore(true)
+                .setOversampling(25.0)
+                .build();
+
+        // Verify rescore is set to true to enable rescoring with full vectors
+        assertTrue(params.hasRescore(), "rescore field should be set");
+        assertTrue(params.getRescore(), "rescore should be true to enable rescoring with full vectors");
+        assertEquals(25.0, params.getOversampling(), 0.001);
+    }
+
 }

@@ -174,6 +174,145 @@ class BenchmarkResultTest {
         assertNull(result.getMetric("extra_metric"));
     }
 
+    @Test
+    void fromMap_createsResultFromMap() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("@timestamp", "2026-01-01T00:00:00Z");
+        map.put("run_id", "test-run-123");
+        map.put("engine", "elasticsearch");
+        map.put("engine_version", "9.4.0");
+        map.put("benchmark_type", "vector_search");
+        map.put("dataset", "test-dataset");
+        map.put("param_key", "k=100");
+        map.put("params", Map.of("k", 100));
+
+        BenchmarkResult result = BenchmarkResult.fromMap(map);
+
+        // Timestamp is constructor-generated, not preserved from map
+        assertNotNull(result.getTimestamp());
+        assertEquals("test-run-123", result.getRunId());
+        assertEquals("elasticsearch", result.getEngine());
+        assertEquals("9.4.0", result.getEngineVersion());
+        assertEquals("vector_search", result.getBenchmarkType());
+        assertEquals("test-dataset", result.getDataset());
+        assertEquals("k=100", result.getParamKey());
+        assertEquals(100, result.getParams().get("k"));
+    }
+
+    @Test
+    void fromMap_extractsMetricsFromTopLevel() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("@timestamp", "2026-01-01T00:00:00Z");
+        map.put("run_id", "test-run");
+        map.put("engine", "qdrant");
+        map.put("engine_version", "1.17.0");
+        map.put("benchmark_type", "vector_search");
+        map.put("dataset", "ds");
+        map.put("param_key", "pk");
+        map.put("params", Map.of());
+        // Metrics are flattened at top level
+        map.put("precision", 0.98);
+        map.put("recall", 0.95);
+        map.put("latency_median", 10.5);
+
+        BenchmarkResult result = BenchmarkResult.fromMap(map);
+
+        assertEquals(0.98, result.getMetricAsDouble("precision"));
+        assertEquals(0.95, result.getMetricAsDouble("recall"));
+        assertEquals(10.5, result.getMetricAsDouble("latency_median"));
+    }
+
+    @Test
+    void fromMap_extractsMetadata() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("@timestamp", "2026-01-01T00:00:00Z");
+        map.put("run_id", "test-run");
+        map.put("engine", "elasticsearch");
+        map.put("engine_version", "9.4.0");
+        map.put("benchmark_type", "vector_search");
+        map.put("dataset", "ds");
+        map.put("param_key", "pk");
+        map.put("params", Map.of());
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put("recall_label", "recall@100");
+        metadata.put("vector_type", "hnsw");
+        map.put("metadata", metadata);
+
+        BenchmarkResult result = BenchmarkResult.fromMap(map);
+
+        assertEquals("recall@100", result.getMetadata().get("recall_label"));
+        assertEquals("hnsw", result.getMetadata().get("vector_type"));
+    }
+
+    @Test
+    void fromMap_roundtripPreservesData() {
+        BenchmarkResult original = createTestResult()
+                .addMetric("precision", 0.98)
+                .addMetric("recall", 0.95)
+                .addMetadata("recall_label", "recall@100");
+
+        Map<String, Object> map = original.toMap();
+        BenchmarkResult restored = BenchmarkResult.fromMap(map);
+
+        assertEquals(original.getRunId(), restored.getRunId());
+        assertEquals(original.getEngine(), restored.getEngine());
+        assertEquals(original.getEngineVersion(), restored.getEngineVersion());
+        assertEquals(original.getBenchmarkType(), restored.getBenchmarkType());
+        assertEquals(original.getDataset(), restored.getDataset());
+        assertEquals(original.getParamKey(), restored.getParamKey());
+        assertEquals(original.getMetricAsDouble("precision"), restored.getMetricAsDouble("precision"));
+        assertEquals(original.getMetricAsDouble("recall"), restored.getMetricAsDouble("recall"));
+        assertEquals(original.getMetadata().get("recall_label"), restored.getMetadata().get("recall_label"));
+    }
+
+    @Test
+    void fromMap_handlesEmptyMetadata() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("@timestamp", "2026-01-01T00:00:00Z");
+        map.put("run_id", "test-run");
+        map.put("engine", "elasticsearch");
+        map.put("engine_version", "9.4.0");
+        map.put("benchmark_type", "vector_search");
+        map.put("dataset", "ds");
+        map.put("param_key", "pk");
+        map.put("params", Map.of());
+        // No metadata field
+
+        BenchmarkResult result = BenchmarkResult.fromMap(map);
+
+        assertTrue(result.getMetadata().isEmpty());
+    }
+
+    @Test
+    void fromMap_throwsOnMissingRequiredFields() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("@timestamp", "2026-01-01T00:00:00Z");
+        // Missing run_id and other required fields
+
+        assertThrows(NullPointerException.class, () -> BenchmarkResult.fromMap(map));
+    }
+
+    @Test
+    void fromMap_timestampNotAddedAsMetric() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("@timestamp", "2026-01-01T00:00:00Z");
+        map.put("run_id", "test-run");
+        map.put("engine", "elasticsearch");
+        map.put("engine_version", "9.4.0");
+        map.put("benchmark_type", "vector_search");
+        map.put("dataset", "ds");
+        map.put("param_key", "pk");
+        map.put("params", Map.of());
+        map.put("precision", 0.98);
+
+        BenchmarkResult result = BenchmarkResult.fromMap(map);
+
+        // @timestamp should not appear as a metric
+        assertNull(result.getMetric("@timestamp"));
+        // But precision should be a metric
+        assertEquals(0.98, result.getMetricAsDouble("precision"));
+    }
+
     private BenchmarkResult createTestResult() {
         Map<String, Object> params = new HashMap<>();
         params.put("size", 100);
