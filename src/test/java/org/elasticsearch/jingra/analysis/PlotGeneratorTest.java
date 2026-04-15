@@ -11,8 +11,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.spy;
 
 class PlotGeneratorTest {
 
@@ -233,24 +237,27 @@ class PlotGeneratorTest {
     void generatesThroughputOverviewBarChart() throws IOException {
         PlotGenerator generator = new PlotGenerator(tempDir.toString());
 
-        // Create results with actual recall values
+        // Create results with actual recall values where BOTH engines have data at overlapping recalls in 0.7-0.9 range
         Map<String, List<BenchmarkResult>> resultsByRecallAt = new HashMap<>();
 
-        // recall@10 results with different recall values
-        List<BenchmarkResult> recall10Results = new ArrayList<>();
-        recall10Results.add(createResultWithThroughput("elasticsearch", 0.85, 50.0, 20.0));
-        recall10Results.add(createResultWithThroughput("elasticsearch", 0.82, 45.0, 22.0));
-        recall10Results.add(createResultWithThroughput("qdrant", 0.80, 40.0, 25.0));
-        recall10Results.add(createResultWithThroughput("qdrant", 0.83, 42.0, 24.0));
-        resultsByRecallAt.put("recall@10", recall10Results);
+        List<BenchmarkResult> results = new ArrayList<>();
+        // Both engines at recall ~0.75
+        results.add(createResultWithThroughput("elasticsearch", 0.751, 50.0, 20.0));
+        results.add(createResultWithThroughput("qdrant", 0.749, 40.0, 25.0));
 
-        // recall@100 results with different recall values
-        List<BenchmarkResult> recall100Results = new ArrayList<>();
-        recall100Results.add(createResultWithThroughput("elasticsearch", 0.93, 120.0, 8.3));
-        recall100Results.add(createResultWithThroughput("elasticsearch", 0.90, 100.0, 10.0));
-        recall100Results.add(createResultWithThroughput("qdrant", 0.88, 100.0, 10.0));
-        recall100Results.add(createResultWithThroughput("qdrant", 0.92, 110.0, 9.0));
-        resultsByRecallAt.put("recall@100", recall100Results);
+        // Both engines at recall ~0.80
+        results.add(createResultWithThroughput("elasticsearch", 0.801, 45.0, 22.0));
+        results.add(createResultWithThroughput("qdrant", 0.799, 42.0, 24.0));
+
+        // Both engines at recall ~0.85
+        results.add(createResultWithThroughput("elasticsearch", 0.851, 60.0, 18.0));
+        results.add(createResultWithThroughput("qdrant", 0.849, 55.0, 19.0));
+
+        // Both engines at recall ~0.88
+        results.add(createResultWithThroughput("elasticsearch", 0.881, 100.0, 10.0));
+        results.add(createResultWithThroughput("qdrant", 0.879, 100.0, 10.0));
+
+        resultsByRecallAt.put("recall@100", results);
 
         // Generate throughput overview
         generator.generateThroughputOverview(resultsByRecallAt);
@@ -278,8 +285,9 @@ class PlotGeneratorTest {
 
         Map<String, List<BenchmarkResult>> data = new HashMap<>();
         List<BenchmarkResult> recall100Results = new ArrayList<>();
-        recall100Results.add(createResultWithThroughput("elasticsearch", 0.93, 120.0, 8.3));
-        recall100Results.add(createResultWithThroughput("qdrant", 0.88, 100.0, 10.0));
+        // Both engines at same rounded recall in 0.7-0.9 range
+        recall100Results.add(createResultWithThroughput("elasticsearch", 0.881, 120.0, 8.3));
+        recall100Results.add(createResultWithThroughput("qdrant", 0.879, 100.0, 10.0));
         data.put("recall@100", recall100Results);
 
         generator.generateThroughputOverview(data);
@@ -387,9 +395,11 @@ class PlotGeneratorTest {
 
         Map<String, List<BenchmarkResult>> data = new HashMap<>();
         List<BenchmarkResult> list = new ArrayList<>();
-        list.add(createResultWithThroughput("elasticsearch", 0.931, 100.0, 10.0));
-        list.add(createResultWithThroughput("elasticsearch", 0.934, 100.0, 500.0));
-        list.add(createResultWithThroughput("qdrant", 0.88, 100.0, 8.0));
+        // Multiple ES results that round to 0.85 - should keep the one with higher throughput (500.0)
+        list.add(createResultWithThroughput("elasticsearch", 0.851, 100.0, 10.0));
+        list.add(createResultWithThroughput("elasticsearch", 0.849, 100.0, 500.0));
+        // Qdrant at same rounded recall
+        list.add(createResultWithThroughput("qdrant", 0.850, 100.0, 8.0));
         data.put("recall@100", list);
 
         generator.generateThroughputOverview(data);
@@ -403,9 +413,11 @@ class PlotGeneratorTest {
 
         Map<String, List<BenchmarkResult>> data = new HashMap<>();
         List<BenchmarkResult> list = new ArrayList<>();
-        list.add(createResultWithThroughput("elasticsearch", 0.931, 100.0, 500.0));
-        list.add(createResultWithThroughput("elasticsearch", 0.934, 100.0, 10.0));
-        list.add(createResultWithThroughput("qdrant", 0.88, 100.0, 8.0));
+        // Multiple ES results that round to 0.85 - should keep the one with higher throughput (500.0), not replace with lower (10.0)
+        list.add(createResultWithThroughput("elasticsearch", 0.851, 100.0, 500.0));
+        list.add(createResultWithThroughput("elasticsearch", 0.849, 100.0, 10.0));
+        // Qdrant at same rounded recall
+        list.add(createResultWithThroughput("qdrant", 0.850, 100.0, 8.0));
         data.put("recall@100", list);
 
         generator.generateThroughputOverview(data);
@@ -419,9 +431,11 @@ class PlotGeneratorTest {
 
         Map<String, List<BenchmarkResult>> data = new HashMap<>();
         List<BenchmarkResult> list = new ArrayList<>();
-        list.add(throughputSecondReadNull("elasticsearch", 0.931, 100.0, 40.0));
-        list.add(createResultWithThroughput("elasticsearch", 0.934, 100.0, 25.0));
-        list.add(createResultWithThroughput("qdrant", 0.88, 100.0, 8.0));
+        // First ES result returns null on second read - should be replaced by second ES result
+        list.add(throughputSecondReadNull("elasticsearch", 0.851, 100.0, 40.0));
+        list.add(createResultWithThroughput("elasticsearch", 0.849, 100.0, 25.0));
+        // Qdrant at same rounded recall
+        list.add(createResultWithThroughput("qdrant", 0.850, 100.0, 8.0));
         data.put("recall@100", list);
 
         generator.generateThroughputOverview(data);
@@ -435,14 +449,125 @@ class PlotGeneratorTest {
 
         Map<String, List<BenchmarkResult>> data = new HashMap<>();
         List<BenchmarkResult> list = new ArrayList<>();
-        list.add(createResultWithThroughput("elasticsearch", 0.931, 100.0, 99.0));
-        list.add(throughputSecondReadNull("elasticsearch", 0.934, 100.0, 50.0));
-        list.add(createResultWithThroughput("qdrant", 0.88, 100.0, 8.0));
+        // First ES result is valid, second returns null on re-read - should keep first
+        list.add(createResultWithThroughput("elasticsearch", 0.851, 100.0, 99.0));
+        list.add(throughputSecondReadNull("elasticsearch", 0.849, 100.0, 50.0));
+        // Qdrant at same rounded recall
+        list.add(createResultWithThroughput("qdrant", 0.850, 100.0, 8.0));
         data.put("recall@100", list);
 
         generator.generateThroughputOverview(data);
 
         assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().equals("throughput_overview.png")));
+    }
+
+    /**
+     * Covers both sides of {@code recall >= 0.70 && recall <= 0.90} (JaCoCo short-circuit branches).
+     */
+    @Test
+    void generateThroughputOverview_recallFilterCoversRangeBounds() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString());
+
+        Map<String, List<BenchmarkResult>> data = new HashMap<>();
+        List<BenchmarkResult> list = new ArrayList<>();
+        // Keys "0.69", "0.85", "0.91" after rounding — only 0.85 stays in candidate list
+        list.add(createResultWithThroughput("elasticsearch", 0.694, 50.0, 20.0));
+        list.add(createResultWithThroughput("qdrant", 0.694, 40.0, 25.0));
+        list.add(createResultWithThroughput("elasticsearch", 0.851, 50.0, 20.0));
+        list.add(createResultWithThroughput("qdrant", 0.849, 40.0, 25.0));
+        list.add(createResultWithThroughput("elasticsearch", 0.914, 50.0, 20.0));
+        list.add(createResultWithThroughput("qdrant", 0.912, 40.0, 25.0));
+        data.put("recall@100", list);
+
+        generator.generateThroughputOverview(data);
+
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().equals("throughput_overview.png")));
+    }
+
+    /**
+     * With more than six candidate recalls, the selection loop exits when {@code maxBars} is reached
+     * ({@code selectedRecalls.size() < maxBars} becomes false while {@code i < otherRecalls.size()}).
+     */
+    @Test
+    void generateThroughputOverview_stopsAddingRecallsWhenMaxBarsReached() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString());
+
+        Map<String, List<BenchmarkResult>> data = new HashMap<>();
+        List<BenchmarkResult> list = new ArrayList<>();
+        double[] recalls = {0.701, 0.712, 0.723, 0.734, 0.745, 0.756, 0.767};
+        for (double r : recalls) {
+            list.add(createResultWithThroughput("elasticsearch", r, 50.0, 20.0));
+            list.add(createResultWithThroughput("qdrant", r - 0.001, 40.0, 25.0));
+        }
+        data.put("recall@100", list);
+
+        generator.generateThroughputOverview(data);
+
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().equals("throughput_overview.png")));
+    }
+
+    /**
+     * With exactly six candidate recalls, {@code otherRecalls} has size five after removing {@code maxDiffRecall};
+     * the loop then exits because {@code i >= otherRecalls.size()} while still under {@code maxBars}.
+     */
+    @Test
+    void generateThroughputOverview_loopEndsWhenOtherRecallsExhausted() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString());
+
+        Map<String, List<BenchmarkResult>> data = new HashMap<>();
+        List<BenchmarkResult> list = new ArrayList<>();
+        double[] recalls = {0.701, 0.712, 0.723, 0.734, 0.745, 0.756};
+        for (double r : recalls) {
+            list.add(createResultWithThroughput("elasticsearch", r, 50.0, 20.0));
+            list.add(createResultWithThroughput("qdrant", r - 0.001, 40.0, 25.0));
+        }
+        data.put("recall@100", list);
+
+        generator.generateThroughputOverview(data);
+
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().equals("throughput_overview.png")));
+    }
+
+    /**
+     * After enough {@code getMetricAsDouble("throughput")} calls for merge/filter/max, later chart reads
+     * return null so the chart path adds 0.0 and may hit the secondary empty-data guard.
+     */
+    @Test
+    void generateThroughputOverview_chartUsesZeroThroughputWhenMetricExhausted() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString());
+
+        BenchmarkResult esBase = createResultWithThroughput("elasticsearch", 0.851, 50.0, 20.0);
+        BenchmarkResult qdBase = createResultWithThroughput("qdrant", 0.849, 40.0, 25.0);
+        BenchmarkResult es = spy(esBase);
+        BenchmarkResult qd = spy(qdBase);
+        AtomicInteger esReads = new AtomicInteger();
+        AtomicInteger qdReads = new AtomicInteger();
+
+        doAnswer(inv -> {
+            String name = inv.getArgument(0);
+            if (!"throughput".equals(name)) {
+                return inv.callRealMethod();
+            }
+            int n = esReads.incrementAndGet();
+            // Reads 1–2: ingest + candidate filter; 3+: chart (null → 0.0, then !hasData)
+            return n <= 2 ? 20.0 : null;
+        }).when(es).getMetricAsDouble(anyString());
+
+        doAnswer(inv -> {
+            String name = inv.getArgument(0);
+            if (!"throughput".equals(name)) {
+                return inv.callRealMethod();
+            }
+            int n = qdReads.incrementAndGet();
+            return n <= 2 ? 25.0 : null;
+        }).when(qd).getMetricAsDouble(anyString());
+
+        Map<String, List<BenchmarkResult>> data = new HashMap<>();
+        data.put("recall@100", new ArrayList<>(List.of(es, qd)));
+
+        generator.generateThroughputOverview(data);
+
+        assertFalse(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().equals("throughput_overview.png")));
     }
 
     private static BenchmarkResult throughputSecondReadNull(
@@ -487,5 +612,48 @@ class PlotGeneratorTest {
         result.addMetric("latency_avg", latency);
         result.addMetric("throughput", throughput);
         return result;
+    }
+
+    @Test
+    void throughputMetric_nullResult() {
+        assertNull(PlotGenerator.throughputMetric(null));
+    }
+
+    @Test
+    void throughputMetric_readsMetric() {
+        BenchmarkResult r = createResultWithThroughput("elasticsearch", 0.9, 50.0, 42.0);
+        assertEquals(42.0, PlotGenerator.throughputMetric(r));
+    }
+
+    @Test
+    void throughputMetric_missingMetric() {
+        BenchmarkResult r = new BenchmarkResult("run", "elasticsearch", "1.0", "vector_search", "ds", "k=1", Map.of());
+        assertNull(PlotGenerator.throughputMetric(r));
+    }
+
+    @Test
+    void isPositiveThroughput_coversNullZeroNegativeAndPositive() {
+        assertFalse(PlotGenerator.isPositiveThroughput(null));
+        assertFalse(PlotGenerator.isPositiveThroughput(0.0));
+        assertFalse(PlotGenerator.isPositiveThroughput(-1.0));
+        assertTrue(PlotGenerator.isPositiveThroughput(0.001));
+    }
+
+    @Test
+    void shouldContinueSelectingRecalls_coversLoopConditions() {
+        assertTrue(PlotGenerator.shouldContinueSelectingRecalls(0, 10, 1, 6));
+        assertFalse(PlotGenerator.shouldContinueSelectingRecalls(5, 5, 1, 6));
+        assertFalse(PlotGenerator.shouldContinueSelectingRecalls(0, 10, 6, 6));
+    }
+
+    @Test
+    void addThroughputIfPositive_onlyAddsWhenPositive() {
+        List<Double> list = new ArrayList<>();
+        PlotGenerator.addThroughputIfPositive(list, null);
+        PlotGenerator.addThroughputIfPositive(list, 0.0);
+        assertTrue(list.isEmpty());
+        PlotGenerator.addThroughputIfPositive(list, 7.5);
+        assertEquals(1, list.size());
+        assertEquals(7.5, list.get(0));
     }
 }

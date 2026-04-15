@@ -13,7 +13,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.awt.Color;
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,8 +39,7 @@ public class PlotGenerator {
 
     // Color palette (matching Python visualization)
     private static final Color ES_COLOR = new Color(244, 78, 152);  // #F04E98 Elastic pink
-    private static final Color QDRANT_COLOR = new Color(0, 94, 184);  // #005EB8 Blue
-    private static final Color MAX_LINE_COLOR = new Color(102, 187, 106);  // #66BB6A Green
+    private static final Color QDRANT_COLOR = new Color(56, 142, 60);  // #388E3C Material Green
 
     public PlotGenerator(String outputDirectory) {
         this.outputDirectory = outputDirectory;
@@ -89,7 +87,6 @@ public class PlotGenerator {
         // Customize styling
         customizeChart(chart, logScale);
 
-        double maxRecall = 0.0;
         boolean hasData = false;
 
         // Plot each engine's data
@@ -108,7 +105,6 @@ public class PlotGenerator {
                 if (latency != null && recall != null && latency > 0) {  // latency must be > 0 for log scale
                     latencies.add(latency);
                     recalls.add(recall);
-                    maxRecall = Math.max(maxRecall, recall);
                 }
             }
 
@@ -198,30 +194,77 @@ public class PlotGenerator {
             return;
         }
 
-        // Sort recall values numerically
-        List<String> sortedRecallValues = recallToEngineResults.keySet().stream()
-                .sorted((a, b) -> Double.compare(Double.parseDouble(a), Double.parseDouble(b)))
-                .collect(Collectors.toList());
-
         // Collect all unique engines across all recall levels
         Set<String> allEngines = recallToEngineResults.values().stream()
                 .flatMap(m -> m.keySet().stream())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
 
-        // Build throughput series - each engine must have a value for each recall level
+        // Filter to recall values between 0.7 and 0.9 where ALL engines have data
+        List<String> candidateRecalls = recallToEngineResults.entrySet().stream()
+                .filter(entry -> {
+                    double recall = Double.parseDouble(entry.getKey());
+                    return recall >= 0.70 && recall <= 0.90;
+                })
+                .filter(entry -> {
+                    // Only include if all engines have valid throughput data
+                    Map<String, BenchmarkResult> engineResults = entry.getValue();
+                    return allEngines.stream().allMatch(engine -> {
+                        BenchmarkResult result = engineResults.get(engine);
+                        Double throughput = result != null ? result.getMetricAsDouble("throughput") : null;
+                        return throughput != null && throughput > 0;
+                    });
+                })
+                .map(Map.Entry::getKey)
+                .sorted((a, b) -> Double.compare(Double.parseDouble(a), Double.parseDouble(b)))
+                .collect(Collectors.toList());
+
+        if (candidateRecalls.isEmpty()) {
+            logger.warn("No recall values between 0.7-0.9 with complete engine data");
+            return;
+        }
+
+        // Find recall with highest throughput difference between engines
+        String maxDiffRecall = candidateRecalls.stream()
+                .max((a, b) -> {
+                    double diffA = calculateThroughputDifference(recallToEngineResults.get(a), allEngines);
+                    double diffB = calculateThroughputDifference(recallToEngineResults.get(b), allEngines);
+                    return Double.compare(diffA, diffB);
+                })
+                .orElse(candidateRecalls.get(0));
+
+        // Randomly select up to 6 recall values, ensuring maxDiff is included
+        List<String> selectedRecalls = new ArrayList<>();
+        selectedRecalls.add(maxDiffRecall);
+
+        // Select additional random recalls
+        List<String> otherRecalls = new ArrayList<>(candidateRecalls);
+        otherRecalls.remove(maxDiffRecall);
+        Collections.shuffle(otherRecalls, new java.util.Random(42)); // Fixed seed for reproducibility
+
+        int maxBars = Math.min(6, candidateRecalls.size());
+        for (int i = 0;
+                shouldContinueSelectingRecalls(i, otherRecalls.size(), selectedRecalls.size(), maxBars);
+                i++) {
+            selectedRecalls.add(otherRecalls.get(i));
+        }
+
+        // Sort selected recalls for display
+        List<String> sortedRecallValues = selectedRecalls.stream()
+                .sorted((a, b) -> Double.compare(Double.parseDouble(a), Double.parseDouble(b)))
+                .collect(Collectors.toList());
+
+        // Build throughput series for selected recalls only
         Map<String, List<Double>> engineThroughputs = new LinkedHashMap<>();
 
         for (String recallValue : sortedRecallValues) {
             Map<String, BenchmarkResult> engineResults = recallToEngineResults.get(recallValue);
 
             for (String engine : allEngines) {
-                BenchmarkResult result = engineResults.get(engine);
-                Double throughput = result != null ? result.getMetricAsDouble("throughput") : null;
+                Double throughput = throughputMetric(engineResults.get(engine));
 
-                if (throughput != null && throughput > 0) {
+                if (isPositiveThroughput(throughput)) {
                     engineThroughputs.computeIfAbsent(engine, k -> new ArrayList<>()).add(throughput);
                 } else {
-                    // Add 0 for missing data to maintain alignment across all recall levels
                     engineThroughputs.computeIfAbsent(engine, k -> new ArrayList<>()).add(0.0);
                 }
             }
@@ -284,7 +327,7 @@ public class PlotGenerator {
      */
     private void customizeChart(XYChart chart, boolean logScale) {
         Styler styler = chart.getStyler();
-        styler.setLegendPosition(Styler.LegendPosition.InsideNE);
+        styler.setLegendPosition(Styler.LegendPosition.InsideSE);
         styler.setMarkerSize(6);
         styler.setChartBackgroundColor(Color.WHITE);
         styler.setPlotBackgroundColor(Color.WHITE);
@@ -350,6 +393,52 @@ public class PlotGenerator {
         if (!Files.exists(dir)) {
             Files.createDirectories(dir);
         }
+    }
+
+    /**
+     * Throughput metric for a result, or {@code null} if the result reference is missing.
+     */
+    static Double throughputMetric(BenchmarkResult result) {
+        return result != null ? result.getMetricAsDouble("throughput") : null;
+    }
+
+    /**
+     * True when throughput is present and strictly positive (used for chart and diff logic).
+     */
+    static boolean isPositiveThroughput(Double throughput) {
+        return throughput != null && throughput > 0;
+    }
+
+    /**
+     * Continuation condition for filling {@code selectedRecalls} from {@code otherRecalls}.
+     */
+    static boolean shouldContinueSelectingRecalls(int i, int otherRecallsSize, int selectedSize, int maxBars) {
+        return i < otherRecallsSize && selectedSize < maxBars;
+    }
+
+    static void addThroughputIfPositive(List<Double> target, Double throughput) {
+        if (isPositiveThroughput(throughput)) {
+            target.add(throughput);
+        }
+    }
+
+    /**
+     * Calculate the maximum throughput difference between any pair of engines.
+     */
+    private double calculateThroughputDifference(Map<String, BenchmarkResult> engineResults, Set<String> allEngines) {
+        List<Double> throughputs = new ArrayList<>();
+
+        for (String engine : allEngines) {
+            addThroughputIfPositive(throughputs, throughputMetric(engineResults.get(engine)));
+        }
+
+        if (throughputs.size() < 2) {
+            return 0.0;
+        }
+
+        double max = Collections.max(throughputs);
+        double min = Collections.min(throughputs);
+        return max - min;
     }
 
     /**
