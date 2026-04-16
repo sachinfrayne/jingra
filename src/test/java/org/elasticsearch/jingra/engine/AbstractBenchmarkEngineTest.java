@@ -274,6 +274,32 @@ class AbstractBenchmarkEngineTest {
     }
 
     @Test
+    void testGetSchemaTemplate_missingReturnsNull() {
+        assertNull(engine.getSchemaTemplate("definitely-missing-schema-xyz"));
+    }
+
+    @Test
+    void testGetSchemaTemplate_missingTemplateFieldReturnsNull() throws Exception {
+        writeJingraFile("schemas/no-template-key.json", "{\"not_template\":{}}");
+        assertNull(engine.getSchemaTemplate("no-template-key"));
+    }
+
+    @Test
+    void testGetSchemaTemplate_convertValueThrowsReturnsNull() throws Exception {
+        // template value is a scalar; cannot be converted to Map
+        writeJingraFile("schemas/bad-convert.json", "{\"template\":\"oops\"}");
+        assertNull(engine.getSchemaTemplate("bad-convert"));
+    }
+
+    @Test
+    void testGetSchemaTemplate_convertsTemplateObjectToMap() throws Exception {
+        writeJingraFile("schemas/good-template.json", "{\"template\":{\"mappings\":{\"properties\":{\"f\":{\"type\":\"keyword\"}}}}}");
+        Map<String, Object> tpl = engine.getSchemaTemplate("good-template");
+        assertNotNull(tpl);
+        assertTrue(tpl.containsKey("mappings"));
+    }
+
+    @Test
     void testLoadSchemaTemplate_fromClasspath() {
         JsonNode schema = engine.publicLoadSchemaTemplate("cp-schema");
         assertNotNull(schema);
@@ -282,14 +308,14 @@ class AbstractBenchmarkEngineTest {
 
     @Test
     void testLoadSchemaTemplate_fromFilesystemOverridesClasspath() throws Exception {
-        writeJingraFile("schemas/test/winner.json", "{\"winner\":\"disk\"}");
+        writeJingraFile("schemas/winner.json", "{\"winner\":\"disk\"}");
         JsonNode schema = engine.publicLoadSchemaTemplate("winner");
         assertEquals("disk", schema.get("winner").asText());
     }
 
     @Test
     void testLoadSchemaTemplate_invalidOnDiskFallsBackToClasspath() throws Exception {
-        writeJingraFile("schemas/test/recover.json", "{ not json");
+        writeJingraFile("schemas/recover.json", "{ not json");
         JsonNode schema = engine.publicLoadSchemaTemplate("recover");
         assertNotNull(schema);
         assertTrue(schema.get("recoveredFromClasspath").asBoolean());
@@ -302,13 +328,13 @@ class AbstractBenchmarkEngineTest {
 
     @Test
     void testLoadSchemaTemplate_invalidOnDiskAndMissingClasspathReturnsNull() throws Exception {
-        writeJingraFile("schemas/test/only-disk-bad.json", "{ not json");
+        writeJingraFile("schemas/only-disk-bad.json", "{ not json");
         assertNull(engine.publicLoadSchemaTemplate("only-disk-bad"));
     }
 
     @Test
     void testLoadSchemaTemplate_fromFilesystemOnly() throws Exception {
-        writeJingraFile("schemas/test/fs-only.json", "{\"fs\":true}");
+        writeJingraFile("schemas/fs-only.json", "{\"fs\":true}");
         JsonNode schema = engine.publicLoadSchemaTemplate("fs-only");
         assertTrue(schema.get("fs").asBoolean());
     }
@@ -332,14 +358,14 @@ class AbstractBenchmarkEngineTest {
 
     @Test
     void testLoadQueryTemplate_invalidOnDiskFallsBackToClasspath() throws Exception {
-        writeJingraFile("queries/test/recover-query.json", "{ not json");
+        writeJingraFile("queries/recover-query.json", "{ not json");
         JsonNode query = engine.publicLoadQueryTemplate("recover-query");
         assertTrue(query.get("recoveredQuery").asBoolean());
     }
 
     @Test
     void testLoadQueryTemplate_fromFilesystemOnly() throws Exception {
-        writeJingraFile("queries/test/fs-only-query.json", "{\"q\":\"disk\"}");
+        writeJingraFile("queries/fs-only-query.json", "{\"q\":\"disk\"}");
         JsonNode query = engine.publicLoadQueryTemplate("fs-only-query");
         assertEquals("disk", query.get("q").asText());
     }
@@ -372,17 +398,17 @@ class AbstractBenchmarkEngineTest {
     void testQueryDumpDirectoryBlankTreatedAsDisabled() {
         Map<String, Object> cfg = new HashMap<>();
         cfg.put(AbstractBenchmarkEngine.CONFIG_QUERY_DUMP_DIRECTORY, "   \t ");
-        TestBenchmarkEngine e = new TestBenchmarkEngine(cfg);
-        assertDoesNotThrow(() -> e.publicWriteFirstQueryDump("test", "{\"a\":1}"));
+        engine = new TestBenchmarkEngine(cfg);
+        assertDoesNotThrow(() -> engine.publicWriteFirstQueryDump("test", "{\"a\":1}"));
     }
 
     @Test
     void testWriteFirstQueryDump_writesPrettyJsonOnce(@TempDir Path dumpRoot) throws Exception {
         Map<String, Object> cfg = new HashMap<>();
         cfg.put(AbstractBenchmarkEngine.CONFIG_QUERY_DUMP_DIRECTORY, dumpRoot.toString());
-        TestBenchmarkEngine e = new TestBenchmarkEngine(cfg);
-        e.publicWriteFirstQueryDump("ab", "{\"b\":2}");
-        e.publicWriteFirstQueryDump("ab", "{\"c\":3}");
+        engine = new TestBenchmarkEngine(cfg);
+        engine.publicWriteFirstQueryDump("ab", "{\"b\":2}");
+        engine.publicWriteFirstQueryDump("ab", "{\"c\":3}");
         Path out = dumpRoot.resolve("ab-first-query.json");
         assertTrue(Files.isRegularFile(out));
         String body = Files.readString(out, StandardCharsets.UTF_8);
@@ -394,9 +420,9 @@ class AbstractBenchmarkEngineTest {
     void testWriteFirstQueryDump_nonJsonPayloadWrittenVerbatim(@TempDir Path dumpRoot) throws Exception {
         Map<String, Object> cfg = new HashMap<>();
         cfg.put(AbstractBenchmarkEngine.CONFIG_QUERY_DUMP_DIRECTORY, dumpRoot.toString());
-        TestBenchmarkEngine e = new TestBenchmarkEngine(cfg);
+        engine = new TestBenchmarkEngine(cfg);
         String raw = "not-json-at-all";
-        e.publicWriteFirstQueryDump("raw", raw);
+        engine.publicWriteFirstQueryDump("raw", raw);
         assertEquals(raw, Files.readString(dumpRoot.resolve("raw-first-query.json"), StandardCharsets.UTF_8));
     }
 
@@ -406,8 +432,8 @@ class AbstractBenchmarkEngineTest {
         Files.createFile(blocker);
         Map<String, Object> cfg = new HashMap<>();
         cfg.put(AbstractBenchmarkEngine.CONFIG_QUERY_DUMP_DIRECTORY, blocker.toAbsolutePath().toString());
-        TestBenchmarkEngine e = new TestBenchmarkEngine(cfg);
-        assertDoesNotThrow(() -> e.publicWriteFirstQueryDump("x", "{\"a\":1}"));
+        engine = new TestBenchmarkEngine(cfg);
+        assertDoesNotThrow(() -> engine.publicWriteFirstQueryDump("x", "{\"a\":1}"));
     }
 
     @Test

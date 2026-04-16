@@ -104,7 +104,7 @@ class ElasticsearchEngineTest {
                 }
                 """;
 
-        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/elasticsearch/test-schema-es.json");
+        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-es.json");
         java.nio.file.Files.createDirectories(schemaPath.getParent());
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
@@ -157,7 +157,7 @@ class ElasticsearchEngineTest {
                 }
                 """;
 
-        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/elasticsearch/test-schema-es-no-id.json");
+        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-es-no-id.json");
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
         engine.createIndex(tempIndex, "test-schema-es-no-id");
@@ -195,7 +195,7 @@ class ElasticsearchEngineTest {
                 }
                 """;
 
-        java.nio.file.Path queryPath = java.nio.file.Paths.get("jingra-config/queries/elasticsearch/test-query-basic.json");
+        java.nio.file.Path queryPath = java.nio.file.Paths.get("jingra-config/queries/test-query-basic.json");
         java.nio.file.Files.createDirectories(queryPath.getParent());
         java.nio.file.Files.writeString(queryPath, queryTemplate);
 
@@ -248,7 +248,7 @@ class ElasticsearchEngineTest {
                 }
                 """;
 
-        java.nio.file.Path queryPath = java.nio.file.Paths.get("jingra-config/queries/elasticsearch/test-query-filtered.json");
+        java.nio.file.Path queryPath = java.nio.file.Paths.get("jingra-config/queries/test-query-filtered.json");
         java.nio.file.Files.writeString(queryPath, queryTemplate);
 
         Map<String, Object> params = new HashMap<>();
@@ -304,7 +304,7 @@ class ElasticsearchEngineTest {
                 }
                 """;
 
-        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/elasticsearch/test-schema-es-delete.json");
+        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-es-delete.json");
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
         engine.createIndex(tempIndex, "test-schema-es-delete");
@@ -342,7 +342,7 @@ class ElasticsearchEngineTest {
                 }
                 """;
 
-        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/elasticsearch/test-schema-es-large.json");
+        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-es-large.json");
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
         engine.createIndex(tempIndex, "test-schema-es-large");

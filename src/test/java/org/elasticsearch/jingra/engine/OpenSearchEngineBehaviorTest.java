@@ -283,7 +283,7 @@ class OpenSearchEngineBehaviorTest {
 
     @Test
     void createIndexFalseWhenSchemaHasNoTemplateField() throws Exception {
-        Path dir = Path.of("jingra-config/schemas/opensearch");
+        Path dir = Path.of("jingra-config/schemas");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-no-template-key.json");
         Files.writeString(f, "{\"not_template\": {}}");
@@ -302,7 +302,7 @@ class OpenSearchEngineBehaviorTest {
 
     @Test
     void createIndexFalseWhenPutThrows() throws Exception {
-        Path dir = Path.of("jingra-config/schemas/opensearch");
+        Path dir = Path.of("jingra-config/schemas");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-put-fail.json");
         Files.writeString(f, "{\"template\": {\"mappings\": {\"properties\": {\"f\": {\"type\": \"keyword\"}}}}}");
@@ -335,7 +335,7 @@ class OpenSearchEngineBehaviorTest {
 
     @Test
     void queryRethrowsIllegalStateFromRender() throws Exception {
-        Path dir = Path.of("jingra-config/queries/opensearch");
+        Path dir = Path.of("jingra-config/queries");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-bad-render.json");
         Files.writeString(f, "{\"no_template\": true}");
@@ -350,7 +350,7 @@ class OpenSearchEngineBehaviorTest {
 
     @Test
     void queryOmitsHitsWithEmptyId() throws Exception {
-        Path dir = Path.of("jingra-config/queries/opensearch");
+        Path dir = Path.of("jingra-config/queries");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-query-empty-id.json");
         Files.writeString(f, """
@@ -373,7 +373,7 @@ class OpenSearchEngineBehaviorTest {
 
     @Test
     void queryStoresLastQueryJsonOnceAndReturnsHits() throws Exception {
-        Path dir = Path.of("jingra-config/queries/opensearch");
+        Path dir = Path.of("jingra-config/queries");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-query.json");
         Files.writeString(f, """
@@ -405,7 +405,7 @@ class OpenSearchEngineBehaviorTest {
 
     @Test
     void queryReturnsEmptyOnGenericFailure() throws Exception {
-        Path dir = Path.of("jingra-config/queries/opensearch");
+        Path dir = Path.of("jingra-config/queries");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-query-fail.json");
         Files.writeString(f, """
@@ -700,7 +700,7 @@ class OpenSearchEngineBehaviorTest {
 
     @Test
     void querySkipsDocumentIdsWhenInnerHitsNotArray() throws Exception {
-        Path dir = Path.of("jingra-config/queries/opensearch");
+        Path dir = Path.of("jingra-config/queries");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-query-hits-not-array.json");
         Files.writeString(f, """

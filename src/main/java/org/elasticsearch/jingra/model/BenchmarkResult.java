@@ -29,6 +29,9 @@ public class BenchmarkResult {
     // Additional metadata
     private final Map<String, String> metadata;
 
+    // Schema information (mappings and settings from the index schema template)
+    private Map<String, Object> schema;
+
     public BenchmarkResult(
             String runId,
             String engine,
@@ -67,6 +70,12 @@ public class BenchmarkResult {
         return this;
     }
 
+    // Fluent API for adding schema
+    public BenchmarkResult setSchema(Map<String, Object> schema) {
+        this.schema = schema != null ? new HashMap<>(schema) : null;
+        return this;
+    }
+
     // Getters
     public String getTimestamp() { return timestamp; }
     public String getRunId() { return runId; }
@@ -78,6 +87,7 @@ public class BenchmarkResult {
     public Map<String, Object> getParams() { return new HashMap<>(params); }
     public Map<String, Object> getMetrics() { return new HashMap<>(metrics); }
     public Map<String, String> getMetadata() { return new HashMap<>(metadata); }
+    public Map<String, Object> getSchema() { return schema != null ? new HashMap<>(schema) : null; }
 
     // Convenience getters for metrics
     public Object getMetric(String name) {
@@ -122,6 +132,11 @@ public class BenchmarkResult {
             map.put("metadata", metadata);
         }
 
+        // Add schema
+        if (schema != null && !schema.isEmpty()) {
+            map.put("schema", schema);
+        }
+
         return map;
     }
 
@@ -156,11 +171,17 @@ public class BenchmarkResult {
             }
         }
 
+        // Extract schema if present
+        Object schemaObj = map.get("schema");
+        if (schemaObj instanceof Map) {
+            result.setSchema((Map<String, Object>) schemaObj);
+        }
+
         // All other fields are metrics (flattened at top level)
         // Standard fields to skip when extracting metrics
         java.util.Set<String> standardFields = java.util.Set.of(
                 "@timestamp", "run_id", "engine", "engine_version", "benchmark_type",
-                "dataset", "param_key", "params", "metadata"
+                "dataset", "param_key", "params", "metadata", "schema"
         );
 
         for (Map.Entry<String, Object> entry : map.entrySet()) {

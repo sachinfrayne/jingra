@@ -127,7 +127,7 @@ class OpenSearchEngineTest {
                 }
                 """;
 
-        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/opensearch/test-schema-os.json");
+        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-os.json");
         java.nio.file.Files.createDirectories(schemaPath.getParent());
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
@@ -180,7 +180,7 @@ class OpenSearchEngineTest {
                 }
                 """;
 
-        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/opensearch/test-schema-os-no-id.json");
+        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-os-no-id.json");
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
         engine.createIndex(tempIndex, "test-schema-os-no-id");
@@ -220,7 +220,7 @@ class OpenSearchEngineTest {
                 }
                 """;
 
-        java.nio.file.Path queryPath = java.nio.file.Paths.get("jingra-config/queries/opensearch/test-query-basic.json");
+        java.nio.file.Path queryPath = java.nio.file.Paths.get("jingra-config/queries/test-query-basic.json");
         java.nio.file.Files.createDirectories(queryPath.getParent());
         java.nio.file.Files.writeString(queryPath, queryTemplate);
 
@@ -282,7 +282,7 @@ class OpenSearchEngineTest {
                 }
                 """;
 
-        java.nio.file.Path queryPath = java.nio.file.Paths.get("jingra-config/queries/opensearch/test-query-filtered.json");
+        java.nio.file.Path queryPath = java.nio.file.Paths.get("jingra-config/queries/test-query-filtered.json");
         java.nio.file.Files.writeString(queryPath, queryTemplate);
 
         Map<String, Object> params = new HashMap<>();
@@ -337,7 +337,7 @@ class OpenSearchEngineTest {
                 }
                 """;
 
-        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/opensearch/test-schema-os-delete.json");
+        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-os-delete.json");
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
         engine.createIndex(tempIndex, "test-schema-os-delete");
@@ -375,7 +375,7 @@ class OpenSearchEngineTest {
                 }
                 """;
 
-        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/opensearch/test-schema-os-large.json");
+        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-os-large.json");
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
         engine.createIndex(tempIndex, "test-schema-os-large");

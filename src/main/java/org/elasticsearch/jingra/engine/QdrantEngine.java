@@ -546,28 +546,38 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
                 io.qdrant.client.grpc.Points.SearchParams.Builder paramsBuilder =
                         io.qdrant.client.grpc.Points.SearchParams.newBuilder();
 
-                // Handle hnsw_ef (num_candidates)
-                if (templateParams.has("hnsw_ef")) {
-                    String hnswEfExpr = templateParams.get("hnsw_ef").asText();
-                    Integer hnswEf = resolveIntParam(hnswEfExpr, params);
-                    if (hnswEf != null) {
-                        paramsBuilder.setHnswEf(hnswEf);
-                    }
-                }
+                // Check if exact (brute force) search is requested
+                boolean isExact = templateParams.has("exact") && templateParams.get("exact").asBoolean(false);
 
-                // Handle quantization oversampling (rescoring): literal or single "{{param}}" (e.g. "{{rescore}}")
-                if (templateParams.has("quantization")) {
-                    JsonNode quantParams = templateParams.get("quantization");
-                    if (quantParams.has("oversampling")) {
-                        String oversamplingExpr = quantParams.get("oversampling").asText();
-                        Double oversampling = resolveDoubleParam(oversamplingExpr, params);
-                        if (oversampling != null) {
-                            paramsBuilder.setQuantization(
-                                    QuantizationSearchParams.newBuilder()
-                                            .setRescore(true)
-                                            .setOversampling(oversampling)
-                                            .build()
-                            );
+                if (isExact) {
+                    // For exact search, only set exact flag - skip hnsw_ef and quantization
+                    paramsBuilder.setExact(true);
+                } else {
+                    // For approximate search, handle hnsw_ef and quantization
+
+                    // Handle hnsw_ef (num_candidates)
+                    if (templateParams.has("hnsw_ef")) {
+                        String hnswEfExpr = templateParams.get("hnsw_ef").asText();
+                        Integer hnswEf = resolveIntParam(hnswEfExpr, params);
+                        if (hnswEf != null) {
+                            paramsBuilder.setHnswEf(hnswEf);
+                        }
+                    }
+
+                    // Handle quantization oversampling (rescoring): literal or single "{{param}}" (e.g. "{{rescore}}")
+                    if (templateParams.has("quantization")) {
+                        JsonNode quantParams = templateParams.get("quantization");
+                        if (quantParams.has("oversampling")) {
+                            String oversamplingExpr = quantParams.get("oversampling").asText();
+                            Double oversampling = resolveDoubleParam(oversamplingExpr, params);
+                            if (oversampling != null) {
+                                paramsBuilder.setQuantization(
+                                        QuantizationSearchParams.newBuilder()
+                                                .setRescore(true)
+                                                .setOversampling(oversampling)
+                                                .build()
+                                );
+                            }
                         }
                     }
                 }

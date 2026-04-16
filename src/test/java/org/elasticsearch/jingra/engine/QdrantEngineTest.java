@@ -80,14 +80,14 @@ class QdrantEngineTest {
 
     private static void writeQdrantSchemaFile(String schemaBaseName, String json) throws Exception {
         java.nio.file.Path schemaPath =
-                java.nio.file.Paths.get("jingra-config/schemas/qdrant/" + schemaBaseName + ".json");
+                java.nio.file.Paths.get("jingra-config/schemas/" + schemaBaseName + ".json");
         java.nio.file.Files.createDirectories(schemaPath.getParent());
         java.nio.file.Files.writeString(schemaPath, json.strip());
     }
 
     private static void writeQdrantQueryFile(String queryBaseName, String json) throws Exception {
         java.nio.file.Path queryPath =
-                java.nio.file.Paths.get("jingra-config/queries/qdrant/" + queryBaseName + ".json");
+                java.nio.file.Paths.get("jingra-config/queries/" + queryBaseName + ".json");
         java.nio.file.Files.createDirectories(queryPath.getParent());
         java.nio.file.Files.writeString(queryPath, json.strip());
     }
@@ -144,7 +144,7 @@ class QdrantEngineTest {
                 }
                 """;
 
-        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/qdrant/test-schema-qdrant.json");
+        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-qdrant.json");
         java.nio.file.Files.createDirectories(schemaPath.getParent());
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
@@ -196,7 +196,7 @@ class QdrantEngineTest {
                 }
                 """;
 
-        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/qdrant/test-schema-qdrant-no-id.json");
+        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-qdrant-no-id.json");
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
         engine.createIndex(tempIndex, "test-schema-qdrant-no-id");
@@ -229,7 +229,7 @@ class QdrantEngineTest {
                 }
                 """;
 
-        java.nio.file.Path queryPath = java.nio.file.Paths.get("jingra-config/queries/qdrant/test-query-basic.json");
+        java.nio.file.Path queryPath = java.nio.file.Paths.get("jingra-config/queries/test-query-basic.json");
         java.nio.file.Files.createDirectories(queryPath.getParent());
         java.nio.file.Files.writeString(queryPath, queryContent);
 
@@ -293,7 +293,7 @@ class QdrantEngineTest {
                 }
                 """;
 
-        java.nio.file.Path queryPath = java.nio.file.Paths.get("jingra-config/queries/qdrant/test-query-filtered.json");
+        java.nio.file.Path queryPath = java.nio.file.Paths.get("jingra-config/queries/test-query-filtered.json");
         java.nio.file.Files.writeString(queryPath, queryContent);
 
         Map<String, Object> params = new HashMap<>();
@@ -360,7 +360,7 @@ class QdrantEngineTest {
                 }
                 """;
 
-        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/qdrant/test-schema-qdrant-delete.json");
+        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-qdrant-delete.json");
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
         engine.createIndex(tempIndex, "test-schema-qdrant-delete");
@@ -402,7 +402,7 @@ class QdrantEngineTest {
                 }
                 """;
 
-        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/qdrant/test-schema-qdrant-large.json");
+        java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-qdrant-large.json");
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
         engine.createIndex(tempIndex, "test-schema-qdrant-large");

@@ -96,6 +96,11 @@ public class MockBenchmarkEngine implements BenchmarkEngine {
     }
 
     @Override
+    public Map<String, Object> getSchemaTemplate(String schemaName) {
+        return new HashMap<>();
+    }
+
+    @Override
     public void close() throws Exception {
         // no-op
     }
