@@ -474,6 +474,45 @@ class BenchmarkEvaluatorTest {
         assertNotNull(br.getMetrics().get("throughput_aggregate_latency_model"));
     }
 
+    @Test
+    void calculateMetrics_setsSchemaWhenSchemaNameConfiguredAndTemplateFound() throws Exception {
+        org.elasticsearch.jingra.config.DatasetConfig datasetConfig = jingraConfig.getActiveDataset();
+        datasetConfig.setSchemaName("schema-a");
+
+        MockBenchmarkEngine engineWithSchema = new MockBenchmarkEngine() {
+            @Override
+            public Map<String, Object> getSchemaTemplate(String schemaName) {
+                return Map.of("mappings", Map.of("properties", Map.of("f", Map.of("type", "keyword"))));
+            }
+        };
+
+        BenchmarkEvaluator ev = new BenchmarkEvaluator(jingraConfig, engineWithSchema, List.of(mockSink));
+        MetricsCalculator.QueryResult res = new MetricsCalculator.QueryResult(
+                List.of("a"), List.of("a"), 10.0, null);
+        BenchmarkResult br = invokeCalculateMetrics(ev, List.of(res), 1000L);
+        assertNotNull(br.getSchema());
+        assertTrue(br.getSchema().containsKey("mappings"));
+    }
+
+    @Test
+    void calculateMetrics_doesNotSetSchemaWhenSchemaNameConfiguredButTemplateMissing() throws Exception {
+        org.elasticsearch.jingra.config.DatasetConfig datasetConfig = jingraConfig.getActiveDataset();
+        datasetConfig.setSchemaName("schema-missing");
+
+        MockBenchmarkEngine engineNoSchema = new MockBenchmarkEngine() {
+            @Override
+            public Map<String, Object> getSchemaTemplate(String schemaName) {
+                return null;
+            }
+        };
+
+        BenchmarkEvaluator ev = new BenchmarkEvaluator(jingraConfig, engineNoSchema, List.of(mockSink));
+        MetricsCalculator.QueryResult res = new MetricsCalculator.QueryResult(
+                List.of("a"), List.of("a"), 10.0, null);
+        BenchmarkResult br = invokeCalculateMetrics(ev, List.of(res), 1000L);
+        assertNull(br.getSchema());
+    }
+
     @SuppressWarnings("unchecked")
     private List<Object> invokeParse(List<Document> docs) throws Exception {
         Method m = BenchmarkEvaluator.class.getDeclaredMethod("parseQueryDocumentsFromDocuments", List.class, DatasetConfig.class);

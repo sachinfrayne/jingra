@@ -21,7 +21,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public abstract class AbstractBenchmarkEngine implements BenchmarkEngine {
     /**
-     * Relative directory for on-disk schema/query overrides (local dev, K8s mounts). Classpath fallback uses {@code /schemas/} and {@code /queries/}.
+     * Relative directory for on-disk schema/query overrides (local dev, K8s mounts).
+     * Templates live under {@code jingra-config/schemas/} and {@code jingra-config/queries/} (same layout for every engine).
+     * Classpath fallback uses {@code /schemas/} and {@code /queries/}.
      */
     public static final String JINGRA_CONFIG_DIR = "jingra-config";
 
@@ -44,8 +46,8 @@ public abstract class AbstractBenchmarkEngine implements BenchmarkEngine {
 
     protected AbstractBenchmarkEngine(Map<String, Object> config) {
         this.config = config;
-        this.schemasPath = "schemas/" + getEngineName();
-        this.queriesPath = "queries/" + getEngineName();
+        this.schemasPath = "schemas";
+        this.queriesPath = "queries";
         String dumpDir = getConfigString(CONFIG_QUERY_DUMP_DIRECTORY, null);
         if (dumpDir != null && !dumpDir.isBlank()) {
             this.queryDumpDirectory = Paths.get(dumpDir).toAbsolutePath().normalize();
@@ -125,6 +127,35 @@ public abstract class AbstractBenchmarkEngine implements BenchmarkEngine {
 
         logger.error("Schema template '{}' not found for engine '{}'", schemaName, getEngineName());
         return null;
+    }
+
+    /**
+     * Get the schema template as a Map (for storing in benchmark results).
+     * Returns the "template" object containing mappings and settings.
+     *
+     * @param schemaName the schema name
+     * @return schema template as Map with mappings and settings, or null if not found
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getSchemaTemplate(String schemaName) {
+        JsonNode template = loadSchemaTemplate(schemaName);
+        if (template == null) {
+            return null;
+        }
+
+        // Extract the "template" node which contains mappings and settings
+        JsonNode templateNode = template.get("template");
+        if (templateNode == null) {
+            logger.warn("Schema template '{}' missing 'template' field", schemaName);
+            return null;
+        }
+
+        try {
+            return objectMapper.convertValue(templateNode, Map.class);
+        } catch (Exception e) {
+            logger.error("Failed to convert schema template to Map", e);
+            return null;
+        }
     }
 
     /**

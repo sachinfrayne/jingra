@@ -409,6 +409,15 @@ public class BenchmarkEvaluator {
             result.addMetadata("vector_type", vt);
         }
 
+        // Add schema information
+        String schemaName = dataset.getSchemaName();
+        if (schemaName != null) {
+            Map<String, Object> schema = engine.getSchemaTemplate(schemaName);
+            if (schema != null) {
+                result.setSchema(schema);
+            }
+        }
+
         return result;
     }
 

@@ -102,4 +102,13 @@ public interface BenchmarkEngine extends AutoCloseable {
      * @return metadata map (e.g., vector type, compression, etc.)
      */
     Map<String, String> getIndexMetadata(String indexName);
+
+    /**
+     * Get the schema template as a Map (for storing in benchmark results).
+     * Returns the "template" object containing mappings and settings.
+     *
+     * @param schemaName the schema name
+     * @return schema template as Map with mappings and settings, or null if not found
+     */
+    Map<String, Object> getSchemaTemplate(String schemaName);
 }

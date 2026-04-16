@@ -76,6 +76,11 @@ class BenchmarkEngineTest {
         }
 
         @Override
+        public Map<String, Object> getSchemaTemplate(String schemaName) {
+            return Map.of();
+        }
+
+        @Override
         public void close() {
             // no-op
         }

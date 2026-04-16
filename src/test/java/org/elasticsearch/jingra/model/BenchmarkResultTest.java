@@ -103,6 +103,29 @@ class BenchmarkResultTest {
     }
 
     @Test
+    void setSchema_nullClearsSchemaAndGetSchemaReturnsNull() {
+        BenchmarkResult result = createTestResult()
+                .setSchema(Map.of("mappings", Map.of()));
+        assertNotNull(result.getSchema());
+        result.setSchema(null);
+        assertNull(result.getSchema());
+    }
+
+    @Test
+    void toMap_withEmptySchemaOmitsSchemaKey() {
+        BenchmarkResult result = createTestResult().setSchema(Map.of());
+        Map<String, Object> map = result.toMap();
+        assertFalse(map.containsKey("schema"));
+    }
+
+    @Test
+    void toMap_withNonEmptySchemaIncludesSchemaKey() {
+        BenchmarkResult result = createTestResult().setSchema(Map.of("mappings", Map.of("properties", Map.of())));
+        Map<String, Object> map = result.toMap();
+        assertTrue(map.containsKey("schema"));
+    }
+
+    @Test
     void testGetMetricAsInteger() {
         BenchmarkResult result = createTestResult();
         result.addMetric("num_samples", 10000);
@@ -281,6 +304,41 @@ class BenchmarkResultTest {
         BenchmarkResult result = BenchmarkResult.fromMap(map);
 
         assertTrue(result.getMetadata().isEmpty());
+    }
+
+    @Test
+    void fromMap_schemaPresentButNotMap_isIgnored() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("@timestamp", "2026-01-01T00:00:00Z");
+        map.put("run_id", "test-run");
+        map.put("engine", "qdrant");
+        map.put("engine_version", "1.17.0");
+        map.put("benchmark_type", "vector_search");
+        map.put("dataset", "ds");
+        map.put("param_key", "pk");
+        map.put("params", Map.of());
+        map.put("schema", "not-a-map");
+
+        BenchmarkResult result = BenchmarkResult.fromMap(map);
+        assertNull(result.getSchema());
+    }
+
+    @Test
+    void fromMap_extractsSchemaWhenPresent() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("@timestamp", "2026-01-01T00:00:00Z");
+        map.put("run_id", "test-run");
+        map.put("engine", "qdrant");
+        map.put("engine_version", "1.17.0");
+        map.put("benchmark_type", "vector_search");
+        map.put("dataset", "ds");
+        map.put("param_key", "pk");
+        map.put("params", Map.of());
+        map.put("schema", Map.of("mappings", Map.of("properties", Map.of("f", Map.of("type", "keyword")))));
+
+        BenchmarkResult result = BenchmarkResult.fromMap(map);
+        assertNotNull(result.getSchema());
+        assertTrue(result.getSchema().containsKey("mappings"));
     }
 
     @Test

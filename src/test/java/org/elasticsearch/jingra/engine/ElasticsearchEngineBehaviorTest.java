@@ -337,7 +337,7 @@ class ElasticsearchEngineBehaviorTest {
 
     @Test
     void createIndexFalseWhenSchemaHasNoTemplateField() throws Exception {
-        Path dir = Path.of("jingra-config/schemas/elasticsearch");
+        Path dir = Path.of("jingra-config/schemas");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-es-no-template-key.json");
         Files.writeString(f, "{\"not_template\": {}}");
@@ -356,7 +356,7 @@ class ElasticsearchEngineBehaviorTest {
 
     @Test
     void createIndexFalseWhenCreateThrows() throws Exception {
-        Path dir = Path.of("jingra-config/schemas/elasticsearch");
+        Path dir = Path.of("jingra-config/schemas");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-es-create-fail.json");
         Files.writeString(f, "{\"template\": {\"mappings\": {\"properties\": {\"f\": {\"type\": \"keyword\"}}}}}");
@@ -389,7 +389,7 @@ class ElasticsearchEngineBehaviorTest {
 
     @Test
     void queryRethrowsIllegalStateFromRender() throws Exception {
-        Path dir = Path.of("jingra-config/queries/elasticsearch");
+        Path dir = Path.of("jingra-config/queries");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-es-bad-render.json");
         Files.writeString(f, "{\"no_template\": true}");
@@ -404,7 +404,7 @@ class ElasticsearchEngineBehaviorTest {
 
     @Test
     void queryIncludesEmptyStringIdsInOrder() throws Exception {
-        Path dir = Path.of("jingra-config/queries/elasticsearch");
+        Path dir = Path.of("jingra-config/queries");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-es-query-empty-id.json");
         Files.writeString(f, """
@@ -426,7 +426,7 @@ class ElasticsearchEngineBehaviorTest {
 
     @Test
     void queryStoresLastQueryJsonOnceAndReturnsHits() throws Exception {
-        Path dir = Path.of("jingra-config/queries/elasticsearch");
+        Path dir = Path.of("jingra-config/queries");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-es-query.json");
         Files.writeString(f, """
@@ -458,7 +458,7 @@ class ElasticsearchEngineBehaviorTest {
 
     @Test
     void queryReturnsEmptyOnGenericFailure() throws Exception {
-        Path dir = Path.of("jingra-config/queries/elasticsearch");
+        Path dir = Path.of("jingra-config/queries");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-es-query-fail.json");
         Files.writeString(f, """

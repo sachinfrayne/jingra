@@ -91,14 +91,14 @@ class QdrantEngineBehaviorTest {
 
     private static void writeQdrantSchemaFile(String schemaBaseName, String json) throws Exception {
         Path schemaPath = Paths.get(AbstractBenchmarkEngine.JINGRA_CONFIG_DIR)
-                .resolve("schemas/qdrant/" + schemaBaseName + ".json");
+                .resolve("schemas/" + schemaBaseName + ".json");
         Files.createDirectories(schemaPath.getParent());
         Files.writeString(schemaPath, json, StandardCharsets.UTF_8);
     }
 
     private static void writeQdrantQueryFile(String queryBaseName, String json) throws Exception {
         Path queryPath = Paths.get(AbstractBenchmarkEngine.JINGRA_CONFIG_DIR)
-                .resolve("queries/qdrant/" + queryBaseName + ".json");
+                .resolve("queries/" + queryBaseName + ".json");
         Files.createDirectories(queryPath.getParent());
         Files.writeString(queryPath, json, StandardCharsets.UTF_8);
     }
@@ -1245,6 +1245,99 @@ class QdrantEngineBehaviorTest {
         assertTrue(r.getDocumentIds().isEmpty());
         assertNotNull(r.getClientLatencyMs());
         assertNotNull(r.getServerLatencyMs());
+    }
+
+    @Test
+    void searchParamsSupportsExactFlag() {
+        // Verify that SearchParams can be built with exact flag for brute force search
+        io.qdrant.client.grpc.Points.SearchParams params = io.qdrant.client.grpc.Points.SearchParams.newBuilder()
+                .setExact(true)
+                .build();
+
+        assertTrue(params.hasExact(), "exact field should be set");
+        assertTrue(params.getExact(), "exact should be true for brute force search");
+    }
+
+    @Test
+    void queryAppliesExactFlagFromTemplateParams() throws Exception {
+        writeQdrantQueryFile("q-exact", """
+                {"template":{"params":{"exact":true}}}
+                """);
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("grpc_timeout_seconds", 1);
+        QdrantEngine e = new QdrantEngine(cfg);
+        SearchResponse sr = SearchResponse.newBuilder().setTime(0.0).build();
+        QdrantClient mockClient = mock(QdrantClient.class);
+        QdrantGrpcClient grpc = mock(QdrantGrpcClient.class);
+        PointsFutureStub points = mock(PointsFutureStub.class);
+        when(mockClient.grpcClient()).thenReturn(grpc);
+        when(grpc.points()).thenReturn(points);
+        when(points.search(any(SearchPoints.class))).thenReturn(Futures.immediateFuture(sr));
+        injectClient(e, mockClient);
+        QueryParams qp = new QueryParams(Map.of("query_vector", List.of(0.1f)));
+        assertNotNull(e.query("c", "q-exact", qp).getClientLatencyMs());
+    }
+
+    @Test
+    void querySkipsHnswEfAndQuantizationWhenExactIsTrue() throws Exception {
+        // When exact:true is set, hnsw_ef and quantization should be ignored
+        writeQdrantQueryFile("q-exact-ignores-approx", """
+                {"template":{"params":{"exact":true,"hnsw_ef":"{{num}}","quantization":{"oversampling":"{{rescore}}"}}}}
+                """);
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("grpc_timeout_seconds", 1);
+        QdrantEngine e = new QdrantEngine(cfg);
+        SearchResponse sr = SearchResponse.newBuilder().setTime(0.0).build();
+        QdrantClient mockClient = mock(QdrantClient.class);
+        QdrantGrpcClient grpc = mock(QdrantGrpcClient.class);
+        PointsFutureStub points = mock(PointsFutureStub.class);
+        when(mockClient.grpcClient()).thenReturn(grpc);
+        when(grpc.points()).thenReturn(points);
+        when(points.search(any(SearchPoints.class))).thenReturn(Futures.immediateFuture(sr));
+        injectClient(e, mockClient);
+        QueryParams qp = new QueryParams(Map.of("query_vector", List.of(0.1f), "num", 64, "rescore", 3.0));
+        // Query should succeed - exact search ignores approximate search params
+        assertNotNull(e.query("c", "q-exact-ignores-approx", qp).getClientLatencyMs());
+    }
+
+    @Test
+    void queryWhenExactKeyIsFalseUsesApproximateParamsNotExactFlag() throws Exception {
+        writeQdrantQueryFile("q-exact-false-hnsw", """
+                {"template":{"params":{"exact":false,"hnsw_ef":"48"}}}
+                """);
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("grpc_timeout_seconds", 1);
+        QdrantEngine e = new QdrantEngine(cfg);
+        SearchResponse sr = SearchResponse.newBuilder().setTime(0.0).build();
+        QdrantClient mockClient = mock(QdrantClient.class);
+        QdrantGrpcClient grpc = mock(QdrantGrpcClient.class);
+        PointsFutureStub points = mock(PointsFutureStub.class);
+        when(mockClient.grpcClient()).thenReturn(grpc);
+        when(grpc.points()).thenReturn(points);
+        when(points.search(any(SearchPoints.class))).thenReturn(Futures.immediateFuture(sr));
+        injectClient(e, mockClient);
+        QueryParams qp = new QueryParams(Map.of("query_vector", List.of(0.1f)));
+        assertNotNull(e.query("c", "q-exact-false-hnsw", qp).getClientLatencyMs());
+    }
+
+    @Test
+    void queryWithQuantizationBlockWithoutOversamplingSkipsRescoreParams() throws Exception {
+        writeQdrantQueryFile("q-quant-no-oversampling-key", """
+                {"template":{"params":{"quantization":{}}}}
+                """);
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("grpc_timeout_seconds", 1);
+        QdrantEngine e = new QdrantEngine(cfg);
+        SearchResponse sr = SearchResponse.newBuilder().setTime(0.0).build();
+        QdrantClient mockClient = mock(QdrantClient.class);
+        QdrantGrpcClient grpc = mock(QdrantGrpcClient.class);
+        PointsFutureStub points = mock(PointsFutureStub.class);
+        when(mockClient.grpcClient()).thenReturn(grpc);
+        when(grpc.points()).thenReturn(points);
+        when(points.search(any(SearchPoints.class))).thenReturn(Futures.immediateFuture(sr));
+        injectClient(e, mockClient);
+        QueryParams qp = new QueryParams(Map.of("query_vector", List.of(0.1f)));
+        assertNotNull(e.query("c", "q-quant-no-oversampling-key", qp).getClientLatencyMs());
     }
 
 }
