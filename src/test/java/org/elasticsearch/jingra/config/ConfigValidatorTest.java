@@ -33,6 +33,64 @@ class ConfigValidatorTest {
     }
 
     @Test
+    void validateBase_analyzeCommand_noBenchmarkEngine() {
+        JingraConfig c = new JingraConfig();
+        c.setDataset(null);
+        c.setDatasets(null);
+        AnalysisConfig ac = new AnalysisConfig();
+        ac.setRunId("run-1");
+        ac.setEngines(List.of("elasticsearch", "qdrant"));
+        ac.setResultsCluster(Map.of("url", "http://localhost:9200"));
+        c.setAnalysis(ac);
+        ConfigValidator.validateBase(c, "analyze");
+    }
+
+    @Test
+    void validateBase_analyzeCommand_blankEngine_skipsEngineConfigLookup() {
+        JingraConfig c = new JingraConfig();
+        c.setEngine("   ");
+        c.setDataset(null);
+        c.setDatasets(null);
+        AnalysisConfig ac = new AnalysisConfig();
+        ac.setRunId("run-1");
+        ac.setEngines(List.of("elasticsearch", "qdrant"));
+        ac.setResultsCluster(Map.of("url", "http://localhost:9200"));
+        c.setAnalysis(ac);
+        ConfigValidator.validateBase(c, "analyze");
+    }
+
+    @Test
+    void validateBase_analyzeCommand_enginePresent_resolvesEngineConfig() {
+        JingraConfig c = new JingraConfig();
+        c.setEngine("elasticsearch");
+        c.setElasticsearch(Map.of("url_env", "ES_URL"));
+        c.setDataset(null);
+        c.setDatasets(null);
+        AnalysisConfig ac = new AnalysisConfig();
+        ac.setRunId("run-1");
+        ac.setEngines(List.of("elasticsearch", "qdrant"));
+        ac.setResultsCluster(Map.of("url", "http://localhost:9200"));
+        c.setAnalysis(ac);
+        ConfigValidator.validateBase(c, "analyze");
+    }
+
+    @Test
+    void validateBase_analyzeCommand_optionalEngineStillValidated() {
+        JingraConfig c = new JingraConfig();
+        c.setEngine("unknown_engine");
+        c.setDataset(null);
+        c.setDatasets(null);
+        AnalysisConfig ac = new AnalysisConfig();
+        ac.setRunId("run-1");
+        ac.setEngines(List.of("elasticsearch", "qdrant"));
+        ac.setResultsCluster(Map.of("url", "http://localhost:9200"));
+        c.setAnalysis(ac);
+        IllegalStateException ex =
+                assertThrows(IllegalStateException.class, () -> ConfigValidator.validateBase(c, "analyze"));
+        assertEquals("Engine configuration not found for: unknown_engine", ex.getMessage());
+    }
+
+    @Test
     void validateBase_missingEngine() {
         JingraConfig c = validBaseConfig();
         c.setEngine(null);

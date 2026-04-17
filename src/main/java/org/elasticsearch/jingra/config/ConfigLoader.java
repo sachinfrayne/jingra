@@ -30,6 +30,14 @@ public final class ConfigLoader {
      * @throws IOException if loading fails
      */
     public static JingraConfig loadFromFile(String configPath) throws IOException {
+        return loadFromFile(configPath, null);
+    }
+
+    /**
+     * @param command CLI command ({@code load}, {@code eval}, {@code analyze}); passed to base validation so
+     *                {@code analyze} can omit benchmark {@code engine} when the config is analysis-only.
+     */
+    public static JingraConfig loadFromFile(String configPath, String command) throws IOException {
         Objects.requireNonNull(configPath, "configPath");
         Path path = Path.of(configPath);
         if (!Files.exists(path)) {
@@ -42,7 +50,7 @@ public final class ConfigLoader {
         logger.info("Loading configuration from: {}", configPath);
         try (InputStream is = Files.newInputStream(path)) {
             JingraConfig config = yamlMapper.readValue(is, JingraConfig.class);
-            ConfigValidator.validateBase(config);
+            ConfigValidator.validateBase(config, command);
             return config;
         }
     }

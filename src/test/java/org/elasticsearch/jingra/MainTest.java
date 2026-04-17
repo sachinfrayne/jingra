@@ -134,6 +134,27 @@ class MainTest {
     }
 
     @Test
+    void runMain_analyzeSuccess_analysisOnlyYamlWithoutBenchmarkEngine(@TempDir Path tempDir) throws Exception {
+        Path configFile = tempDir.resolve("analyze-only.yaml");
+        Files.writeString(
+                configFile,
+                """
+                        analysis:
+                          run_id: run-1
+                          engines:
+                            - elasticsearch
+                            - qdrant
+                          results_cluster:
+                            url: http://localhost:9200
+                          output_directory: /tmp/out
+                        """);
+        assertEquals(0, Main.runMain(new String[] { "analyze", configFile.toString() }, c -> {
+        }, c -> {
+        }, c -> {
+        }));
+    }
+
+    @Test
     void commandHandlerIsFunctionalInterface() {
         Main.CommandHandler h = c -> {
         };
