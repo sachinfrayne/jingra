@@ -116,6 +116,7 @@ public final class AnalyzeCommand {
                 List<BenchmarkResult> resultsForRecallAt = entry.getValue();
 
                 csvExporter.exportAllResults(resultsForRecallAt, recallAt, latencyMetrics, baselineEngine, recallAt + "_full_results.csv");
+                csvExporter.exportSpeedupSummary(resultsForRecallAt, recallAt, latencyMetrics, baselineEngine, recallAt + "_summary.csv");
 
                 logger.info("Exported {} results for {}", resultsForRecallAt.size(), recallAt);
             }

@@ -23,9 +23,27 @@ public class CsvExporter {
     }
 
     /**
+     * Ascending recall order with null recalls after non-null (stable tie-break for two nulls).
+     * Package-private for direct unit tests of all branches.
+     */
+    static int compareRecallForSort(Double recallA, Double recallB) {
+        if (recallA == null && recallB == null) {
+            return 0;
+        }
+        if (recallA == null) {
+            return 1;
+        }
+        if (recallB == null) {
+            return -1;
+        }
+        return Double.compare(recallA, recallB);
+    }
+
+    /**
      * Export all benchmark results with speedup comparison.
      * Each row is one result from one engine with one param configuration.
      * Speedup is calculated for matching recall levels across engines.
+     * Results are sorted by recall ascending.
      *
      * @param results list of benchmark results
      * @param recallAtN recall label (e.g., "recall@100")
@@ -44,6 +62,11 @@ public class CsvExporter {
         ensureDirectoryExists();
         Path outputPath = Paths.get(outputDirectory, filename);
 
+        // Sort results by recall ascending
+        List<BenchmarkResult> sortedResults = new java.util.ArrayList<>(results);
+        sortedResults.sort(
+                (a, b) -> compareRecallForSort(a.getMetricAsDouble("recall"), b.getMetricAsDouble("recall")));
+
         // Build header with all latency metric columns
         List<String> headers = new java.util.ArrayList<>();
         headers.add("RecallAtN");
@@ -60,19 +83,16 @@ public class CsvExporter {
         headers.add("Throughput");
         headers.add("Speedup");
 
-        // Use median latency for speedup calculation (prefer server_latency_median)
-        String speedupMetric = findSpeedupMetric(latencyMetrics);
-
         // Build index for speedup lookup: rounded_recall -> engine -> best result
         // Use regular throughput for consistency with what's displayed in CSV
-        Map<String, Map<String, BenchmarkResult>> speedupIndex = buildSpeedupIndex(results);
+        Map<String, Map<String, BenchmarkResult>> speedupIndex = buildSpeedupIndex(sortedResults);
 
         try (FileWriter writer = new FileWriter(outputPath.toFile());
              CSVPrinter printer = new CSVPrinter(writer, CSVFormat.DEFAULT.builder()
                      .setHeader(headers.toArray(new String[0]))
                      .build())) {
 
-            for (BenchmarkResult result : results) {
+            for (BenchmarkResult result : sortedResults) {
                 List<Object> record = new java.util.ArrayList<>();
 
                 Double recall = result.getMetricAsDouble("recall");
@@ -104,17 +124,98 @@ public class CsvExporter {
     }
 
     /**
-     * Find the best metric to use for speedup calculation.
-     * Prefers server_latency_median, falls back to latency_median, then first metric.
+     * Export speedup summary containing rows for aligned recall values where both engines have data.
+     * For each speedup comparison, includes BOTH the faster engine's row (with speedup value)
+     * and the slower engine's row (without speedup value).
+     * Results are sorted by recall ascending.
+     *
+     * @param results list of benchmark results
+     * @param recallAtN recall label (e.g., "recall@100")
+     * @param latencyMetrics list of latency metrics to extract as separate columns
+     * @param baselineEngine name of baseline engine for speedup calculation
+     * @param filename output filename
+     * @throws IOException if export fails
      */
-    private String findSpeedupMetric(List<String> latencyMetrics) {
-        if (latencyMetrics.contains("server_latency_median")) {
-            return "server_latency_median";
+    public void exportSpeedupSummary(
+            List<BenchmarkResult> results,
+            String recallAtN,
+            List<String> latencyMetrics,
+            String baselineEngine,
+            String filename
+    ) throws IOException {
+        ensureDirectoryExists();
+        Path outputPath = Paths.get(outputDirectory, filename);
+
+        // Sort results by recall ascending
+        List<BenchmarkResult> sortedResults = new java.util.ArrayList<>(results);
+        sortedResults.sort(
+                (a, b) -> compareRecallForSort(a.getMetricAsDouble("recall"), b.getMetricAsDouble("recall")));
+
+        // Build header with all latency metric columns
+        List<String> headers = new java.util.ArrayList<>();
+        headers.add("RecallAtN");
+        headers.add("Engine");
+        headers.add("ParamKey");
+        headers.add("Recall");
+        headers.add("Recall Rounded");
+
+        // Add column for each latency metric
+        for (String metric : latencyMetrics) {
+            headers.add(formatColumnName(metric));
         }
-        if (latencyMetrics.contains("latency_median")) {
-            return "latency_median";
+
+        headers.add("Throughput");
+        headers.add("Speedup");
+
+        // Build index for speedup lookup
+        Map<String, Map<String, BenchmarkResult>> speedupIndex = buildSpeedupIndex(sortedResults);
+
+        try (FileWriter writer = new FileWriter(outputPath.toFile());
+             CSVPrinter printer = new CSVPrinter(writer, CSVFormat.DEFAULT.builder()
+                     .setHeader(headers.toArray(new String[0]))
+                     .build())) {
+
+            for (BenchmarkResult result : sortedResults) {
+                Double recall = result.getMetricAsDouble("recall");
+                String recallRounded = formatRecallRounded(recall);
+
+                // Check if this result is part of a speedup comparison (exactly 2 engines at this recall level)
+                Map<String, BenchmarkResult> enginesAtRecall = speedupIndex.get(recallRounded);
+                if (enginesAtRecall == null || enginesAtRecall.size() != 2) {
+                    continue; // Need exactly 2 engines for comparison
+                }
+
+                // Check if current result is in the index (i.e., it was selected as best for its engine)
+                BenchmarkResult indexedResult = enginesAtRecall.get(result.getEngine());
+                if (indexedResult == null || !result.getParamKey().equals(indexedResult.getParamKey())) {
+                    continue; // Not the indexed row for this engine
+                }
+
+                // Calculate speedup (will be empty for slower engine, but we include both rows)
+                String speedup = calculateSpeedup(result, recallRounded, speedupIndex);
+
+                // Build record
+                List<Object> record = new java.util.ArrayList<>();
+                record.add(recallAtN);
+                record.add(result.getEngine());
+                record.add(result.getParamKey());
+                record.add(formatNullableDouble(recall));
+                record.add(recallRounded);
+
+                // Extract each latency metric with fallback
+                for (String metric : latencyMetrics) {
+                    Double latency = extractLatencyWithFallback(result, metric);
+                    record.add(formatNullableDouble(latency));
+                }
+
+                // Throughput uses first latency metric's logic
+                Double throughput = extractThroughput(result, latencyMetrics.get(0));
+                record.add(formatNullableDouble(throughput));
+                record.add(speedup);
+
+                printer.printRecord(record);
+            }
         }
-        return latencyMetrics.get(0);
     }
 
     /**

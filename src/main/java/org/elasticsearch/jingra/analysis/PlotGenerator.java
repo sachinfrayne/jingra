@@ -201,50 +201,15 @@ public class PlotGenerator {
                 .flatMap(m -> m.keySet().stream())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
 
-        // Group recalls from different engines that are close enough (within 0.05)
-        // Map: representative recall -> map of engine -> BenchmarkResult
+        // Filter to recalls where ALL engines have data (engines naturally align in same rounded bucket)
+        // Map: recall -> map of engine -> BenchmarkResult
         Map<String, Map<String, BenchmarkResult>> alignedRecalls = new LinkedHashMap<>();
-        double tolerance = 0.05;
-
-        // Get all recalls in range 0.7-1.0
-        List<Map.Entry<String, Map<String, BenchmarkResult>>> recallsInRange = recallToEngineResults.entrySet().stream()
-                .filter(entry -> {
-                    double recall = Double.parseDouble(entry.getKey());
-                    return recall >= 0.70 && recall <= 1.00;
-                })
-                .collect(Collectors.toList());
-
-        // Match recalls across engines
-        Set<String> used = new HashSet<>();
-        for (Map.Entry<String, Map<String, BenchmarkResult>> entry : recallsInRange) {
-            if (used.contains(entry.getKey())) continue;
-
-            double recall1 = Double.parseDouble(entry.getKey());
-            Map<String, BenchmarkResult> group = new HashMap<>(entry.getValue());
-            used.add(entry.getKey());
-
-            // Find matching recalls from other engines
-            for (Map.Entry<String, Map<String, BenchmarkResult>> other : recallsInRange) {
-                if (used.contains(other.getKey())) continue;
-
-                double recall2 = Double.parseDouble(other.getKey());
-                if (Math.abs(recall1 - recall2) <= tolerance) {
-                    // Merge this recall into the group
-                    group.putAll(other.getValue());
-                    used.add(other.getKey());
+        for (Map.Entry<String, Map<String, BenchmarkResult>> entry : recallToEngineResults.entrySet()) {
+            double recall = Double.parseDouble(entry.getKey());
+            if (recall >= 0.70 && recall <= 1.00) {
+                if (allEngines.stream().allMatch(entry.getValue()::containsKey)) {
+                    alignedRecalls.put(entry.getKey(), entry.getValue());
                 }
-            }
-
-            // Only include groups where ALL engines have data
-            if (allEngines.stream().allMatch(group::containsKey)) {
-                // Use the highest recall in the group as the label
-                String label = String.format("%.2f", Math.max(recall1,
-                        group.keySet().stream()
-                                .map(eng -> group.get(eng).getMetricAsDouble("recall"))
-                                .filter(Objects::nonNull)
-                                .max(Double::compare)
-                                .orElse(recall1)));
-                alignedRecalls.put(label, group);
             }
         }
 

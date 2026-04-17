@@ -24,6 +24,16 @@ class CsvExporterTest {
     Path tempDir;
 
     @Test
+    void compareRecallForSort_coversNullAndNonNullOrderings() {
+        assertEquals(0, CsvExporter.compareRecallForSort(null, null));
+        assertTrue(CsvExporter.compareRecallForSort(null, 0.5) > 0, "null recall sorts after non-null");
+        assertTrue(CsvExporter.compareRecallForSort(0.5, null) < 0, "non-null recall sorts before null");
+        assertEquals(0, CsvExporter.compareRecallForSort(0.7, 0.7));
+        assertTrue(CsvExporter.compareRecallForSort(0.5, 0.9) < 0);
+        assertTrue(CsvExporter.compareRecallForSort(0.9, 0.5) > 0);
+    }
+
+    @Test
     void exportDetailedComparison_createsFile() throws IOException {
         CsvExporter exporter = new CsvExporter(tempDir.toString());
 
@@ -308,6 +318,22 @@ class CsvExporterTest {
 
         String line = Files.readAllLines(tempDir.resolve("out.csv")).get(1);
         assertTrue(line.contains("12.5000") || line.contains("12.5"));
+    }
+
+    @Test
+    void exportAllResults_usesServerThroughputWhenPresentForServerLatencyMetric() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult r = new org.elasticsearch.jingra.model.BenchmarkResult(
+                "run", "es", "1.0", "vector_search", "ds", "k=1", Map.of());
+        r.addMetric("recall", 0.9);
+        r.addMetric("server_latency_median", 3.0);
+        r.addMetric("server_throughput", 77.0);
+        r.addMetric("throughput", 99.0);
+
+        exporter.exportAllResults(List.of(r), "recall@100", List.of("server_latency_median"), "elasticsearch", "out.csv");
+
+        String line = Files.readAllLines(tempDir.resolve("out.csv")).get(1);
+        assertTrue(line.contains("77.0000") || line.contains("77.0"), "throughput column prefers server_throughput when set");
     }
 
     @Test
@@ -901,6 +927,15 @@ class CsvExporterTest {
         return r;
     }
 
+    private static org.elasticsearch.jingra.model.BenchmarkResult benchWithoutRecall(
+            String engine, String paramKey, double serverLatencyMedian, double throughput) {
+        org.elasticsearch.jingra.model.BenchmarkResult r = new org.elasticsearch.jingra.model.BenchmarkResult(
+                "run", engine, "1.0", "vector_search", "ds", paramKey, Map.of());
+        r.addMetric("server_latency_median", serverLatencyMedian);
+        r.addMetric("throughput", throughput);
+        return r;
+    }
+
     private static org.elasticsearch.jingra.model.BenchmarkResult benchThroughputSecondReadNull(
             String engine,
             String paramKey,
@@ -966,5 +1001,173 @@ class CsvExporterTest {
                 .targetLatency(targetLatency)
                 .targetThroughput(targetThroughput)
                 .build();
+    }
+
+    @Test
+    void exportSpeedupSummary_skipsEngineNotInSpeedupIndexWhenBucketHasExactlyTwoOtherEngines() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult es =
+                bench("es", "k=1", 0.751, 10.0, 100.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd =
+                bench("qdrant", "ef=1", 0.749, 15.0, 80.0);
+        org.elasticsearch.jingra.model.BenchmarkResult os =
+                new org.elasticsearch.jingra.model.BenchmarkResult(
+                        "run", "opensearch", "1.0", "vector_search", "ds", "k=os", Map.of());
+        os.addMetric("recall", 0.75);
+        os.addMetric("latency_median", 5.0);
+
+        exporter.exportSpeedupSummary(
+                List.of(es, qd, os), "recall@100", List.of("latency_median"), "elasticsearch", "summary.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+        assertEquals(3, lines.size(), "header + es + qdrant only; opensearch shares recall bucket but is not in index");
+        assertTrue(lines.stream().noneMatch(l -> l.contains("opensearch")));
+    }
+
+    @Test
+    void exportSpeedupSummary_skipsSameEngineRowWhenParamKeyIsNotIndexedSelection() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult esLow =
+                bench("es", "k=low", 0.751, 20.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult esHigh =
+                bench("es", "k=high", 0.751, 10.0, 200.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd =
+                bench("qdrant", "ef=1", 0.749, 15.0, 80.0);
+
+        exporter.exportSpeedupSummary(
+                List.of(esLow, esHigh, qd), "recall@100", List.of("latency_median"), "elasticsearch", "summary.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+        assertEquals(3, lines.size());
+        assertTrue(lines.stream().noneMatch(l -> l.contains("k=low")), "lower-throughput duplicate is not the indexed row");
+        assertTrue(lines.stream().anyMatch(l -> l.contains("k=high")));
+    }
+
+    @Test
+    void exportSpeedupSummary_includesBothEnginesForEachComparison() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+
+        // Create results where only some have matching rounded recalls
+        org.elasticsearch.jingra.model.BenchmarkResult es1 = bench("es", "k=10", 0.751, 10.0, 100.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd1 = bench("qdrant", "ef=20", 0.749, 15.0, 80.0);
+
+        // This one has no match (qdrant is alone at 0.85)
+        org.elasticsearch.jingra.model.BenchmarkResult qd2 = bench("qdrant", "ef=30", 0.85, 20.0, 50.0);
+
+        List<org.elasticsearch.jingra.model.BenchmarkResult> results = List.of(es1, qd1, qd2);
+
+        exporter.exportSpeedupSummary(results, "recall@100", List.of("latency_median"), "elasticsearch", "summary.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+
+        // Header + 2 rows (both engines at 0.75)
+        assertEquals(3, lines.size(), "Should have header and 2 rows (both engines compared at 0.75)");
+
+        // Rows are sorted by recall (0.749 < 0.751), so qdrant comes first
+        // First row: qdrant (recall 0.749, slower engine, no speedup)
+        assertTrue(lines.get(1).contains("qdrant"));
+        assertTrue(lines.get(1).contains("0.75"));
+
+        // Second row: elasticsearch (recall 0.751, faster engine, with speedup)
+        assertTrue(lines.get(2).contains("es"));
+        assertTrue(lines.get(2).contains("0.75"));
+    }
+
+    /**
+     * Exercises recall sort comparator: non-null recalls ordered ascending, then rows with missing recall
+     * (nulls last; two null-recall rows compare equal and keep stable order).
+     */
+    @Test
+    void exportAllResults_ordersNullRecallRowsAfterRowsWithRecall() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult naFirst =
+                benchWithoutRecall("elasticsearch", "k=na1", 5.0, 10.0);
+        org.elasticsearch.jingra.model.BenchmarkResult withRecall =
+                bench("qdrant", "k=mid", 0.88, 4.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult naSecond =
+                benchWithoutRecall("opensearch", "k=na2", 6.0, 11.0);
+
+        exporter.exportAllResults(
+                List.of(naFirst, withRecall, naSecond),
+                "recall@100",
+                List.of("server_latency_median"),
+                "elasticsearch",
+                "out.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("out.csv"));
+        assertEquals(4, lines.size(), "header + 3 rows");
+        assertTrue(lines.get(1).contains("qdrant"), "lowest recall row first");
+        assertTrue(lines.get(1).contains("0.88"));
+        assertTrue(lines.get(2).contains("elasticsearch"), "null-recall rows after measured recall, stable order");
+        assertTrue(lines.get(3).contains("opensearch"));
+    }
+
+    @Test
+    void exportAllResults_sortComparatorBothRecallsNullComparesEqual() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult a = benchWithoutRecall("elasticsearch", "k=a", 1.0, 10.0);
+        org.elasticsearch.jingra.model.BenchmarkResult b = benchWithoutRecall("qdrant", "k=b", 2.0, 20.0);
+
+        exporter.exportAllResults(
+                List.of(a, b),
+                "recall@100",
+                List.of("server_latency_median"),
+                "elasticsearch",
+                "out.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("out.csv"));
+        assertEquals(3, lines.size());
+        assertTrue(lines.get(1).contains("elasticsearch"));
+        assertTrue(lines.get(2).contains("qdrant"));
+    }
+
+    @Test
+    void exportSpeedupSummary_sortComparatorCoversNullRecallOrdering() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult na =
+                benchWithoutRecall("elasticsearch", "k=na", 1.0, 10.0);
+        org.elasticsearch.jingra.model.BenchmarkResult es =
+                bench("es", "k=10", 0.751, 10.0, 100.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd =
+                bench("qdrant", "ef=20", 0.749, 15.0, 80.0);
+
+        exporter.exportSpeedupSummary(
+                List.of(na, es, qd), "recall@100", List.of("latency_median"), "elasticsearch", "summary.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+        assertEquals(3, lines.size(), "header + two rows (both engines at shared 0.75 bucket)");
+        // Sorted by recall: qdrant (0.749) comes before es (0.751)
+        assertTrue(lines.get(1).contains("qdrant"));
+        assertTrue(lines.get(2).contains("es"));
+    }
+
+    @Test
+    void exportSpeedupSummary_sortsByRecallAscending() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+
+        // Create results with multiple matching recalls, but add them out of order
+        org.elasticsearch.jingra.model.BenchmarkResult es2 = bench("es", "k=30", 0.851, 12.0, 90.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd2 = bench("qdrant", "ef=40", 0.849, 18.0, 60.0);
+
+        org.elasticsearch.jingra.model.BenchmarkResult es1 = bench("es", "k=20", 0.751, 10.0, 100.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd1 = bench("qdrant", "ef=30", 0.749, 15.0, 80.0);
+
+        // Add in high->low order
+        List<org.elasticsearch.jingra.model.BenchmarkResult> results = List.of(es2, qd2, es1, qd1);
+
+        exporter.exportSpeedupSummary(results, "recall@100", List.of("latency_median"), "elasticsearch", "summary.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+
+        // Header + 4 rows (2 engines at each of 2 recall levels)
+        assertEquals(5, lines.size(), "Should have header and 4 rows (both engines at 2 recall levels)");
+
+        // First two data rows should have lower recall (0.75)
+        assertTrue(lines.get(1).contains("0.75"), "First row should have recall 0.75");
+        assertTrue(lines.get(2).contains("0.75"), "Second row should have recall 0.75");
+
+        // Last two data rows should have higher recall (0.85)
+        assertTrue(lines.get(3).contains("0.85"), "Third row should have recall 0.85");
+        assertTrue(lines.get(4).contains("0.85"), "Fourth row should have recall 0.85");
     }
 }
