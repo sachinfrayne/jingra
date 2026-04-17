@@ -343,8 +343,9 @@ class PlotGeneratorTest {
 
         Map<String, List<BenchmarkResult>> data = new HashMap<>();
         List<BenchmarkResult> recall100Results = new ArrayList<>();
-        recall100Results.add(createResultWithThroughput("elasticsearch", 0.9, 100.0, 0.0));
-        recall100Results.add(createResultWithThroughput("qdrant", 0.88, 100.0, 0.0));
+        // Both engines at same rounded recall (0.90) but with 0 throughput
+        recall100Results.add(createResultWithThroughput("elasticsearch", 0.901, 100.0, 0.0));
+        recall100Results.add(createResultWithThroughput("qdrant", 0.899, 100.0, 0.0));
         data.put("recall@100", recall100Results);
 
         generator.generateThroughputOverview(data);
