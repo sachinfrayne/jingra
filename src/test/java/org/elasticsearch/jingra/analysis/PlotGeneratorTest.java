@@ -567,7 +567,8 @@ class PlotGeneratorTest {
 
         generator.generateThroughputOverview(data);
 
-        assertFalse(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().equals("throughput_overview.png")));
+        // With the new alignment logic, the chart is still generated even if throughput becomes null later
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().equals("throughput_overview.png")));
     }
 
     private static BenchmarkResult throughputSecondReadNull(
@@ -631,29 +632,104 @@ class PlotGeneratorTest {
         assertNull(PlotGenerator.throughputMetric(r));
     }
 
+    /**
+     * A recall bucket whose numeric key is {@code > 1.0} is filtered out of {@code recallsInRange}
+     * (covers {@code recall <= 1.00} false in the stream filter).
+     */
     @Test
-    void isPositiveThroughput_coversNullZeroNegativeAndPositive() {
-        assertFalse(PlotGenerator.isPositiveThroughput(null));
-        assertFalse(PlotGenerator.isPositiveThroughput(0.0));
-        assertFalse(PlotGenerator.isPositiveThroughput(-1.0));
-        assertTrue(PlotGenerator.isPositiveThroughput(0.001));
+    void generateThroughputOverview_ignoresRoundedRecallBucketsAboveOne() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString());
+
+        Map<String, List<BenchmarkResult>> data = new HashMap<>();
+        List<BenchmarkResult> list = new ArrayList<>();
+        list.add(createResultWithThroughput("elasticsearch", 1.021, 50.0, 20.0));
+        list.add(createResultWithThroughput("qdrant", 1.019, 40.0, 25.0));
+        list.add(createResultWithThroughput("elasticsearch", 0.851, 50.0, 20.0));
+        list.add(createResultWithThroughput("qdrant", 0.849, 40.0, 25.0));
+        data.put("recall@100", list);
+
+        generator.generateThroughputOverview(data);
+
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().equals("throughput_overview.png")));
+    }
+
+    /**
+     * When {@code allEngines} includes an engine that never appears in the 0.7–1.0 alignment window,
+     * no recall group passes {@code allMatch} and the empty-overview warning path runs.
+     */
+    @Test
+    void generateThroughputOverview_warnsWhenEngineOnlyPresentOutsideAlignmentRange() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString());
+
+        Map<String, List<BenchmarkResult>> data = new HashMap<>();
+        List<BenchmarkResult> list = new ArrayList<>();
+        list.add(createResultWithThroughput("elasticsearch", 0.851, 50.0, 20.0));
+        list.add(createResultWithThroughput("qdrant", 0.849, 40.0, 25.0));
+        list.add(createResultWithThroughput("opensearch", 0.50, 30.0, 15.0));
+        data.put("recall@100", list);
+
+        generator.generateThroughputOverview(data);
+
+        assertFalse(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().equals("throughput_overview.png")));
     }
 
     @Test
-    void shouldContinueSelectingRecalls_coversLoopConditions() {
-        assertTrue(PlotGenerator.shouldContinueSelectingRecalls(0, 10, 1, 6));
-        assertFalse(PlotGenerator.shouldContinueSelectingRecalls(5, 5, 1, 6));
-        assertFalse(PlotGenerator.shouldContinueSelectingRecalls(0, 10, 6, 6));
+    void generateThroughputOverview_nullThroughputUsesZeroInSeries() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString());
+
+        Map<String, List<BenchmarkResult>> data = new HashMap<>();
+        List<BenchmarkResult> list = new ArrayList<>();
+        list.add(createResultWithThroughput("elasticsearch", 0.851, 50.0, 20.0));
+        list.add(createResultWithThroughput("qdrant", 0.849, 40.0, 25.0));
+        BenchmarkResult os = new BenchmarkResult(
+                "test-run", "opensearch", "1.0", "vector_search", "test-dataset", "k=os", Map.of()) {
+            @Override
+            public Double getMetricAsDouble(String name) {
+                if ("throughput".equals(name)) {
+                    return null;
+                }
+                return super.getMetricAsDouble(name);
+            }
+        };
+        os.addMetric("recall", 0.850);
+        os.addMetric("latency_avg", 35.0);
+        list.add(os);
+        data.put("recall@100", list);
+
+        generator.generateThroughputOverview(data);
+
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().equals("throughput_overview.png")));
     }
 
     @Test
-    void addThroughputIfPositive_onlyAddsWhenPositive() {
-        List<Double> list = new ArrayList<>();
-        PlotGenerator.addThroughputIfPositive(list, null);
-        PlotGenerator.addThroughputIfPositive(list, 0.0);
-        assertTrue(list.isEmpty());
-        PlotGenerator.addThroughputIfPositive(list, 7.5);
-        assertEquals(1, list.size());
-        assertEquals(7.5, list.get(0));
+    void generateThroughputOverview_mergeKeepsFirstWhenThroughputsTied() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString());
+
+        Map<String, List<BenchmarkResult>> data = new HashMap<>();
+        List<BenchmarkResult> list = new ArrayList<>();
+        list.add(createResultWithThroughput("elasticsearch", 0.851, 100.0, 50.0));
+        list.add(createResultWithThroughput("elasticsearch", 0.849, 100.0, 50.0));
+        list.add(createResultWithThroughput("qdrant", 0.850, 100.0, 8.0));
+        data.put("recall@100", list);
+
+        generator.generateThroughputOverview(data);
+
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().equals("throughput_overview.png")));
+    }
+
+    @Test
+    void generateThroughputOverview_requiresAllThreeEnginesAtAlignedRecall() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString());
+
+        Map<String, List<BenchmarkResult>> data = new HashMap<>();
+        List<BenchmarkResult> list = new ArrayList<>();
+        list.add(createResultWithThroughput("elasticsearch", 0.851, 50.0, 20.0));
+        list.add(createResultWithThroughput("qdrant", 0.849, 40.0, 25.0));
+        list.add(createResultWithThroughput("opensearch", 0.850, 35.0, 30.0));
+        data.put("recall@100", list);
+
+        generator.generateThroughputOverview(data);
+
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().equals("throughput_overview.png")));
     }
 }

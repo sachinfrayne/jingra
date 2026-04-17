@@ -21,10 +21,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -194,81 +196,87 @@ public class PlotGenerator {
             return;
         }
 
-        // Collect all unique engines across all recall levels
+        // Collect all unique engines
         Set<String> allEngines = recallToEngineResults.values().stream()
                 .flatMap(m -> m.keySet().stream())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
 
-        // Filter to recall values between 0.7 and 0.9 where ALL engines have data
-        List<String> candidateRecalls = recallToEngineResults.entrySet().stream()
+        // Group recalls from different engines that are close enough (within 0.05)
+        // Map: representative recall -> map of engine -> BenchmarkResult
+        Map<String, Map<String, BenchmarkResult>> alignedRecalls = new LinkedHashMap<>();
+        double tolerance = 0.05;
+
+        // Get all recalls in range 0.7-1.0
+        List<Map.Entry<String, Map<String, BenchmarkResult>>> recallsInRange = recallToEngineResults.entrySet().stream()
                 .filter(entry -> {
                     double recall = Double.parseDouble(entry.getKey());
-                    return recall >= 0.70 && recall <= 0.90;
+                    return recall >= 0.70 && recall <= 1.00;
                 })
-                .filter(entry -> {
-                    // Only include if all engines have valid throughput data
-                    Map<String, BenchmarkResult> engineResults = entry.getValue();
-                    return allEngines.stream().allMatch(engine -> {
-                        BenchmarkResult result = engineResults.get(engine);
-                        Double throughput = result != null ? result.getMetricAsDouble("throughput") : null;
-                        return throughput != null && throughput > 0;
-                    });
-                })
-                .map(Map.Entry::getKey)
-                .sorted((a, b) -> Double.compare(Double.parseDouble(a), Double.parseDouble(b)))
                 .collect(Collectors.toList());
 
-        if (candidateRecalls.isEmpty()) {
-            logger.warn("No recall values between 0.7-0.9 with complete engine data");
+        // Match recalls across engines
+        Set<String> used = new HashSet<>();
+        for (Map.Entry<String, Map<String, BenchmarkResult>> entry : recallsInRange) {
+            if (used.contains(entry.getKey())) continue;
+
+            double recall1 = Double.parseDouble(entry.getKey());
+            Map<String, BenchmarkResult> group = new HashMap<>(entry.getValue());
+            used.add(entry.getKey());
+
+            // Find matching recalls from other engines
+            for (Map.Entry<String, Map<String, BenchmarkResult>> other : recallsInRange) {
+                if (used.contains(other.getKey())) continue;
+
+                double recall2 = Double.parseDouble(other.getKey());
+                if (Math.abs(recall1 - recall2) <= tolerance) {
+                    // Merge this recall into the group
+                    group.putAll(other.getValue());
+                    used.add(other.getKey());
+                }
+            }
+
+            // Only include groups where ALL engines have data
+            if (allEngines.stream().allMatch(group::containsKey)) {
+                // Use the highest recall in the group as the label
+                String label = String.format("%.2f", Math.max(recall1,
+                        group.keySet().stream()
+                                .map(eng -> group.get(eng).getMetricAsDouble("recall"))
+                                .filter(Objects::nonNull)
+                                .max(Double::compare)
+                                .orElse(recall1)));
+                alignedRecalls.put(label, group);
+            }
+        }
+
+        if (alignedRecalls.isEmpty()) {
+            logger.warn("No aligned recall values between 0.7-1.0 where all engines have data");
             return;
         }
 
-        // Find recall with highest throughput difference between engines
-        String maxDiffRecall = candidateRecalls.stream()
-                .max((a, b) -> {
-                    double diffA = calculateThroughputDifference(recallToEngineResults.get(a), allEngines);
-                    double diffB = calculateThroughputDifference(recallToEngineResults.get(b), allEngines);
-                    return Double.compare(diffA, diffB);
-                })
-                .orElse(candidateRecalls.get(0));
-
-        // Randomly select up to 6 recall values, ensuring maxDiff is included
-        List<String> selectedRecalls = new ArrayList<>();
-        selectedRecalls.add(maxDiffRecall);
-
-        // Select additional random recalls
-        List<String> otherRecalls = new ArrayList<>(candidateRecalls);
-        otherRecalls.remove(maxDiffRecall);
-        Collections.shuffle(otherRecalls, new java.util.Random(42)); // Fixed seed for reproducibility
-
-        int maxBars = Math.min(6, candidateRecalls.size());
-        for (int i = 0;
-                shouldContinueSelectingRecalls(i, otherRecalls.size(), selectedRecalls.size(), maxBars);
-                i++) {
-            selectedRecalls.add(otherRecalls.get(i));
-        }
-
-        // Sort selected recalls for display
-        List<String> sortedRecallValues = selectedRecalls.stream()
+        // Randomly select up to 6 aligned recalls
+        List<String> candidateLabels = new ArrayList<>(alignedRecalls.keySet());
+        Collections.shuffle(candidateLabels, new java.util.Random(42));
+        int maxBars = Math.min(6, candidateLabels.size());
+        List<String> selectedLabels = candidateLabels.stream()
+                .limit(maxBars)
                 .sorted((a, b) -> Double.compare(Double.parseDouble(a), Double.parseDouble(b)))
                 .collect(Collectors.toList());
 
-        // Build throughput series for selected recalls only
+        // Build throughput series
         Map<String, List<Double>> engineThroughputs = new LinkedHashMap<>();
 
-        for (String recallValue : sortedRecallValues) {
-            Map<String, BenchmarkResult> engineResults = recallToEngineResults.get(recallValue);
+        for (String label : selectedLabels) {
+            Map<String, BenchmarkResult> engineResults = alignedRecalls.get(label);
 
             for (String engine : allEngines) {
-                Double throughput = throughputMetric(engineResults.get(engine));
-
-                if (isPositiveThroughput(throughput)) {
-                    engineThroughputs.computeIfAbsent(engine, k -> new ArrayList<>()).add(throughput);
-                } else {
-                    engineThroughputs.computeIfAbsent(engine, k -> new ArrayList<>()).add(0.0);
-                }
+                BenchmarkResult result = engineResults.get(engine);
+                Double throughput = throughputMetric(result);
+                double barValue = Objects.requireNonNullElse(throughput, 0.0);
+                engineThroughputs.computeIfAbsent(engine, k -> new ArrayList<>()).add(barValue);
             }
         }
+
+        List<String> sortedRecallValues = selectedLabels;
 
         // Check if we have any valid data
         boolean hasData = engineThroughputs.values().stream()
@@ -400,45 +408,6 @@ public class PlotGenerator {
      */
     static Double throughputMetric(BenchmarkResult result) {
         return result != null ? result.getMetricAsDouble("throughput") : null;
-    }
-
-    /**
-     * True when throughput is present and strictly positive (used for chart and diff logic).
-     */
-    static boolean isPositiveThroughput(Double throughput) {
-        return throughput != null && throughput > 0;
-    }
-
-    /**
-     * Continuation condition for filling {@code selectedRecalls} from {@code otherRecalls}.
-     */
-    static boolean shouldContinueSelectingRecalls(int i, int otherRecallsSize, int selectedSize, int maxBars) {
-        return i < otherRecallsSize && selectedSize < maxBars;
-    }
-
-    static void addThroughputIfPositive(List<Double> target, Double throughput) {
-        if (isPositiveThroughput(throughput)) {
-            target.add(throughput);
-        }
-    }
-
-    /**
-     * Calculate the maximum throughput difference between any pair of engines.
-     */
-    private double calculateThroughputDifference(Map<String, BenchmarkResult> engineResults, Set<String> allEngines) {
-        List<Double> throughputs = new ArrayList<>();
-
-        for (String engine : allEngines) {
-            addThroughputIfPositive(throughputs, throughputMetric(engineResults.get(engine)));
-        }
-
-        if (throughputs.size() < 2) {
-            return 0.0;
-        }
-
-        double max = Collections.max(throughputs);
-        double min = Collections.min(throughputs);
-        return max - min;
     }
 
     /**
