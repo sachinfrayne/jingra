@@ -22,6 +22,7 @@ class ConfigLoaderTest {
     @Test
     void loadFromFile_nullPath() {
         assertThrows(NullPointerException.class, () -> ConfigLoader.loadFromFile(null));
+        assertThrows(NullPointerException.class, () -> ConfigLoader.loadFromFile(null, "analyze"));
     }
 
     @Test
@@ -101,6 +102,26 @@ class ConfigLoaderTest {
                         """);
         IllegalStateException ex = assertThrows(IllegalStateException.class, () -> ConfigLoader.loadFromFile(f.toString()));
         assertEquals("Engine not specified in configuration", ex.getMessage());
+    }
+
+    @Test
+    void loadFromFile_analyzeCommand_analysisOnlyYaml() throws IOException {
+        Path f = write(
+                tempDir,
+                "analyze.yaml",
+                """
+                        analysis:
+                          run_id: "run-1"
+                          engines:
+                            - elasticsearch
+                            - qdrant
+                          results_cluster:
+                            url: "http://localhost:9200"
+                          output_directory: "/tmp/out"
+                        """);
+        JingraConfig config = ConfigLoader.loadFromFile(f.toString(), "analyze");
+        assertEquals("run-1", config.getAnalysis().getRunId());
+        assertEquals(2, config.getAnalysis().getEngines().size());
     }
 
     @Test

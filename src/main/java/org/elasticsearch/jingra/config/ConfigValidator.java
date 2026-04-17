@@ -21,9 +21,30 @@ public final class ConfigValidator {
      * For analyze command (when analysis section is present), datasets are optional.
      */
     public static void validateBase(JingraConfig config) {
-        String engine = config.getEngine();
-        if (engine == null || engine.isEmpty()) {
-            throw new IllegalStateException("Engine not specified in configuration");
+        validateBase(config, null);
+    }
+
+    /**
+     * Same as {@link #validateBase(JingraConfig)} but {@code cliCommand} allows relaxing rules for
+     * {@code analyze}, which does not use the benchmark {@code engine} / engine block (only
+     * {@code analysis.results_cluster}).
+     *
+     * @param cliCommand CLI command name (e.g. {@code "load"}, {@code "eval"}, {@code "analyze"}), or {@code null}
+     *                   for strict benchmark validation (engine required).
+     */
+    public static void validateBase(JingraConfig config, String cliCommand) {
+        boolean analyzeCommand = "analyze".equals(cliCommand);
+        if (!analyzeCommand) {
+            requireBenchmarkEngine(config);
+        } else {
+            String engine = config.getEngine();
+            if (engine != null && !engine.isBlank()) {
+                try {
+                    config.getEngineConfig();
+                } catch (IllegalStateException e) {
+                    throw new IllegalStateException("Engine configuration not found for: " + config.getEngine(), e);
+                }
+            }
         }
 
         // Skip dataset validation if this is an analysis-only config
@@ -45,16 +66,24 @@ public final class ConfigValidator {
             }
         }
 
+        logger.info("Configuration validated successfully");
+        if (config.getEngine() != null && !config.getEngine().isBlank()) {
+            logger.info("  Engine: {}", config.getEngine());
+        }
+        if (!isAnalysisOnly) {
+            logger.info("  Dataset: {}", config.getDataset());
+        }
+    }
+
+    private static void requireBenchmarkEngine(JingraConfig config) {
+        String engine = config.getEngine();
+        if (engine == null || engine.isEmpty()) {
+            throw new IllegalStateException("Engine not specified in configuration");
+        }
         try {
             config.getEngineConfig();
         } catch (IllegalStateException e) {
             throw new IllegalStateException("Engine configuration not found for: " + config.getEngine(), e);
-        }
-
-        logger.info("Configuration validated successfully");
-        logger.info("  Engine: {}", config.getEngine());
-        if (!isAnalysisOnly) {
-            logger.info("  Dataset: {}", config.getDataset());
         }
     }
 

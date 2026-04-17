@@ -87,7 +87,7 @@ public class Main {
         String configPath = args[1];
 
         try {
-            JingraConfig config = ConfigLoader.loadFromFile(configPath);
+            JingraConfig config = ConfigLoader.loadFromFile(configPath, command);
 
             // Apply logging configuration if specified
             LoggingConfigurator.configure(config);
