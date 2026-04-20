@@ -110,6 +110,14 @@ class AbstractBenchmarkEngineTest {
         public void publicWriteFirstQueryDump(String engineShortName, String requestJson) {
             writeFirstQueryDumpIfConfigured(engineShortName, requestJson);
         }
+
+        public boolean publicShouldWriteFirstQueryDump() {
+            return shouldWriteFirstQueryDump();
+        }
+
+        public JsonNode publicLoadQueryTemplateCached(String queryName) {
+            return loadQueryTemplateCached(queryName);
+        }
     }
 
     @BeforeEach
@@ -281,7 +289,9 @@ class AbstractBenchmarkEngineTest {
     @Test
     void testGetSchemaTemplate_missingTemplateFieldReturnsNull() throws Exception {
         writeJingraFile("schemas/no-template-key.json", "{\"not_template\":{}}");
-        assertNull(engine.getSchemaTemplate("no-template-key"));
+        Map<String, Object> tpl = engine.getSchemaTemplate("no-template-key");
+        assertNotNull(tpl);
+        assertTrue(tpl.containsKey("not_template"));
     }
 
     @Test
@@ -434,6 +444,35 @@ class AbstractBenchmarkEngineTest {
         cfg.put(AbstractBenchmarkEngine.CONFIG_QUERY_DUMP_DIRECTORY, blocker.toAbsolutePath().toString());
         engine = new TestBenchmarkEngine(cfg);
         assertDoesNotThrow(() -> engine.publicWriteFirstQueryDump("x", "{\"a\":1}"));
+    }
+
+    @Test
+    void testShouldWriteFirstQueryDump_nullDirectoryIsFalse() {
+        Map<String, Object> cfg = new HashMap<>();
+        engine = new TestBenchmarkEngine(cfg);
+        assertFalse(engine.publicShouldWriteFirstQueryDump());
+    }
+
+    @Test
+    void testShouldWriteFirstQueryDump_trueThenFalseAfterWrite(@TempDir Path dumpRoot) throws Exception {
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put(AbstractBenchmarkEngine.CONFIG_QUERY_DUMP_DIRECTORY, dumpRoot.toString());
+        engine = new TestBenchmarkEngine(cfg);
+        assertTrue(engine.publicShouldWriteFirstQueryDump());
+        engine.publicWriteFirstQueryDump("t", "{\"x\":1}");
+        assertFalse(engine.publicShouldWriteFirstQueryDump(), "after first write, subsequent dumps should be disabled");
+    }
+
+    @Test
+    void testLoadQueryTemplateCached_nullNameReturnsNullWithoutLoading() {
+        engine = new TestBenchmarkEngine(new HashMap<>()) {
+            @Override
+            protected JsonNode loadQueryTemplate(String queryName) {
+                fail("loadQueryTemplate should not be called for null queryName");
+                return null;
+            }
+        };
+        assertNull(engine.publicLoadQueryTemplateCached(null));
     }
 
     @Test

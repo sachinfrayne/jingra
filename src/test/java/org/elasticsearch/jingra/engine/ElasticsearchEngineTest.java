@@ -87,17 +87,15 @@ class ElasticsearchEngineTest {
     void testCreateIndex_withSchema() throws Exception {
         String schemaContent = """
                 {
-                  "template": {
-                    "mappings": {
-                      "properties": {
-                        "id": {"type": "keyword"},
-                        "title": {"type": "text"},
-                        "embedding": {
-                          "type": "dense_vector",
-                          "dims": 128,
-                          "index": true,
-                          "similarity": "cosine"
-                        }
+                  "mappings": {
+                    "properties": {
+                      "id": {"type": "keyword"},
+                      "title": {"type": "text"},
+                      "embedding": {
+                        "type": "dense_vector",
+                        "dims": 128,
+                        "index": true,
+                        "similarity": "cosine"
                       }
                     }
                   }
@@ -147,11 +145,9 @@ class ElasticsearchEngineTest {
 
         String schemaContent = """
                 {
-                  "template": {
-                    "mappings": {
-                      "properties": {
-                        "title": {"type": "text"}
-                      }
+                  "mappings": {
+                    "properties": {
+                      "title": {"type": "text"}
                     }
                   }
                 }
@@ -183,15 +179,15 @@ class ElasticsearchEngineTest {
     void testQuery_basicKNN() throws Exception {
         String queryTemplate = """
                 {
-                  "template": {
+                  "query": {
                     "knn": {
                       "field": "embedding",
                       "query_vector": "{{query_vector}}",
                       "k": "{{k}}",
                       "num_candidates": "{{num_candidates}}"
-                    },
-                    "size": "{{size}}"
-                  }
+                    }
+                  },
+                  "size": "{{size}}"
                 }
                 """;
 
@@ -231,7 +227,7 @@ class ElasticsearchEngineTest {
 
         String queryTemplate = """
                 {
-                  "template": {
+                  "query": {
                     "knn": {
                       "field": "embedding",
                       "query_vector": "{{query_vector}}",
@@ -242,9 +238,9 @@ class ElasticsearchEngineTest {
                           "category": "even"
                         }
                       }
-                    },
-                    "size": "{{size}}"
-                  }
+                    }
+                  },
+                  "size": "{{size}}"
                 }
                 """;
 
@@ -294,11 +290,9 @@ class ElasticsearchEngineTest {
         String tempIndex = "test-delete-index";
         String schemaContent = """
                 {
-                  "template": {
-                    "mappings": {
-                      "properties": {
-                        "field": {"type": "keyword"}
-                      }
+                  "mappings": {
+                    "properties": {
+                      "field": {"type": "keyword"}
                     }
                   }
                 }
@@ -331,12 +325,10 @@ class ElasticsearchEngineTest {
         String tempIndex = "test-large-batch";
         String schemaContent = """
                 {
-                  "template": {
-                    "mappings": {
-                      "properties": {
-                        "id": {"type": "keyword"},
-                        "value": {"type": "integer"}
-                      }
+                  "mappings": {
+                    "properties": {
+                      "id": {"type": "keyword"},
+                      "value": {"type": "integer"}
                     }
                   }
                 }

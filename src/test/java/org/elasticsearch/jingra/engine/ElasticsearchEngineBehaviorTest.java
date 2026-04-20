@@ -340,7 +340,7 @@ class ElasticsearchEngineBehaviorTest {
         Path dir = Path.of("jingra-config/schemas");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-es-no-template-key.json");
-        Files.writeString(f, "{\"not_template\": {}}");
+        Files.writeString(f, "{\"template\": {\"mappings\": {\"properties\": {\"f\": {\"type\": \"keyword\"}}}}}");
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
                 @Override
@@ -348,6 +348,7 @@ class ElasticsearchEngineBehaviorTest {
                     return false;
                 }
             };
+            // Wrapped schemas are rejected under the direct-only contract.
             assertFalse(e.createIndex("i", "behavior-es-no-template-key"));
         } finally {
             Files.deleteIfExists(f);
@@ -359,7 +360,7 @@ class ElasticsearchEngineBehaviorTest {
         Path dir = Path.of("jingra-config/schemas");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-es-create-fail.json");
-        Files.writeString(f, "{\"template\": {\"mappings\": {\"properties\": {\"f\": {\"type\": \"keyword\"}}}}}");
+        Files.writeString(f, "{\"mappings\": {\"properties\": {\"f\": {\"type\": \"keyword\"}}}}");
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
                 @Override
@@ -392,11 +393,14 @@ class ElasticsearchEngineBehaviorTest {
         Path dir = Path.of("jingra-config/queries");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-es-bad-render.json");
-        Files.writeString(f, "{\"no_template\": true}");
+        Files.writeString(f, "{\"query\": {\"term\": {\"x\": \"{{v}}\"}}}");
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {};
+            List<Object> cyclic = new ArrayList<>();
+            cyclic.add(cyclic);
+            QueryParams qp = new QueryParams(Map.of("v", cyclic));
             assertThrows(IllegalStateException.class,
-                    () -> e.query("idx", "behavior-es-bad-render", new QueryParams()));
+                    () -> e.query("idx", "behavior-es-bad-render", qp));
         } finally {
             Files.deleteIfExists(f);
         }
@@ -408,7 +412,7 @@ class ElasticsearchEngineBehaviorTest {
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-es-query-empty-id.json");
         Files.writeString(f, """
-                {"template": {"query": {"match_all": {}}, "size": 2}}
+                {"query": {"match_all": {}}, "size": 2}
                 """);
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
@@ -430,7 +434,7 @@ class ElasticsearchEngineBehaviorTest {
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-es-query.json");
         Files.writeString(f, """
-                {"template": {"query": {"match_all": {}}, "size": 1}}
+                {"query": {"match_all": {}}, "size": 1}
                 """);
         try {
             AtomicBoolean second = new AtomicBoolean(false);
@@ -462,7 +466,7 @@ class ElasticsearchEngineBehaviorTest {
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-es-query-fail.json");
         Files.writeString(f, """
-                {"template": {"query": {"match_all": {}}, "size": 1}}
+                {"query": {"match_all": {}}, "size": 1}
                 """);
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {

@@ -45,9 +45,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
  * Qdrant engine implementation.
@@ -57,6 +56,162 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
     private QdrantClient client;
     private ManagedChannel customChannel;  // Track custom channel for cleanup
     private final long grpcTimeoutSeconds;
+    private final ConcurrentHashMap<String, CompiledQueryTemplate> compiledQueryTemplates = new ConcurrentHashMap<>();
+
+    private static final WithPayloadSelector NO_PAYLOAD =
+            WithPayloadSelector.newBuilder().setEnable(false).build();
+    private static final WithPayloadSelector WITH_PAYLOAD =
+            WithPayloadSelector.newBuilder().setEnable(true).build();
+    private static final io.qdrant.client.grpc.Points.WithVectorsSelector NO_VECTORS =
+            io.qdrant.client.grpc.Points.WithVectorsSelector.newBuilder().setEnable(false).build();
+    private static final io.qdrant.client.grpc.Points.WithVectorsSelector WITH_VECTORS =
+            io.qdrant.client.grpc.Points.WithVectorsSelector.newBuilder().setEnable(true).build();
+
+    private record IntExpr(Integer literal, String paramName) {
+        Integer resolve(QueryParams params) {
+            if (literal != null) {
+                return literal;
+            }
+            return paramName != null ? params.getInteger(paramName) : null;
+        }
+    }
+
+    private record DoubleExpr(Double literal, String paramName) {
+        Double resolve(QueryParams params) {
+            if (literal != null) {
+                return literal;
+            }
+            if (paramName == null) {
+                return null;
+            }
+            Object v = params.getAll().get(paramName);
+            return v instanceof Number ? ((Number) v).doubleValue() : null;
+        }
+    }
+
+    private record VectorExpr(List<Float> literal, String paramName) {
+        List<Float> resolve(QueryParams params) {
+            if (literal != null) {
+                return literal;
+            }
+            return paramName != null ? params.getFloatList(paramName) : null;
+        }
+    }
+
+    private record CompiledQueryTemplate(
+            VectorExpr vector,
+            IntExpr limit,
+            IntExpr hnswEf,
+            boolean exact,
+            boolean quantRescore,
+            DoubleExpr quantOversampling,
+            Filter staticFilter,
+            boolean withPayload,
+            boolean withVector
+    ) {}
+
+    private static IntExpr compileIntExpr(String expression) {
+        if (expression == null) {
+            return new IntExpr(null, null);
+        }
+        String trimmed = expression.trim();
+        if (trimmed.startsWith("{{") && trimmed.endsWith("}}")) {
+            String paramName = trimmed.substring(2, trimmed.length() - 2).trim();
+            return new IntExpr(null, paramName.isEmpty() ? null : paramName);
+        }
+        try {
+            return new IntExpr(Integer.parseInt(trimmed), null);
+        } catch (NumberFormatException e) {
+            return new IntExpr(null, null);
+        }
+    }
+
+    private static DoubleExpr compileDoubleExpr(String expression) {
+        if (expression == null) {
+            return new DoubleExpr(null, null);
+        }
+        String trimmed = expression.trim();
+        if (trimmed.startsWith("{{") && trimmed.endsWith("}}")) {
+            String paramName = trimmed.substring(2, trimmed.length() - 2).trim();
+            return new DoubleExpr(null, paramName.isEmpty() ? null : paramName);
+        }
+        try {
+            return new DoubleExpr(Double.parseDouble(trimmed), null);
+        } catch (NumberFormatException e) {
+            return new DoubleExpr(null, null);
+        }
+    }
+
+    /**
+     * Legacy test helper for resolving template integer expressions.
+     * Kept for compatibility with same-package unit tests that reflectively invoke it.
+     */
+    @SuppressWarnings("unused")
+    private Integer resolveIntParam(String expression, QueryParams params) {
+        if (expression == null) {
+            return null;
+        }
+        String trimmed = expression.trim();
+        if (trimmed.startsWith("{{") && trimmed.endsWith("}}")) {
+            String paramName = trimmed.substring(2, trimmed.length() - 2).trim();
+            return paramName.isEmpty() ? null : params.getInteger(paramName);
+        }
+        try {
+            return Integer.parseInt(trimmed);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Legacy test helper for resolving template double expressions.
+     * Kept for compatibility with same-package unit tests that reflectively invoke it.
+     */
+    @SuppressWarnings("unused")
+    private Double resolveDoubleParam(String expression, QueryParams params) {
+        if (expression == null) {
+            return null;
+        }
+        String trimmed = expression.trim();
+        if (trimmed.startsWith("{{") && trimmed.endsWith("}}")) {
+            String paramName = trimmed.substring(2, trimmed.length() - 2).trim();
+            if (paramName.isEmpty()) {
+                return null;
+            }
+            Object v = params.getAll().get(paramName);
+            return v instanceof Number ? ((Number) v).doubleValue() : null;
+        }
+        try {
+            return Double.parseDouble(trimmed);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static VectorExpr compileVectorExpr(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return new VectorExpr(null, null);
+        }
+        if (node.isTextual()) {
+            String trimmed = node.asText().trim();
+            if (trimmed.startsWith("{{") && trimmed.endsWith("}}")) {
+                String paramName = trimmed.substring(2, trimmed.length() - 2).trim();
+                return new VectorExpr(null, paramName.isEmpty() ? null : paramName);
+            }
+            return new VectorExpr(null, null);
+        }
+        if (node.isArray()) {
+            ArrayList<Float> v = new ArrayList<>(node.size());
+            for (JsonNode e : node) {
+                if (!e.isNumber()) {
+                    return new VectorExpr(null, null);
+                }
+                v.add(e.floatValue());
+            }
+            return new VectorExpr(List.copyOf(v), null);
+        }
+        return new VectorExpr(null, null);
+    }
 
     public QdrantEngine(Map<String, Object> config) {
         super(config);
@@ -199,11 +354,8 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
                 return false;
             }
 
-            JsonNode templateNode = template.get("template");
-            if (templateNode == null) {
-                logger.error("Schema missing 'template' field");
-                return false;
-            }
+            // Support both legacy Jingra-wrapped schemas ({name, template:{...}}) and direct Qdrant-console schemas ({...}).
+            JsonNode templateNode = template.has("template") ? template.get("template") : template;
 
             // Parse schema configuration
             // Support both direct Qdrant format and ES/OS-shaped format
@@ -513,21 +665,34 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
         }
 
         try {
-            // Load and render query template
-            JsonNode template = loadQueryTemplate(queryName);
+            // Load query template (cached; avoid per-query I/O / JSON parse)
+            JsonNode template = loadQueryTemplateCached(queryName);
             if (template == null) {
                 logger.error("Query template '{}' not found", queryName);
                 return new QueryResponse(List.of(), null, null);
             }
 
-            // Extract query parameters
-            List<Float> queryVector = params.getFloatList("query_vector");
+            CompiledQueryTemplate compiled = compiledQueryTemplates.computeIfAbsent(queryName, ignored -> compileTemplate(template));
+
+            // Resolve request from query JSON (source of truth), with {{placeholders}} filled from QueryParams
+            List<Float> queryVector = compiled.vector != null ? compiled.vector.resolve(params) : null;
+            if (queryVector == null) {
+                // Back-compat: older harnesses always supply query_vector directly
+                queryVector = params.getFloatList("query_vector");
+            }
             if (queryVector == null) {
                 logger.error("query_vector is required for Qdrant search");
                 return new QueryResponse(List.of(), null, null);
             }
 
-            int limit = params.getInteger("size") != null ? params.getInteger("size") : 10;
+            Integer limit = compiled.limit != null ? compiled.limit.resolve(params) : null;
+            if (limit == null) {
+                // Back-compat: older harnesses always supply size directly
+                limit = params.getInteger("size");
+            }
+            if (limit == null) {
+                limit = 10;
+            }
 
             // Build search request using gRPC API
             SearchPoints.Builder searchBuilder = SearchPoints.newBuilder()
@@ -536,78 +701,44 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
                     .setLimit(limit)
                     .setTimeout(grpcTimeoutSeconds);
 
-            // Apply search params from template (hnsw_ef, quantization, etc.)
-            JsonNode templateParams = template.path("template").path("params");
-            if (templateParams.isMissingNode()) {
-                templateParams = template.path("params");
-            }
-
-            if (!templateParams.isMissingNode()) {
-                io.qdrant.client.grpc.Points.SearchParams.Builder paramsBuilder =
-                        io.qdrant.client.grpc.Points.SearchParams.newBuilder();
-
-                // Check if exact (brute force) search is requested
-                boolean isExact = templateParams.has("exact") && templateParams.get("exact").asBoolean(false);
-
-                if (isExact) {
-                    // For exact search, only set exact flag - skip hnsw_ef and quantization
-                    paramsBuilder.setExact(true);
-                } else {
-                    // For approximate search, handle hnsw_ef and quantization
-
-                    // Handle hnsw_ef (num_candidates)
-                    if (templateParams.has("hnsw_ef")) {
-                        String hnswEfExpr = templateParams.get("hnsw_ef").asText();
-                        Integer hnswEf = resolveIntParam(hnswEfExpr, params);
-                        if (hnswEf != null) {
-                            paramsBuilder.setHnswEf(hnswEf);
-                        }
-                    }
-
-                    // Handle quantization oversampling (rescoring): literal or single "{{param}}" (e.g. "{{rescore}}")
-                    if (templateParams.has("quantization")) {
-                        JsonNode quantParams = templateParams.get("quantization");
-                        if (quantParams.has("oversampling")) {
-                            String oversamplingExpr = quantParams.get("oversampling").asText();
-                            Double oversampling = resolveDoubleParam(oversamplingExpr, params);
-                            if (oversampling != null) {
-                                paramsBuilder.setQuantization(
-                                        QuantizationSearchParams.newBuilder()
-                                                .setRescore(true)
-                                                .setOversampling(oversampling)
-                                                .build()
-                                );
-                            }
-                        }
-                    }
+            // Apply search params (compiled once; resolve cheap per-query)
+            io.qdrant.client.grpc.Points.SearchParams.Builder paramsBuilder =
+                    io.qdrant.client.grpc.Points.SearchParams.newBuilder();
+            if (compiled.exact) {
+                paramsBuilder.setExact(true);
+            } else {
+                Integer hnswEf = compiled.hnswEf != null ? compiled.hnswEf.resolve(params) : null;
+                if (hnswEf != null) {
+                    paramsBuilder.setHnswEf(hnswEf);
                 }
-
-                searchBuilder.setParams(paramsBuilder.build());
-            }
-
-            // Apply filters from template
-            JsonNode filterNode = template.path("template").path("filter");
-            if (filterNode.isMissingNode()) {
-                filterNode = template.path("filter");
-            }
-
-            if (!filterNode.isMissingNode() && !filterNode.isNull()) {
-                Filter filter = parseFilter(filterNode);
-                if (filter != null) {
-                    searchBuilder.setFilter(filter);
+                Double oversampling = compiled.quantOversampling != null ? compiled.quantOversampling.resolve(params) : null;
+                if (oversampling != null) {
+                    paramsBuilder.setQuantization(
+                            QuantizationSearchParams.newBuilder()
+                                    .setRescore(compiled.quantRescore)
+                                    .setOversampling(oversampling)
+                                    .build()
+                    );
                 }
             }
+            searchBuilder.setParams(paramsBuilder.build());
 
-            searchBuilder.setWithPayload(WithPayloadSelector.newBuilder().setEnable(false).build());
-            searchBuilder.setWithVectors(io.qdrant.client.grpc.Points.WithVectorsSelector.newBuilder().setEnable(false).build());
+            if (compiled.staticFilter != null) {
+                searchBuilder.setFilter(compiled.staticFilter);
+            }
+
+            searchBuilder.setWithPayload(compiled.withPayload ? WITH_PAYLOAD : NO_PAYLOAD);
+            searchBuilder.setWithVectors(compiled.withVector ? WITH_VECTORS : NO_VECTORS);
 
             SearchPoints searchRequest = searchBuilder.build();
-            try {
-                writeFirstQueryDumpIfConfigured(
-                        getShortName(),
-                        formatSearchPointsJsonForDump(printSearchPointsForDump(searchRequest)));
-            } catch (InvalidProtocolBufferException e) {
-                logger.warn("Could not serialize SearchPoints for query dump", e);
+            if (shouldWriteFirstQueryDump()) {
+                try {
+                    writeFirstQueryDumpIfConfigured(
+                            getShortName(),
+                            formatSearchPointsJsonForDump(printSearchPointsForDump(searchRequest)));
+                } catch (InvalidProtocolBufferException e) {
+                    logger.warn("Could not serialize SearchPoints for query dump", e);
+                }
             }
 
             // Execute search using raw gRPC client to get full SearchResponse with timing
@@ -643,6 +774,57 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
             logger.error("Query execution failed", e);
             return new QueryResponse(List.of(), null, null);
         }
+    }
+
+    private CompiledQueryTemplate compileTemplate(JsonNode template) {
+        JsonNode templateNode = template.path("template");
+        if (templateNode.isMissingNode()) {
+            templateNode = template;
+        }
+
+        JsonNode vectorNode = templateNode.get("vector");
+        VectorExpr vector =
+                (vectorNode == null || vectorNode.isNull()) ? null : compileVectorExpr(vectorNode);
+
+        JsonNode limitNode = templateNode.get("limit");
+        IntExpr limit = limitNode == null || limitNode.isNull()
+                ? null
+                : compileIntExpr(limitNode.asText());
+
+        // Apply search params from template (hnsw_ef, quantization, etc.)
+        JsonNode templateParams = templateNode.path("params");
+
+        boolean exact = templateParams.has("exact") && templateParams.get("exact").asBoolean(false);
+
+        IntExpr hnswEf = null;
+        DoubleExpr oversampling = null;
+        boolean rescore = true;
+        if (!exact) {
+            if (templateParams.has("hnsw_ef")) {
+                hnswEf = compileIntExpr(templateParams.get("hnsw_ef").asText());
+            }
+            if (templateParams.has("quantization")) {
+                JsonNode quantParams = templateParams.get("quantization");
+                if (quantParams.has("rescore")) {
+                    rescore = quantParams.get("rescore").asBoolean(true);
+                }
+                if (quantParams.has("oversampling")) {
+                    oversampling = compileDoubleExpr(quantParams.get("oversampling").asText());
+                }
+            }
+        }
+
+        // Compile static filter if present (assumes no per-query placeholders inside filter)
+        JsonNode filterNode = templateNode.path("filter");
+        Filter staticFilter = null;
+        if (!filterNode.isMissingNode() && !filterNode.isNull()) {
+            staticFilter = parseFilter(filterNode);
+        }
+
+        boolean withPayload = templateNode.path("with_payload").asBoolean(false);
+        boolean withVector = templateNode.path("with_vector").asBoolean(false);
+
+        return new CompiledQueryTemplate(vector, limit, hnswEf, exact, rescore, oversampling, staticFilter, withPayload, withVector);
     }
 
     @Override
@@ -785,54 +967,6 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
         }
 
         return matchBuilder.build();
-    }
-
-    /**
-     * Resolve a template parameter expression like "{{num_candidates}}" to an integer value.
-     */
-    private Integer resolveIntParam(String expression, QueryParams params) {
-        if (expression == null) {
-            return null;
-        }
-
-        // Handle template expressions like "{{num_candidates}}"
-        if (expression.startsWith("{{") && expression.endsWith("}}")) {
-            String paramName = expression.substring(2, expression.length() - 2).trim();
-            return params.getInteger(paramName);
-        }
-
-        // Handle direct integer values
-        try {
-            return Integer.parseInt(expression);
-        } catch (NumberFormatException e) {
-            logger.warn("Could not parse integer parameter: {}", expression);
-            return null;
-        }
-    }
-
-    /**
-     * Resolve oversampling and similar values: a numeric literal or a single {@code {{param}}} placeholder.
-     */
-    private Double resolveDoubleParam(String expression, QueryParams params) {
-        if (expression == null) {
-            return null;
-        }
-        String trimmed = expression.trim();
-        if (trimmed.startsWith("{{") && trimmed.endsWith("}}")) {
-            String paramName = trimmed.substring(2, trimmed.length() - 2).trim();
-            Object v = params.getAll().get(paramName);
-            if (v instanceof Number) {
-                return ((Number) v).doubleValue();
-            }
-            logger.warn("Parameter '{}' not found or not numeric in query params", paramName);
-            return null;
-        }
-        try {
-            return Double.parseDouble(trimmed);
-        } catch (NumberFormatException e) {
-            logger.warn("Could not parse double parameter: {}", expression);
-            return null;
-        }
     }
 
     /**

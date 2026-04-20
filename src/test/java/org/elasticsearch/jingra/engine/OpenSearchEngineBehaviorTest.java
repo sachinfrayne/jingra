@@ -286,7 +286,7 @@ class OpenSearchEngineBehaviorTest {
         Path dir = Path.of("jingra-config/schemas");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-no-template-key.json");
-        Files.writeString(f, "{\"not_template\": {}}");
+        Files.writeString(f, "{\"template\": {\"mappings\": {\"properties\": {\"f\": {\"type\": \"keyword\"}}}}}");
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
                 @Override
@@ -294,6 +294,7 @@ class OpenSearchEngineBehaviorTest {
                     return false;
                 }
             };
+            // Wrapped schemas are rejected under the direct-only contract.
             assertFalse(e.createIndex("i", "behavior-os-no-template-key"));
         } finally {
             Files.deleteIfExists(f);
@@ -305,7 +306,7 @@ class OpenSearchEngineBehaviorTest {
         Path dir = Path.of("jingra-config/schemas");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-put-fail.json");
-        Files.writeString(f, "{\"template\": {\"mappings\": {\"properties\": {\"f\": {\"type\": \"keyword\"}}}}}");
+        Files.writeString(f, "{\"mappings\": {\"properties\": {\"f\": {\"type\": \"keyword\"}}}}");
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
                 @Override
@@ -338,11 +339,14 @@ class OpenSearchEngineBehaviorTest {
         Path dir = Path.of("jingra-config/queries");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-bad-render.json");
-        Files.writeString(f, "{\"no_template\": true}");
+        Files.writeString(f, "{\"query\": {\"term\": {\"x\": \"{{v}}\"}}}");
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {};
+            List<Object> cyclic = new ArrayList<>();
+            cyclic.add(cyclic);
+            QueryParams qp = new QueryParams(Map.of("v", cyclic));
             assertThrows(IllegalStateException.class,
-                    () -> e.query("idx", "behavior-os-bad-render", new QueryParams()));
+                    () -> e.query("idx", "behavior-os-bad-render", qp));
         } finally {
             Files.deleteIfExists(f);
         }
@@ -354,7 +358,7 @@ class OpenSearchEngineBehaviorTest {
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-query-empty-id.json");
         Files.writeString(f, """
-                {"template": {"query": {"match_all": {}}, "size": 2}}
+                {"query": {"match_all": {}}, "size": 2}
                 """);
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
@@ -377,7 +381,7 @@ class OpenSearchEngineBehaviorTest {
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-query.json");
         Files.writeString(f, """
-                {"template": {"query": {"match_all": {}}, "size": 1}}
+                {"query": {"match_all": {}}, "size": 1}
                 """);
         try {
             AtomicBoolean secondRound = new AtomicBoolean(false);
@@ -409,7 +413,7 @@ class OpenSearchEngineBehaviorTest {
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-query-fail.json");
         Files.writeString(f, """
-                {"template": {"query": {"match_all": {}}, "size": 1}}
+                {"query": {"match_all": {}}, "size": 1}
                 """);
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
@@ -704,7 +708,7 @@ class OpenSearchEngineBehaviorTest {
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-query-hits-not-array.json");
         Files.writeString(f, """
-                {"template": {"query": {"match_all": {}}, "size": 1}}
+                {"query": {"match_all": {}}, "size": 1}
                 """);
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
