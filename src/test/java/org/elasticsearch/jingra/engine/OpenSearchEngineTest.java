@@ -97,32 +97,30 @@ class OpenSearchEngineTest {
     void testCreateIndex_withSchema() throws Exception {
         String schemaContent = """
                 {
-                  "template": {
-                    "mappings": {
-                      "properties": {
-                        "id": {"type": "keyword"},
-                        "title": {"type": "text"},
-                        "embedding": {
-                          "type": "knn_vector",
-                          "dimension": 128,
-                          "space_type": "cosinesimil",
-                          "data_type": "float",
-                          "compression_level": "32x",
-                          "mode": "in_memory",
-                          "method": {
-                            "name": "hnsw",
-                            "engine": "faiss",
-                            "parameters": {
-                              "ef_construction": 100,
-                              "m": 16
-                            }
+                  "mappings": {
+                    "properties": {
+                      "id": {"type": "keyword"},
+                      "title": {"type": "text"},
+                      "embedding": {
+                        "type": "knn_vector",
+                        "dimension": 128,
+                        "space_type": "cosinesimil",
+                        "data_type": "float",
+                        "compression_level": "32x",
+                        "mode": "in_memory",
+                        "method": {
+                          "name": "hnsw",
+                          "engine": "faiss",
+                          "parameters": {
+                            "ef_construction": 100,
+                            "m": 16
                           }
                         }
                       }
-                    },
-                    "settings": {
-                      "index.knn": true
                     }
+                  },
+                  "settings": {
+                    "index.knn": true
                   }
                 }
                 """;
@@ -170,11 +168,9 @@ class OpenSearchEngineTest {
 
         String schemaContent = """
                 {
-                  "template": {
-                    "mappings": {
-                      "properties": {
-                        "title": {"type": "text"}
-                      }
+                  "mappings": {
+                    "properties": {
+                      "title": {"type": "text"}
                     }
                   }
                 }
@@ -206,14 +202,12 @@ class OpenSearchEngineTest {
     void testQuery_basicKNN() throws Exception {
         String queryTemplate = """
                 {
-                  "template": {
-                    "size": "{{size}}",
-                    "query": {
-                      "knn": {
-                        "embedding": {
-                          "vector": "{{query_vector}}",
-                          "k": "{{k}}"
-                        }
+                  "size": "{{size}}",
+                  "query": {
+                    "knn": {
+                      "embedding": {
+                        "vector": "{{query_vector}}",
+                        "k": "{{k}}"
                       }
                     }
                   }
@@ -255,28 +249,26 @@ class OpenSearchEngineTest {
 
         String queryTemplate = """
                 {
-                  "template": {
-                    "size": "{{size}}",
-                    "query": {
-                      "bool": {
-                        "must": [
-                          {
-                            "knn": {
-                              "embedding": {
-                                "vector": "{{query_vector}}",
-                                "k": "{{k}}"
-                              }
+                  "size": "{{size}}",
+                  "query": {
+                    "bool": {
+                      "must": [
+                        {
+                          "knn": {
+                            "embedding": {
+                              "vector": "{{query_vector}}",
+                              "k": "{{k}}"
                             }
                           }
-                        ],
-                        "filter": [
-                          {
-                            "term": {
-                              "category": "even"
-                            }
+                        }
+                      ],
+                      "filter": [
+                        {
+                          "term": {
+                            "category": "even"
                           }
-                        ]
-                      }
+                        }
+                      ]
                     }
                   }
                 }
@@ -327,11 +319,9 @@ class OpenSearchEngineTest {
         String tempIndex = "test-delete-index";
         String schemaContent = """
                 {
-                  "template": {
-                    "mappings": {
-                      "properties": {
-                        "field": {"type": "keyword"}
-                      }
+                  "mappings": {
+                    "properties": {
+                      "field": {"type": "keyword"}
                     }
                   }
                 }
@@ -364,12 +354,10 @@ class OpenSearchEngineTest {
         String tempIndex = "test-large-batch";
         String schemaContent = """
                 {
-                  "template": {
-                    "mappings": {
-                      "properties": {
-                        "id": {"type": "keyword"},
-                        "value": {"type": "integer"}
-                      }
+                  "mappings": {
+                    "properties": {
+                      "id": {"type": "keyword"},
+                      "value": {"type": "integer"}
                     }
                   }
                 }

@@ -216,15 +216,14 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
                 return false;
             }
 
-            // Get the template content
-            JsonNode templateNode = template.get("template");
-            if (templateNode == null) {
-                logger.error("Schema missing 'template' field");
+            // Source-of-truth schema files must be direct OpenSearch create-index bodies (no Jingra wrapper).
+            if (template.has("template") || template.has("name")) {
+                logger.error("Wrapped schemas are not supported for OpenSearch. Provide a direct create-index JSON body (no top-level 'name'/'template').");
                 return false;
             }
 
             // Create index with schema using low-level REST client
-            String schemaJson = objectMapper.writeValueAsString(templateNode);
+            String schemaJson = objectMapper.writeValueAsString(template);
 
             Request request = new Request("PUT", "/" + indexName);
             request.setJsonEntity(schemaJson);
@@ -344,15 +343,23 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
         }
 
         try {
-            // Load and render query template
-            JsonNode template = loadQueryTemplate(queryName);
+            // Load and render query template (cached; avoid per-query I/O / JSON parse)
+            JsonNode template = loadQueryTemplateCached(queryName);
             if (template == null) {
                 logger.error("Query template '{}' not found", queryName);
                 return new QueryResponse(List.of(), null, null);
             }
 
-            String queryJson = renderTemplate(template, params.getAll());
-            writeFirstQueryDumpIfConfigured(getShortName(), queryJson);
+            // Source-of-truth query files must be direct OpenSearch _search bodies (no Jingra wrapper).
+            if (template.has("template") || template.has("name")) {
+                logger.error("Wrapped queries are not supported for OpenSearch. Provide a direct _search JSON body (no top-level 'name'/'template').");
+                return new QueryResponse(List.of(), null, null);
+            }
+
+            String queryJson = renderDirectTemplate(template, params.getAll());
+            if (shouldWriteFirstQueryDump()) {
+                writeFirstQueryDumpIfConfigured(getShortName(), queryJson);
+            }
 
             long startTime = System.nanoTime();
             Request request = new Request("POST", "/" + indexName + "/_search");
@@ -384,6 +391,30 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
         } catch (Exception e) {
             logger.error("Query execution failed", e);
             return new QueryResponse(List.of(), null, null);
+        }
+    }
+
+    private static String renderDirectTemplate(JsonNode templateNode, Map<String, Object> params) {
+        try {
+            String templateStr = objectMapper.writeValueAsString(templateNode);
+            for (Map.Entry<String, Object> entry : params.entrySet()) {
+                String placeholder = "\"{{" + entry.getKey() + "}}\"";
+                String value;
+
+                Object paramValue = entry.getValue();
+                if (paramValue instanceof String) {
+                    value = "\"" + paramValue + "\"";
+                } else if (paramValue instanceof Number || paramValue instanceof Boolean) {
+                    value = paramValue.toString();
+                } else {
+                    value = objectMapper.writeValueAsString(paramValue);
+                }
+
+                templateStr = templateStr.replace(placeholder, value);
+            }
+            return templateStr;
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to render OpenSearch query template", e);
         }
     }
 

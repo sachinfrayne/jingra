@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -43,6 +44,7 @@ public abstract class AbstractBenchmarkEngine implements BenchmarkEngine {
 
     private final Path queryDumpDirectory;
     private final AtomicBoolean firstQueryDumpWritten = new AtomicBoolean(false);
+    private final ConcurrentHashMap<String, JsonNode> queryTemplateCache = new ConcurrentHashMap<>();
 
     protected AbstractBenchmarkEngine(Map<String, Object> config) {
         this.config = config;
@@ -84,6 +86,13 @@ public abstract class AbstractBenchmarkEngine implements BenchmarkEngine {
         } catch (IOException e) {
             logger.warn("Failed to write query dump under {}: {}", queryDumpDirectory, e.toString());
         }
+    }
+
+    /**
+     * Cheap guard for callers to avoid doing expensive dump serialization work when dumps are disabled or already written.
+     */
+    protected boolean shouldWriteFirstQueryDump() {
+        return queryDumpDirectory != null && !firstQueryDumpWritten.get();
     }
 
     private static String prettifyJsonForDump(String json) {
@@ -143,12 +152,8 @@ public abstract class AbstractBenchmarkEngine implements BenchmarkEngine {
             return null;
         }
 
-        // Extract the "template" node which contains mappings and settings
-        JsonNode templateNode = template.get("template");
-        if (templateNode == null) {
-            logger.warn("Schema template '{}' missing 'template' field", schemaName);
-            return null;
-        }
+        // Support both legacy Jingra-wrapped schemas ({name, template:{...}}) and direct schemas ({...}).
+        JsonNode templateNode = template.has("template") ? template.get("template") : template;
 
         try {
             return objectMapper.convertValue(templateNode, Map.class);
@@ -190,6 +195,17 @@ public abstract class AbstractBenchmarkEngine implements BenchmarkEngine {
 
         logger.error("Query template '{}' not found for engine '{}'", queryName, getEngineName());
         return null;
+    }
+
+    /**
+     * Cached variant of {@link #loadQueryTemplate(String)} to avoid per-query filesystem/classpath I/O and JSON parsing.
+     * Cache is per engine instance (safe for typical harness lifecycle) and does not auto-reload changes on disk.
+     */
+    protected JsonNode loadQueryTemplateCached(String queryName) {
+        if (queryName == null) {
+            return null;
+        }
+        return queryTemplateCache.computeIfAbsent(queryName, this::loadQueryTemplate);
     }
 
     /**

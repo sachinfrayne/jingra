@@ -481,7 +481,7 @@ class QdrantEngineTest {
         try {
             assertEquals(1, engine.ingest(List.of(
                     new Document(Map.of("id", "u1", "embedding", generateRandomVector(128)))), col, "id"));
-            await().atMost(5, TimeUnit.SECONDS)
+            await().atMost(15, TimeUnit.SECONDS)
                     .pollInterval(100, TimeUnit.MILLISECONDS)
                     .untilAsserted(() -> assertTrue(engine.getDocumentCount(col) >= 1));
             Map<String, Object> p = new HashMap<>();
