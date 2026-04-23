@@ -25,7 +25,7 @@ services:
       - ./data:/app/data
       - ./config.yaml:/app/config.yaml
       - ./config:/app/jingra-config
-      - ./analysis-output:/app/analysis-output
+      - ./output:/app/output
     networks:
       - es-demo-net
     depends_on:

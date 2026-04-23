@@ -71,7 +71,7 @@ analysis:
   results_cluster:
     url_env: ES_URL
     index: jingra-results
-  output_directory: ./analysis-output
+  output_directory: ./output
   generate_plots: true
   latency_metrics:
     - latency_median

@@ -64,4 +64,4 @@ clean:
 	@echo "Stopping and removing containers..."
 	$(COMPOSE) down -v
 
-run: build start load eval analyze clean
+run: clean build start load eval analyze clean

@@ -34,7 +34,7 @@ __pycache__/
 *.pyc
 
 # Demo analysis output (generated at runtime)
-demos/*/analysis-output/
+demos/*/output/
 
 # Local review artifacts
 
