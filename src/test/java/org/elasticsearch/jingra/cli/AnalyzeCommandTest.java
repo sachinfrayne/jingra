@@ -33,7 +33,7 @@ class AnalyzeCommandTest {
     @AfterEach
     void restoreDefaults() {
         AnalyzeCommand.resultsEngineFactory = AnalyzeCommand::createResultsEngine;
-        AnalyzeCommand.plotGeneratorFactory = PlotGenerator::new;
+        AnalyzeCommand.plotGeneratorFactory = (out, versions) -> new PlotGenerator(out, versions);
     }
 
     @Test
@@ -105,7 +105,7 @@ class AnalyzeCommandTest {
     @Test
     void run_continuesWhenOnePlotGenerationThrows() throws Exception {
         AtomicInteger plotCalls = new AtomicInteger();
-        AnalyzeCommand.plotGeneratorFactory = out -> new PlotGenerator(out) {
+        AnalyzeCommand.plotGeneratorFactory = (out, versions) -> new PlotGenerator(out) {
             @Override
             public void generateRecallVsLatencyPlot(
                     Map<String, List<BenchmarkResult>> resultsByEngine,
@@ -153,7 +153,7 @@ class AnalyzeCommandTest {
 
     @Test
     void run_logsWarningWhenThroughputOverviewThrows() throws Exception {
-        AnalyzeCommand.plotGeneratorFactory = out -> new PlotGenerator(out) {
+        AnalyzeCommand.plotGeneratorFactory = (out, versions) -> new PlotGenerator(out) {
             @Override
             public void generateThroughputOverview(Map<String, List<BenchmarkResult>> data)
                     throws IOException {

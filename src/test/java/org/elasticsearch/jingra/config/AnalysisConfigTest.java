@@ -170,4 +170,46 @@ class AnalysisConfigTest {
         assertEquals(List.of("latency_avg", "latency_p95"), config.getLatencyMetrics());
         assertFalse(config.isGeneratePlots());
     }
+
+    @Test
+    void getEngineVersions_returnsEmptyMapWhenUnset() {
+        AnalysisConfig config = new AnalysisConfig();
+        assertTrue(config.getEngineVersions().isEmpty());
+    }
+
+    @Test
+    void setEngineVersions_roundTripsThroughGetter() {
+        AnalysisConfig config = new AnalysisConfig();
+        Map<String, String> versions = Map.of("elasticsearch", "9.3.2", "qdrant", "1.17.0");
+        config.setEngineVersions(versions);
+        assertEquals(versions, config.getEngineVersions());
+    }
+
+    @Test
+    void getEngineVersions_returnsEmptyAfterSetToNull() {
+        AnalysisConfig config = new AnalysisConfig();
+        config.setEngineVersions(Map.of("opensearch", "2.11.0"));
+        assertFalse(config.getEngineVersions().isEmpty());
+        config.setEngineVersions(null);
+        assertTrue(config.getEngineVersions().isEmpty());
+    }
+
+    @Test
+    void deserializesEngineVersionsFromYaml() throws Exception {
+        String yaml = """
+                run_id: "test-run-123"
+                engines:
+                  - elasticsearch
+                  - qdrant
+                results_cluster:
+                  url: "http://localhost:9200"
+                engine_versions:
+                  elasticsearch: "9.3.2"
+                  qdrant: "1.17.0"
+                """;
+
+        AnalysisConfig config = yamlMapper.readValue(yaml, AnalysisConfig.class);
+
+        assertEquals(Map.of("elasticsearch", "9.3.2", "qdrant", "1.17.0"), config.getEngineVersions());
+    }
 }
