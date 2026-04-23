@@ -1,0 +1,60 @@
+engine: elasticsearch
+
+elasticsearch:
+  url_env: ES_URL
+
+dataset: demo-parquet
+
+datasets:
+  demo-parquet:
+    type: lexical
+    index_name: demo-parquet
+    schema_name: demo-parquet-schema
+    query_name: demo-parquet-query
+
+    path:
+      data_path: data/docs.parquet
+      queries_path: data/queries.parquet
+
+    data_mapping:
+      id_field: id
+
+    queries_mapping:
+      query_text_field: query_text
+      ground_truth_field: ground_truth
+
+    param_groups:
+      recall@10:
+        - { size: 10 }
+
+load:
+  threads: 4
+  batch_size: 10
+  queue_capacity: 10
+
+evaluation:
+  run_id: demo-parquet
+  warmup_workers: 1
+  measurement_workers: 1
+  warmup_rounds: 3
+  measurement_rounds: 1
+
+output:
+  sinks:
+    - type: elasticsearch
+      config:
+        url_env: ES_URL
+        index: jingra-results
+
+analysis:
+  run_id: demo-parquet
+  engines:
+    - elasticsearch
+  results_cluster:
+    url_env: ES_URL
+    index: jingra-results
+  output_directory: ./output
+  generate_plots: true
+  latency_metrics:
+    - latency_median
+    - latency_avg

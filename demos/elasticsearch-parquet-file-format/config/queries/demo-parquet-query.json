@@ -1,0 +1,9 @@
+{
+  "query": {
+    "multi_match": {
+      "query": "{{query_text}}",
+      "fields": ["title", "description"]
+    }
+  },
+  "size": "{{size}}"
+}
