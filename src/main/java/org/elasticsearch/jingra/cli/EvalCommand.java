@@ -61,7 +61,11 @@ public final class EvalCommand {
             DatasetConfig dataset = config.getActiveDataset();
             String queriesPath = dataset.getPath().getQueriesPath();
             String queriesUrlEnv = dataset.getPath().getQueriesUrlEnv();
-            FileDownloader.ensureFileExists(queriesPath, queriesUrlEnv);
+            if (queriesUrlEnv != null) {
+                FileDownloader.ensureFileExists(queriesPath, queriesUrlEnv);
+            } else if (!new java.io.File(queriesPath).exists()) {
+                throw new RuntimeException("Queries file not found: " + queriesPath);
+            }
 
             BenchmarkEvaluator evaluator = new BenchmarkEvaluator(config, engine, sinks);
             evaluator.runEvaluation();

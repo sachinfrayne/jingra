@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * Reads Parquet files and converts rows to generic Document objects.
  */
-public class ParquetReader {
+public class ParquetReader implements DatasetReader {
     private static final Logger logger = LoggerFactory.getLogger(ParquetReader.class);
 
     private final String filePath;
@@ -90,8 +90,8 @@ public class ParquetReader {
      * @param consumer consumer to process each batch
      * @throws IOException if reading fails
      */
-    public void readInBatches(int batchSize, BatchConsumer consumer) throws IOException {
-        // Use single-threaded conversion for backward compatibility
+    @Override
+    public void readInBatches(int batchSize, DatasetReader.BatchConsumer consumer) throws IOException {
         readInBatches(batchSize, 1, consumer);
     }
 
@@ -105,7 +105,8 @@ public class ParquetReader {
      * @param consumer consumer to process each batch
      * @throws IOException if reading fails
      */
-    public void readInBatches(int batchSize, int conversionThreads, BatchConsumer consumer) throws IOException {
+    @Override
+    public void readInBatches(int batchSize, int conversionThreads, DatasetReader.BatchConsumer consumer) throws IOException {
         if (conversionThreads < 1) {
             throw new IllegalArgumentException("conversionThreads must be >= 1, got: " + conversionThreads);
         }
@@ -335,12 +336,9 @@ public class ParquetReader {
     }
 
     /**
-     * Functional interface for consuming batches of documents.
+     * Alias for {@link DatasetReader.BatchConsumer} kept for backward compatibility.
      */
-    @FunctionalInterface
-    public interface BatchConsumer {
-        void accept(List<Document> batch) throws IOException;
-    }
+    public interface BatchConsumer extends DatasetReader.BatchConsumer {}
 
     /**
      * Get the row count of the Parquet file without reading all data.

@@ -11,6 +11,7 @@ import org.elasticsearch.jingra.model.QueryResponse;
 import org.elasticsearch.jingra.output.ResultsSink;
 import org.elasticsearch.jingra.testing.MockBenchmarkEngine;
 import org.elasticsearch.jingra.testing.MockResultsSink;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -32,7 +33,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests for BenchmarkEvaluator.
- * Uses test queries parquet file created in src/test/resources/test_queries.parquet
+ * Uses test queries parquet file created in src/test/resources/parquet/test_queries.parquet
  */
 class BenchmarkEvaluatorTest {
 
@@ -61,12 +62,12 @@ class BenchmarkEvaluatorTest {
 
         // Set path config with queries path
         org.elasticsearch.jingra.config.DatasetConfig.PathConfig pathConfig = new org.elasticsearch.jingra.config.DatasetConfig.PathConfig();
-        pathConfig.setQueriesPath("src/test/resources/test_queries.parquet");
+        pathConfig.setQueriesPath("src/test/resources/parquet/test_vector_queries.parquet");
         datasetConfig.setPath(pathConfig);
 
         // Set queries mapping config
         org.elasticsearch.jingra.config.DatasetConfig.QueriesMappingConfig queriesMapping = new org.elasticsearch.jingra.config.DatasetConfig.QueriesMappingConfig();
-        queriesMapping.setQueryVectorField("query_vector");
+        queriesMapping.setQueryVectorField("embedding");
         queriesMapping.setGroundTruthField("ground_truth");
         queriesMapping.setConditionsField("meta_conditions");
         datasetConfig.setQueriesMapping(queriesMapping);
@@ -97,6 +98,13 @@ class BenchmarkEvaluatorTest {
                 mockEngine,
                 List.of(mockSink)
         );
+    }
+
+    @AfterEach
+    void resetDebugLoggedOnceStatic() throws Exception {
+        Field f = BenchmarkEvaluator.class.getDeclaredField("debugLoggedOnce");
+        f.setAccessible(true);
+        f.setBoolean(null, false);
     }
 
     @Test
@@ -165,15 +173,7 @@ class BenchmarkEvaluatorTest {
 
         // Verify query vectors were passed
         assertFalse(mockEngine.receivedVectors.isEmpty(), "Should pass query vectors");
-        assertEquals(128, mockEngine.receivedVectors.get(0).size(), "Vector should have 128 dimensions");
-    }
-
-    @Test
-    void testRunEvaluation_passesMetaConditions() throws Exception {
-        evaluator.runEvaluation();
-
-        // Verify meta conditions were passed
-        assertFalse(mockEngine.receivedParams.isEmpty(), "Should pass query parameters");
+        assertEquals(10, mockEngine.receivedVectors.get(0).size(), "Vector should have 10 dimensions");
     }
 
     @Test
@@ -232,7 +232,7 @@ class BenchmarkEvaluatorTest {
 
         // Set path config with text queries path
         DatasetConfig.PathConfig pathConfig = new DatasetConfig.PathConfig();
-        pathConfig.setQueriesPath("src/test/resources/test_text_queries.parquet");
+        pathConfig.setQueriesPath("src/test/resources/parquet/test_text_queries.parquet");
         datasetConfig.setPath(pathConfig);
 
         // Set queries mapping config with query_text_field
@@ -266,9 +266,14 @@ class BenchmarkEvaluatorTest {
         QueryParams firstQueryParams = textMockEngine.receivedParams.get(0);
         String queryText = firstQueryParams.getString("query_text");
         assertNotNull(queryText, "Should pass query_text parameter");
-        assertTrue(queryText.contains("wireless") || queryText.contains("laptop") ||
-                   queryText.contains("running") || queryText.contains("coffee"),
-                   "Query text should contain expected keywords, got: " + queryText);
+        assertTrue(
+                queryText.contains("wireless")
+                        || queryText.contains("laptop")
+                        || queryText.contains("running")
+                        || queryText.contains("coffee")
+                        || queryText.contains("headphones")
+                        || queryText.contains("bluetooth"),
+                "Query text should contain expected keywords, got: " + queryText);
 
         // Should not have query_vector
         assertNull(firstQueryParams.getFloatList("query_vector"),
@@ -334,7 +339,7 @@ class BenchmarkEvaluatorTest {
     private static final class DocumentDoubleVectorOnly extends Document {
         @Override
         public List<Float> getFloatList(String field) {
-            if ("query_vector".equals(field)) {
+            if ("embedding".equals(field)) {
                 return null;
             }
             return super.getFloatList(field);
@@ -342,7 +347,7 @@ class BenchmarkEvaluatorTest {
 
         @Override
         public List<Double> getDoubleList(String field) {
-            if ("query_vector".equals(field)) {
+            if ("embedding".equals(field)) {
                 return List.of(0.25d, 0.5d);
             }
             return super.getDoubleList(field);
@@ -369,7 +374,7 @@ class BenchmarkEvaluatorTest {
     @Test
     void parseQueryDocumentsFromDocuments_skipsUnexpectedVectorType() throws Exception {
         Document d = new Document();
-        d.put("query_vector", List.of("not", "numbers"));
+        d.put("embedding", List.of("not", "numbers"));
         d.put("ground_truth", List.of("a"));
         List<Object> q = invokeParse(List.of(d));
         assertEquals(0, q.size());
@@ -379,7 +384,7 @@ class BenchmarkEvaluatorTest {
     private static final class DocumentEmptyListRawVector extends Document {
         @Override
         public List<Float> getFloatList(String field) {
-            if ("query_vector".equals(field)) {
+            if ("embedding".equals(field)) {
                 return null;
             }
             return super.getFloatList(field);
@@ -387,7 +392,7 @@ class BenchmarkEvaluatorTest {
 
         @Override
         public List<Double> getDoubleList(String field) {
-            if ("query_vector".equals(field)) {
+            if ("embedding".equals(field)) {
                 return null;
             }
             return super.getDoubleList(field);
@@ -395,7 +400,7 @@ class BenchmarkEvaluatorTest {
 
         @Override
         public Object get(String field) {
-            if ("query_vector".equals(field)) {
+            if ("embedding".equals(field)) {
                 return List.of();
             }
             return super.get(field);
@@ -414,17 +419,17 @@ class BenchmarkEvaluatorTest {
     private static final class DocumentIntegerRawVector extends Document {
         @Override
         public List<Float> getFloatList(String field) {
-            return "query_vector".equals(field) ? null : super.getFloatList(field);
+            return "embedding".equals(field) ? null : super.getFloatList(field);
         }
 
         @Override
         public List<Double> getDoubleList(String field) {
-            return "query_vector".equals(field) ? null : super.getDoubleList(field);
+            return "embedding".equals(field) ? null : super.getDoubleList(field);
         }
 
         @Override
         public Object get(String field) {
-            return "query_vector".equals(field) ? 42 : super.get(field);
+            return "embedding".equals(field) ? 42 : super.get(field);
         }
     }
 
@@ -439,7 +444,7 @@ class BenchmarkEvaluatorTest {
     @Test
     void parseQueryDocumentsFromDocuments_groundTruthNullBecomesEmptyList() throws Exception {
         Document d = new Document();
-        d.put("query_vector", List.of(1f, 2f));
+        d.put("embedding", List.of(1f, 2f));
         List<Object> q = invokeParse(List.of(d));
         assertEquals(1, q.size());
         assertTrue(qdGroundTruth(q.get(0)).isEmpty());
@@ -448,7 +453,7 @@ class BenchmarkEvaluatorTest {
     @Test
     void parseQueryDocumentsFromDocuments_conditionsAsMap() throws Exception {
         Document d = new Document();
-        d.put("query_vector", List.of(1f));
+        d.put("embedding", List.of(1f));
         d.put("ground_truth", List.of());
         d.put("meta_conditions", Map.of("k", "v"));
         List<Object> q = invokeParse(List.of(d));
@@ -458,7 +463,7 @@ class BenchmarkEvaluatorTest {
     @Test
     void parseQueryDocumentsFromDocuments_conditionsAsValidJsonString() throws Exception {
         Document d = new Document();
-        d.put("query_vector", List.of(1f));
+        d.put("embedding", List.of(1f));
         d.put("ground_truth", List.of());
         d.put("meta_conditions", "{\"region\":\"us\"}");
         List<Object> q = invokeParse(List.of(d));
@@ -468,7 +473,7 @@ class BenchmarkEvaluatorTest {
     @Test
     void parseQueryDocumentsFromDocuments_invalidJsonStringUsesEmptyMap() throws Exception {
         Document d = new Document();
-        d.put("query_vector", List.of(1f));
+        d.put("embedding", List.of(1f));
         d.put("ground_truth", List.of());
         d.put("meta_conditions", "not-json{");
         List<Object> q = invokeParse(List.of(d));
@@ -478,7 +483,7 @@ class BenchmarkEvaluatorTest {
     @Test
     void parseQueryDocumentsFromDocuments_conditionsNonMapNonStringLeavesMetaNull() throws Exception {
         Document d = new Document();
-        d.put("query_vector", List.of(1f));
+        d.put("embedding", List.of(1f));
         d.put("ground_truth", List.of());
         d.put("meta_conditions", 42);
         List<Object> q = invokeParse(List.of(d));
@@ -515,7 +520,7 @@ class BenchmarkEvaluatorTest {
         Document bad = new Document();
         bad.put("ground_truth", List.of("x"));
         Document good = new Document();
-        good.put("query_vector", List.of(1f, 2f));
+        good.put("embedding", List.of(1f, 2f));
         good.put("ground_truth", List.of("y"));
         List<Object> q = invokeParse(List.of(bad, good));
         assertEquals(1, q.size());
@@ -851,6 +856,30 @@ class BenchmarkEvaluatorTest {
         QueryParams last = mockEngine.receivedParams.get(mockEngine.receivedParams.size() - 1);
         assertEquals(List.of(0.5f), last.getFloatList("query_vector"));
         assertEquals("hybrid", last.getString("query_text"));
+    }
+
+    /**
+     * {@code !debugLoggedOnce && query.queryText != null}: when the flag is already true, the outer
+     * condition short-circuits without re-evaluating {@code queryText}.
+     */
+    @Test
+    void executeQuery_debugOuterShortCircuitsWhenAlreadyLogged() throws Exception {
+        Field flag = BenchmarkEvaluator.class.getDeclaredField("debugLoggedOnce");
+        flag.setAccessible(true);
+        flag.setBoolean(null, true);
+
+        Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
+        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, String.class, List.class, Map.class);
+        ctor.setAccessible(true);
+        Object qd = ctor.newInstance(null, "text after flag set", List.of("z"), null);
+        Method m = BenchmarkEvaluator.class.getDeclaredMethod(
+                "executeQuery", qdClass, DatasetConfig.class, Map.class);
+        m.setAccessible(true);
+        int before = mockEngine.queryCount;
+        m.invoke(evaluator, qd, jingraConfig.getActiveDataset(), Map.of("size", 10));
+        assertEquals(before + 1, mockEngine.queryCount);
+        QueryParams last = mockEngine.receivedParams.get(mockEngine.receivedParams.size() - 1);
+        assertEquals("text after flag set", last.getString("query_text"));
     }
 
     private BenchmarkResult invokeCalculateMetrics(

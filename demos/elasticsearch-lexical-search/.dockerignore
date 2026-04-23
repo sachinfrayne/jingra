@@ -1,5 +1,0 @@
-datasets/
-.git/
-*.md
-Makefile
-docker-compose.yml

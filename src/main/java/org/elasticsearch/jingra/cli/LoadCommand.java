@@ -4,7 +4,8 @@ import org.elasticsearch.jingra.config.ConfigLoader;
 import org.elasticsearch.jingra.config.DatasetConfig;
 import org.elasticsearch.jingra.config.JingraConfig;
 import org.elasticsearch.jingra.config.LoadConfig;
-import org.elasticsearch.jingra.data.ParquetReader;
+import org.elasticsearch.jingra.data.DatasetReader;
+import org.elasticsearch.jingra.data.DatasetReaderFactory;
 import org.elasticsearch.jingra.engine.BenchmarkEngine;
 import org.elasticsearch.jingra.engine.EngineFactory;
 import org.elasticsearch.jingra.utils.FileDownloader;
@@ -39,9 +40,9 @@ public final class LoadCommand {
     static Function<JingraConfig, BenchmarkEngine> engineFactory = EngineFactory::create;
 
     /**
-     * Constructs the {@link ParquetReader} for the dataset path. Tests may substitute a stub to avoid filesystem I/O.
+     * Creates a {@link DatasetReader} for the dataset path. Tests may substitute a stub to avoid filesystem I/O.
      */
-    static Function<String, ParquetReader> parquetReaderFactory = ParquetReader::new;
+    static Function<String, DatasetReader> datasetReaderFactory = DatasetReaderFactory::create;
 
     /**
      * Default executor for parallel ingest; tests may replace to simulate termination failure.
@@ -157,10 +158,14 @@ public final class LoadCommand {
 
             String dataPath = dataset.getPath().getDataPath();
             String dataUrlEnv = dataset.getPath().getDataUrlEnv();
-            FileDownloader.ensureFileExists(dataPath, dataUrlEnv);
+            if (dataUrlEnv != null) {
+                FileDownloader.ensureFileExists(dataPath, dataUrlEnv);
+            } else if (!new java.io.File(dataPath).exists()) {
+                throw new RuntimeException("Data file not found: " + dataPath);
+            }
             logger.info("Loading data from: {}", dataPath);
 
-            ParquetReader reader = parquetReaderFactory.apply(dataPath);
+            DatasetReader reader = datasetReaderFactory.apply(dataPath);
             long rowCount = reader.getRowCount();
             logger.info("Parquet file contains {} documents", rowCount);
 

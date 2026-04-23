@@ -33,6 +33,9 @@ jingra-config/
 __pycache__/
 *.pyc
 
+# Demo analysis output (generated at runtime)
+demos/*/analysis-output/
+
 # Local review artifacts
 
 REVIEW*.md

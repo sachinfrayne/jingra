@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -522,7 +523,7 @@ class ConfigValidatorTest {
         c.getAnalysis().setEngines(null);
         IllegalStateException ex =
                 assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
-        assertEquals("analysis.engines must have at least 2 engines to compare", ex.getMessage());
+        assertEquals("analysis.engines must have at least 1 engine", ex.getMessage());
     }
 
     @Test
@@ -531,16 +532,14 @@ class ConfigValidatorTest {
         c.getAnalysis().setEngines(List.of());
         IllegalStateException ex =
                 assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
-        assertEquals("analysis.engines must have at least 2 engines to compare", ex.getMessage());
+        assertEquals("analysis.engines must have at least 1 engine", ex.getMessage());
     }
 
     @Test
-    void validateForAnalysis_enginesTooFewOne() {
+    void validateForAnalysis_singleEngineIsValid() {
         JingraConfig c = analysisCompleteConfig();
         c.getAnalysis().setEngines(List.of("elasticsearch"));
-        IllegalStateException ex =
-                assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
-        assertEquals("analysis.engines must have at least 2 engines to compare", ex.getMessage());
+        assertDoesNotThrow(() -> ConfigValidator.validateForAnalysis(c));
     }
 
     @Test

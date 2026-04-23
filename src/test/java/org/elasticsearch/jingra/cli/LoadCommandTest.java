@@ -3,6 +3,7 @@ package org.elasticsearch.jingra.cli;
 import org.elasticsearch.jingra.config.DatasetConfig;
 import org.elasticsearch.jingra.config.JingraConfig;
 import org.elasticsearch.jingra.config.LoadConfig;
+import org.elasticsearch.jingra.data.DatasetReader;
 import org.elasticsearch.jingra.data.ParquetReader;
 import org.elasticsearch.jingra.model.Document;
 import org.elasticsearch.jingra.engine.EngineFactory;
@@ -34,25 +35,45 @@ class LoadCommandTest {
         LoadCommand.loadExecutorFactory = LoadCommand::newDefaultLoadExecutor;
         LoadCommand.indexAbsentDeadlineNanosOverride = -1L;
         LoadCommand.indexAbsentPollNanosOverride = -1L;
-        LoadCommand.parquetReaderFactory = ParquetReader::new;
+        LoadCommand.datasetReaderFactory = org.elasticsearch.jingra.data.DatasetReaderFactory::create;
         LoadCommand.ingestMilestoneDocStep = 100_000;
         LoadCommand.sleepAfterRejectedMs = Thread::sleep;
     }
 
     @Test
     void runLoadsParquetWithMockEngine() throws Exception {
-        LoadCommand.parquetReaderFactory = p -> new StubParquetReader(10, oneBatchOf(10));
-        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(10, oneBatchOf(10));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        TrackingMock engine = new TrackingMock();
+        LoadCommand.run(config, c -> engine);
+        assertTrue(engine.ingestCalls >= 1);
+    }
+
+    /** Covers {@code dataUrlEnv != null} → {@link org.elasticsearch.jingra.utils.FileDownloader#ensureFileExists}. */
+    @Test
+    void run_whenDataUrlEnvSet_stillLoadsWhenLocalFileAlreadyValid() throws Exception {
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        config.getActiveDataset().getPath().setDataUrlEnv("UNUSED_IF_FILE_EXISTS");
         TrackingMock engine = new TrackingMock();
         LoadCommand.run(config, c -> engine);
         assertTrue(engine.ingestCalls >= 1);
     }
 
     @Test
+    void run_whenDataFileMissingAndNoDataUrlEnv_throws() {
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
+        JingraConfig config = buildLoadConfig("/no/such/path/does-not-exist.parquet");
+        TrackingMock engine = new TrackingMock();
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> LoadCommand.run(config, c -> engine));
+        assertTrue(ex.getMessage().contains("Data file not found"));
+    }
+
+    @Test
     void runPassesConversionThreadsToParquetReader() throws Exception {
         StubParquetReader stubReader = new StubParquetReader(10, oneBatchOf(10));
-        LoadCommand.parquetReaderFactory = p -> stubReader;
-        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        LoadCommand.datasetReaderFactory = p -> stubReader;
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         TrackingMock engine = new TrackingMock();
         LoadCommand.run(config, c -> engine);
 
@@ -63,8 +84,8 @@ class LoadCommandTest {
 
     @Test
     void publicRunUsesInjectedFactory() throws Exception {
-        LoadCommand.parquetReaderFactory = p -> new StubParquetReader(10, oneBatchOf(10));
-        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(10, oneBatchOf(10));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         TrackingMock engine = new TrackingMock();
         LoadCommand.engineFactory = c -> engine;
         LoadCommand.run(config);
@@ -73,8 +94,8 @@ class LoadCommandTest {
 
     @Test
     void runDeletesExistingIndexWhenPresent() throws Exception {
-        LoadCommand.parquetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
-        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         IndexThenClearMock engine = new IndexThenClearMock();
         LoadCommand.run(config, c -> engine);
         assertTrue(engine.deleteCalled);
@@ -82,7 +103,7 @@ class LoadCommandTest {
 
     @Test
     void run_failsWhenConnectReturnsFalse() {
-        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         MockBenchmarkEngine engine = new MockBenchmarkEngine() {
             @Override
             public boolean connect() {
@@ -95,7 +116,7 @@ class LoadCommandTest {
 
     @Test
     void run_failsWhenDeleteIndexReturnsFalse() {
-        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         MockBenchmarkEngine engine = new MockBenchmarkEngine() {
             @Override
             public boolean deleteIndex(String indexName) {
@@ -108,7 +129,7 @@ class LoadCommandTest {
 
     @Test
     void run_failsWhenCreateIndexReturnsFalse() {
-        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         MockBenchmarkEngine engine = new MockBenchmarkEngine() {
             @Override
             public boolean indexExists(String indexName) {
@@ -126,8 +147,8 @@ class LoadCommandTest {
 
     @Test
     void run_failsWhenIngestThrowsNonTransient() throws Exception {
-        LoadCommand.parquetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
-        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         MockBenchmarkEngine engine = new MockBenchmarkEngine() {
             @Override
             public boolean indexExists(String indexName) {
@@ -145,8 +166,8 @@ class LoadCommandTest {
 
     @Test
     void run_failsWhenIngestedCountDoesNotMatchParquetRowCount() throws Exception {
-        LoadCommand.parquetReaderFactory = p -> new StubParquetReader(2, oneBatchOf(2));
-        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(2, oneBatchOf(2));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         MockBenchmarkEngine engine = new MockBenchmarkEngine() {
             @Override
             public boolean indexExists(String indexName) {
@@ -164,8 +185,8 @@ class LoadCommandTest {
 
     @Test
     void run_withExplicitLoadConfigUsesBatchThreadsAndQueue() throws Exception {
-        LoadCommand.parquetReaderFactory = p -> new StubParquetReader(4, oneBatchOf(4));
-        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(4, oneBatchOf(4));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         LoadConfig load = new LoadConfig();
         load.setBatchSize(2);
         load.setThreads(2);
@@ -179,8 +200,8 @@ class LoadCommandTest {
     @Test
     void run_ingestMilestoneNonPositiveUsesDefaultStep() throws Exception {
         LoadCommand.ingestMilestoneDocStep = 0;
-        LoadCommand.parquetReaderFactory = p -> new StubParquetReader(2, oneBatchOf(2));
-        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(2, oneBatchOf(2));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         TrackingMock engine = new TrackingMock();
         LoadCommand.run(config, c -> engine);
         assertTrue(engine.ingestCalls >= 1);
@@ -189,11 +210,30 @@ class LoadCommandTest {
     @Test
     void run_logsProgressWhenMilestoneCrossed() throws Exception {
         LoadCommand.ingestMilestoneDocStep = 2;
-        LoadCommand.parquetReaderFactory = p -> new StubParquetReader(4, twoBatchesOfTwo());
-        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(4, twoBatchesOfTwo());
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         MilestoneIngestMock engine = new MilestoneIngestMock();
         LoadCommand.run(config, c -> engine);
         assertTrue(engine.ingestCalls >= 2);
+    }
+
+    /**
+     * Covers {@code recentElapsedSec > 0.1 ? ... : overallRate} when two milestones fire back-to-back
+     * (single-threaded pool so the second runnable often runs within 100 ms of the first log).
+     */
+    @Test
+    void run_milestoneLoggingMayUseOverallRateWhenRecentWindowVeryShort() throws Exception {
+        LoadCommand.ingestMilestoneDocStep = 1;
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(3, batchesOfOne(3));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        LoadConfig load = new LoadConfig();
+        load.setBatchSize(1);
+        load.setThreads(1);
+        load.setQueueCapacity(10);
+        config.setLoad(load);
+        TrackingMock engine = new TrackingMock();
+        LoadCommand.run(config, c -> engine);
+        assertEquals(3, engine.ingestCalls);
     }
 
     @Test
@@ -201,8 +241,8 @@ class LoadCommandTest {
         LoadCommand.sleepAfterRejectedMs = ms -> {
             throw new InterruptedException("i");
         };
-        LoadCommand.parquetReaderFactory = p -> new StubParquetReader(10, batchesOfOne(10));
-        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(10, batchesOfOne(10));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         LoadConfig load = new LoadConfig();
         load.setBatchSize(1);
         load.setThreads(1);
@@ -216,8 +256,8 @@ class LoadCommandTest {
 
     @Test
     void run_rejectedExecutionRetriesUntilSubmitSucceeds() throws Exception {
-        LoadCommand.parquetReaderFactory = p -> new StubParquetReader(10, batchesOfOne(10));
-        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(10, batchesOfOne(10));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         LoadConfig load = new LoadConfig();
         load.setBatchSize(1);
         load.setThreads(1);
@@ -231,8 +271,8 @@ class LoadCommandTest {
 
     @Test
     void run_executorAwaitTerminationFalseThrowsIllegalState() throws Exception {
-        LoadCommand.parquetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
-        JingraConfig config = buildLoadConfig("src/test/resources/test_data.parquet");
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         TrackingMock engine = new TrackingMock();
 
         ExecutorService exec = new AbstractExecutorService() {
@@ -487,13 +527,12 @@ class LoadCommandTest {
         }
 
         @Override
-        public void readInBatches(int batchSize, ParquetReader.BatchConsumer consumer) throws IOException {
-            // Shouldn't be called anymore - LoadCommand uses 3-param version
+        public void readInBatches(int batchSize, DatasetReader.BatchConsumer consumer) throws IOException {
             readInBatches(batchSize, 1, consumer);
         }
 
         @Override
-        public void readInBatches(int batchSize, int conversionThreads, ParquetReader.BatchConsumer consumer) throws IOException {
+        public void readInBatches(int batchSize, int conversionThreads, DatasetReader.BatchConsumer consumer) throws IOException {
             capturedConversionThreads = conversionThreads;  // Capture for test assertions
             for (List<Document> batch : batches) {
                 consumer.accept(batch);

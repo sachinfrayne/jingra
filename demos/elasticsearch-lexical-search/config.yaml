@@ -2,20 +2,19 @@ engine: elasticsearch
 
 elasticsearch:
   url_env: ES_URL
-  dump_first_query: true
 
 dataset: demo-lexical
 
 datasets:
   demo-lexical:
     type: lexical
-    index_name: demo-products
+    index_name: demo-lexical
     schema_name: demo-lexical-schema
     query_name: demo-lexical-query
 
     path:
-      data_path: datasets/demo-data.parquet
-      queries_path: datasets/demo-queries.parquet
+      data_path: data/docs.ndjson
+      queries_path: data/queries.ndjson
 
     data_mapping:
       id_field: id
@@ -26,17 +25,36 @@ datasets:
 
     param_groups:
       recall@10:
-        - {size: 10}
-      recall@20:
-        - {size: 20}
+        - { size: 10 }
 
 load:
   threads: 4
-  batch_size: 1000
+  batch_size: 10
   queue_capacity: 10
 
 evaluation:
-  warmup_workers: 2
-  measurement_workers: 4
-  warmup_rounds: 1
+  run_id: demo-lexical
+  warmup_workers: 1
+  measurement_workers: 1
+  warmup_rounds: 3
   measurement_rounds: 1
+
+output:
+  sinks:
+    - type: elasticsearch
+      config:
+        url_env: ES_URL
+        index: jingra-results
+
+analysis:
+  run_id: demo-lexical
+  engines:
+    - elasticsearch
+  results_cluster:
+    url_env: ES_URL
+    index: jingra-results
+  output_directory: ./analysis-output
+  generate_plots: true
+  latency_metrics:
+    - latency_median
+    - latency_avg

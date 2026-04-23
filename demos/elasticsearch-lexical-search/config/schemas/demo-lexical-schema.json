@@ -6,25 +6,11 @@
       },
       "title": {
         "type": "text",
-        "analyzer": "standard",
-        "fields": {
-          "keyword": {
-            "type": "keyword"
-          }
-        }
+        "analyzer": "standard"
       },
       "description": {
         "type": "text",
         "analyzer": "standard"
-      },
-      "category": {
-        "type": "keyword"
-      },
-      "tags": {
-        "type": "keyword"
-      },
-      "batch_id": {
-        "type": "keyword"
       }
     }
   },

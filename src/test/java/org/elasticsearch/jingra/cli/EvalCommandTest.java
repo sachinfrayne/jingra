@@ -38,11 +38,11 @@ class EvalCommandTest {
         datasetConfig.setQueryName("test-query");
 
         DatasetConfig.PathConfig pathConfig = new DatasetConfig.PathConfig();
-        pathConfig.setQueriesPath("src/test/resources/test_queries.parquet");
+        pathConfig.setQueriesPath("src/test/resources/parquet/test_vector_queries.parquet");
         datasetConfig.setPath(pathConfig);
 
         DatasetConfig.QueriesMappingConfig queriesMapping = new DatasetConfig.QueriesMappingConfig();
-        queriesMapping.setQueryVectorField("query_vector");
+        queriesMapping.setQueryVectorField("embedding");
         queriesMapping.setGroundTruthField("ground_truth");
         queriesMapping.setConditionsField("meta_conditions");
         datasetConfig.setQueriesMapping(queriesMapping);
@@ -108,6 +108,25 @@ class EvalCommandTest {
         };
         assertThrows(RuntimeException.class,
                 () -> EvalCommand.run(jingraConfig, c -> engine, c -> List.of(new MockResultsSink())));
+    }
+
+    /** Covers {@code queriesUrlEnv != null} → {@link org.elasticsearch.jingra.utils.FileDownloader#ensureFileExists}. */
+    @Test
+    void run_whenQueriesUrlEnvSet_stillRunsWhenLocalQueriesFileExists() throws Exception {
+        jingraConfig.getActiveDataset().getPath().setQueriesUrlEnv("UNUSED_IF_FILE_EXISTS");
+        MockBenchmarkEngine engine = new MockBenchmarkEngine();
+        MockResultsSink sink = new MockResultsSink();
+        EvalCommand.run(jingraConfig, c -> engine, c -> List.of(sink));
+        assertTrue(engine.queryCount > 0);
+    }
+
+    @Test
+    void run_whenQueriesFileMissingAndNoQueriesUrlEnv_throws() {
+        jingraConfig.getActiveDataset().getPath().setQueriesPath("/no/such/path/queries-does-not-exist.parquet");
+        MockBenchmarkEngine engine = new MockBenchmarkEngine();
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> EvalCommand.run(jingraConfig, c -> engine, c -> List.of(new MockResultsSink())));
+        assertTrue(ex.getMessage().contains("Queries file not found"));
     }
 
     @Test

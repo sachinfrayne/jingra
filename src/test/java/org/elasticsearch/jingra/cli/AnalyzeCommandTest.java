@@ -452,6 +452,27 @@ class AnalyzeCommandTest {
     }
 
     @Test
+    void run_singleEngine_exportsFullResultsCsvAndPlots() throws Exception {
+        JingraConfig config = createValidConfig();
+        config.getAnalysis().setEngines(List.of("elasticsearch"));
+        config.getAnalysis().setGeneratePlots(true);
+
+        MockResultsEngine mockEngine = new MockResultsEngine();
+        mockEngine.addResult(createResult("elasticsearch", "k=100", 0.95, 5.0, "recall@10"));
+        mockEngine.addResult(createResult("elasticsearch", "k=200", 0.99, 8.0, "recall@10"));
+
+        AnalyzeCommand.run(config, cfg -> mockEngine);
+
+        // Full results CSV should be generated
+        assertTrue(Files.exists(tempDir.resolve("recall@10_full_results.csv")));
+        // Summary and throughput comparison require 2 engines — should not exist
+        assertFalse(Files.exists(tempDir.resolve("summary_comparison.csv")));
+        assertFalse(Files.exists(tempDir.resolve("throughput_comparison.csv")));
+        // Plots should still be generated
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().endsWith(".png")));
+    }
+
+    @Test
     void run_exportsAllResultsWhenOnlyTargetEngineHasData() throws Exception {
         JingraConfig config = createValidConfig();
         MockResultsEngine mockEngine = new MockResultsEngine();

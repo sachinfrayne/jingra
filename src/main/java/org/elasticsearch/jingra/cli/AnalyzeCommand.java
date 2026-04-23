@@ -97,13 +97,18 @@ public final class AnalyzeCommand {
             // Snapshot existing files before generating new ones
             Set<String> existingFiles = snapshotFiles(outDir);
 
-            // Compare engines
+            // Export results
             CsvExporter csvExporter = new CsvExporter(ac.getOutputDirectory());
 
             String baselineEngine = ac.getEngines().get(0);
-            String targetEngine = ac.getEngines().get(1);
+            boolean multiEngine = ac.getEngines().size() >= 2;
+            String targetEngine = multiEngine ? ac.getEngines().get(1) : null;
 
-            logger.info("Comparing {} vs {}", baselineEngine, targetEngine);
+            if (multiEngine) {
+                logger.info("Comparing {} vs {}", baselineEngine, targetEngine);
+            } else {
+                logger.info("Analyzing results for engine: {}", baselineEngine);
+            }
 
             List<String> latencyMetrics = ac.getLatencyMetrics();
             logger.info("Including {} latency metric(s) as columns: {}", latencyMetrics.size(), latencyMetrics);
@@ -116,48 +121,52 @@ public final class AnalyzeCommand {
                 List<BenchmarkResult> resultsForRecallAt = entry.getValue();
 
                 csvExporter.exportAllResults(resultsForRecallAt, recallAt, latencyMetrics, baselineEngine, recallAt + "_full_results.csv");
-                csvExporter.exportSpeedupSummary(resultsForRecallAt, recallAt, latencyMetrics, baselineEngine, recallAt + "_summary.csv");
+                if (multiEngine) {
+                    csvExporter.exportSpeedupSummary(resultsForRecallAt, recallAt, latencyMetrics, baselineEngine, recallAt + "_summary.csv");
+                }
 
                 logger.info("Exported {} results for {}", resultsForRecallAt.size(), recallAt);
             }
 
-            // Summary comparison uses first latency metric
-            BenchmarkComparator comparator = new BenchmarkComparator(latencyMetrics.get(0));
-            Map<String, ComparisonResult> maxRecallComparisons = new HashMap<>();
+            // Summary comparison requires 2 engines
+            if (multiEngine) {
+                BenchmarkComparator comparator = new BenchmarkComparator(latencyMetrics.get(0));
+                Map<String, ComparisonResult> maxRecallComparisons = new HashMap<>();
 
-            for (String recallAt : byRecallAt.keySet()) {
-                List<BenchmarkResult> baseline = filterByEngine(byRecallAt.get(recallAt), baselineEngine);
-                List<BenchmarkResult> target = filterByEngine(byRecallAt.get(recallAt), targetEngine);
+                for (String recallAt : byRecallAt.keySet()) {
+                    List<BenchmarkResult> baseline = filterByEngine(byRecallAt.get(recallAt), baselineEngine);
+                    List<BenchmarkResult> target = filterByEngine(byRecallAt.get(recallAt), targetEngine);
 
-                if (baseline.isEmpty() || target.isEmpty()) {
-                    continue;
+                    if (baseline.isEmpty() || target.isEmpty()) {
+                        continue;
+                    }
+
+                    Map<String, BenchmarkResult> maxPoints = comparator.findMaxRecallByEngine(
+                            Map.of(
+                                    baselineEngine, baseline,
+                                    targetEngine, target
+                            )
+                    );
+
+                    // Max points exist for both engines: lists were non-empty above
+                    BenchmarkResult baselineMax = Objects.requireNonNull(maxPoints.get(baselineEngine));
+                    BenchmarkResult targetMax = Objects.requireNonNull(maxPoints.get(targetEngine));
+
+                    List<ComparisonResult> singleComparison = comparator.compare(
+                            List.of(baselineMax),
+                            List.of(targetMax),
+                            recallAt
+                    );
+
+                    if (!singleComparison.isEmpty()) {
+                        maxRecallComparisons.put(recallAt, singleComparison.get(0));
+                    }
                 }
 
-                Map<String, BenchmarkResult> maxPoints = comparator.findMaxRecallByEngine(
-                        Map.of(
-                                baselineEngine, baseline,
-                                targetEngine, target
-                        )
-                );
-
-                // Max points exist for both engines: lists were non-empty above
-                BenchmarkResult baselineMax = Objects.requireNonNull(maxPoints.get(baselineEngine));
-                BenchmarkResult targetMax = Objects.requireNonNull(maxPoints.get(targetEngine));
-
-                List<ComparisonResult> singleComparison = comparator.compare(
-                        List.of(baselineMax),
-                        List.of(targetMax),
-                        recallAt
-                );
-
-                if (!singleComparison.isEmpty()) {
-                    maxRecallComparisons.put(recallAt, singleComparison.get(0));
+                if (!maxRecallComparisons.isEmpty()) {
+                    csvExporter.exportSummaryComparison(maxRecallComparisons, "summary_comparison.csv");
+                    csvExporter.exportThroughputComparison(maxRecallComparisons, "throughput_comparison.csv");
                 }
-            }
-
-            if (!maxRecallComparisons.isEmpty()) {
-                csvExporter.exportSummaryComparison(maxRecallComparisons, "summary_comparison.csv");
-                csvExporter.exportThroughputComparison(maxRecallComparisons, "throughput_comparison.csv");
             }
 
             // Generate plots

@@ -1,18 +1,6 @@
 services:
-  # Data generation service - runs once to create datasets
-  datagen:
-    build:
-      context: .
-      dockerfile: Dockerfile.datagen
-    container_name: datagen-lexical-demo
-    volumes:
-      - ./datasets:/app/datasets
-    networks:
-      - es-demo-net
-
-  # Elasticsearch service
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.3.2
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
     container_name: es-lexical-demo
     environment:
       - discovery.type=single-node
@@ -28,18 +16,18 @@ services:
     networks:
       - es-demo-net
 
-  # Jingra service - for load and eval commands
   jingra:
     build:
       context: ../..
-      dockerfile: demos/elasticsearch-lexical-search/Dockerfile.jingra
+      dockerfile: demos/elasticsearch-lexical-search/Dockerfile
     container_name: jingra-lexical-demo
     environment:
       - ES_URL=http://elasticsearch:9200
     volumes:
-      - ./datasets:/app/datasets
+      - ./data:/app/data
       - ./config.yaml:/app/config.yaml
       - ./config:/app/jingra-config
+      - ./analysis-output:/app/analysis-output
     networks:
       - es-demo-net
     depends_on:

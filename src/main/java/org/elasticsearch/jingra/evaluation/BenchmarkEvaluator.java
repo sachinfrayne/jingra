@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.elasticsearch.jingra.config.DatasetConfig;
 import org.elasticsearch.jingra.config.EvaluationConfig;
 import org.elasticsearch.jingra.config.JingraConfig;
-import org.elasticsearch.jingra.data.ParquetReader;
+import org.elasticsearch.jingra.data.DatasetReaderFactory;
 import org.elasticsearch.jingra.engine.BenchmarkEngine;
 import org.elasticsearch.jingra.model.BenchmarkResult;
 import org.elasticsearch.jingra.model.Document;
@@ -294,7 +294,7 @@ public class BenchmarkEvaluator {
      * Load queries from Parquet file.
      */
     private List<QueryDocument> loadQueries(String path, DatasetConfig dataset) throws IOException {
-        ParquetReader reader = new ParquetReader(path);
+        var reader = DatasetReaderFactory.create(path);
         List<Document> documents = reader.readAll();
         return parseQueryDocumentsFromDocuments(documents, dataset);
     }
