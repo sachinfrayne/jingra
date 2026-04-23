@@ -1,7 +1,6 @@
 services:
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
-    container_name: es-lexical-demo
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -19,8 +18,7 @@ services:
   jingra:
     build:
       context: ../..
-      dockerfile: demos/elasticsearch-lexical-search/Dockerfile
-    container_name: jingra-lexical-demo
+      dockerfile: demos/common/Dockerfile
     environment:
       - ES_URL=http://elasticsearch:9200
     volumes:
