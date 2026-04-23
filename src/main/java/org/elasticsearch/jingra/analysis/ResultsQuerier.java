@@ -25,15 +25,15 @@ public class ResultsQuerier {
     }
 
     /**
-     * Query all benchmark results for a given run_id.
+     * Query all benchmark results for a given run_id, optionally filtered to specific engines.
      *
-     * @param runId the run ID to filter by
+     * @param runId   the run ID to filter by
+     * @param engines engines to include; if empty, all engines are returned
      * @return list of benchmark results
      * @throws IOException if query fails
      */
-    public List<BenchmarkResult> queryByRunId(String runId) throws IOException {
-        // Build Elasticsearch query to filter by run_id.keyword
-        String queryJson = buildRunIdQuery(runId);
+    public List<BenchmarkResult> queryByRunId(String runId, List<String> engines) throws IOException {
+        String queryJson = buildRunIdQuery(runId, engines);
 
         try {
             SearchResponse<Map> response = engine.search(indexName, queryJson);
@@ -84,20 +84,38 @@ public class ResultsQuerier {
     }
 
     /**
-     * Build Elasticsearch query JSON to filter by run_id.keyword.
+     * Build Elasticsearch query JSON to filter by run_id.keyword and optionally by engine.keyword.
      */
-    private String buildRunIdQuery(String runId) {
-        // Build a term query for run_id.keyword
-        // Using keyword field ensures exact match (not analyzed)
+    private String buildRunIdQuery(String runId, List<String> engines) {
+        if (engines == null || engines.isEmpty()) {
+            return String.format("""
+                    {
+                      "query": {
+                        "term": {
+                          "run_id.keyword": "%s"
+                        }
+                      },
+                      "size": 10000
+                    }
+                    """, runId);
+        }
+
+        String engineList = engines.stream()
+                .map(e -> "\"" + e + "\"")
+                .collect(Collectors.joining(", "));
+
         return String.format("""
                 {
                   "query": {
-                    "term": {
-                      "run_id.keyword": "%s"
+                    "bool": {
+                      "must": [
+                        { "term": { "run_id.keyword": "%s" } },
+                        { "terms": { "engine.keyword": [%s] } }
+                      ]
                     }
                   },
                   "size": 10000
                 }
-                """, runId);
+                """, runId, engineList);
     }
 }
