@@ -19,7 +19,10 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -221,6 +224,88 @@ class BenchmarkEvaluatorTest {
     }
 
     @Test
+    void testRunEvaluation_passesQueryText() throws Exception {
+        // Create dataset config with query_text_field instead of query_vector_field
+        DatasetConfig datasetConfig = new DatasetConfig();
+        datasetConfig.setIndexName("test-index");
+        datasetConfig.setQueryName("test-query");
+
+        // Set path config with text queries path
+        DatasetConfig.PathConfig pathConfig = new DatasetConfig.PathConfig();
+        pathConfig.setQueriesPath("src/test/resources/test_text_queries.parquet");
+        datasetConfig.setPath(pathConfig);
+
+        // Set queries mapping config with query_text_field
+        DatasetConfig.QueriesMappingConfig queriesMapping = new DatasetConfig.QueriesMappingConfig();
+        queriesMapping.setQueryTextField("query_text");
+        queriesMapping.setGroundTruthField("ground_truth");
+        datasetConfig.setQueriesMapping(queriesMapping);
+
+        // Create parameter groups
+        Map<String, Object> params1 = new HashMap<>();
+        params1.put("size", 10);
+        Map<String, List<Map<String, Object>>> paramGroups = new HashMap<>();
+        paramGroups.put("default", List.of(params1));
+        datasetConfig.setParamGroups(paramGroups);
+
+        // Update config
+        Map<String, DatasetConfig> datasets = new HashMap<>();
+        datasets.put("test-dataset", datasetConfig);
+        jingraConfig.setDatasets(datasets);
+
+        // Create new mock engine that tracks text queries
+        MockBenchmarkEngine textMockEngine = new MockBenchmarkEngine();
+
+        evaluator = new BenchmarkEvaluator(jingraConfig, textMockEngine, List.of(mockSink));
+        evaluator.runEvaluation();
+
+        // Verify query text was passed (not vectors)
+        assertFalse(textMockEngine.receivedParams.isEmpty(), "Should pass query parameters");
+
+        // First query should have query_text
+        QueryParams firstQueryParams = textMockEngine.receivedParams.get(0);
+        String queryText = firstQueryParams.getString("query_text");
+        assertNotNull(queryText, "Should pass query_text parameter");
+        assertTrue(queryText.contains("wireless") || queryText.contains("laptop") ||
+                   queryText.contains("running") || queryText.contains("coffee"),
+                   "Query text should contain expected keywords, got: " + queryText);
+
+        // Should not have query_vector
+        assertNull(firstQueryParams.getFloatList("query_vector"),
+                   "Should not pass query_vector for text queries");
+    }
+
+    @Test
+    void testRunEvaluation_includesDocumentsIngestedMetric() throws Exception {
+        // Create mock engine that returns a specific document count
+        MockBenchmarkEngine engineWithDocCount = new MockBenchmarkEngine() {
+            @Override
+            public long getDocumentCount(String indexName) {
+                return 50000;
+            }
+        };
+
+        final BenchmarkResult[] capturedResult = new BenchmarkResult[1];
+        MockResultsSink capturingSink = new MockResultsSink() {
+            @Override
+            public void writeResult(BenchmarkResult result) {
+                super.writeResult(result);
+                capturedResult[0] = result;
+            }
+        };
+
+        evaluator = new BenchmarkEvaluator(jingraConfig, engineWithDocCount, List.of(capturingSink));
+        evaluator.runEvaluation();
+
+        // Verify documents_ingested metric is present
+        assertNotNull(capturedResult[0], "Should capture result");
+        Object documentsIngested = capturedResult[0].getMetric("documents_ingested");
+        assertNotNull(documentsIngested, "Should include documents_ingested metric");
+        assertEquals(50000L, ((Number) documentsIngested).longValue(),
+                     "documents_ingested should match engine's document count");
+    }
+
+    @Test
     void testRunEvaluation_addsVectorTypeMetadataWhenPresent() throws Exception {
         MockBenchmarkEngine engineWithMeta = new MockBenchmarkEngine() {
             @Override
@@ -401,11 +486,47 @@ class BenchmarkEvaluatorTest {
     }
 
     @Test
+    void parseQueryDocumentsFromDocuments_textMode_skipsWhenTextValueNull() throws Exception {
+        DatasetConfig.QueriesMappingConfig qm = jingraConfig.getActiveDataset().getQueriesMapping();
+        qm.setQueryVectorField(null);
+        qm.setQueryTextField("query_text");
+
+        Document d = new Document();
+        d.put("ground_truth", List.of("x"));
+        List<Object> q = invokeParse(List.of(d));
+        assertTrue(q.isEmpty());
+    }
+
+    @Test
+    void parseQueryDocumentsFromDocuments_neitherVectorNorTextFieldConfigured_skipsAll() throws Exception {
+        DatasetConfig.QueriesMappingConfig qm = jingraConfig.getActiveDataset().getQueriesMapping();
+        qm.setQueryVectorField(null);
+        qm.setQueryTextField(null);
+
+        Document d = new Document();
+        d.put("query_vector", List.of(1f));
+        d.put("ground_truth", List.of("a"));
+        List<Object> q = invokeParse(List.of(d));
+        assertTrue(q.isEmpty());
+    }
+
+    @Test
+    void parseQueryDocumentsFromDocuments_oneSkippedOneValid_logsSkippedCount() throws Exception {
+        Document bad = new Document();
+        bad.put("ground_truth", List.of("x"));
+        Document good = new Document();
+        good.put("query_vector", List.of(1f, 2f));
+        good.put("ground_truth", List.of("y"));
+        List<Object> q = invokeParse(List.of(bad, good));
+        assertEquals(1, q.size());
+    }
+
+    @Test
     void buildQueryMetric_emptyRetrievedAndGroundTruth_andNullServerLatency() throws Exception {
         Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
-        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, List.class, Map.class);
+        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, String.class, List.class, Map.class);
         ctor.setAccessible(true);
-        Object qd = ctor.newInstance(List.of(1f), List.of("gt"), Map.of("f", "c"));
+        Object qd = ctor.newInstance(List.of(1f), null, List.of("gt"), Map.of("f", "c"));
         MetricsCalculator.QueryResult res = new MetricsCalculator.QueryResult(
                 List.of("gt"), List.of(), 12.0, null);
         Map<String, Object> metric = invokeBuildQueryMetric(
@@ -419,9 +540,9 @@ class BenchmarkEvaluatorTest {
     @Test
     void buildQueryMetric_omitsMetaConditionsWhenNull() throws Exception {
         Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
-        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, List.class, Map.class);
+        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, String.class, List.class, Map.class);
         ctor.setAccessible(true);
-        Object qd = ctor.newInstance(List.of(1f), List.of("a"), null);
+        Object qd = ctor.newInstance(List.of(1f), null, List.of("a"), null);
         MetricsCalculator.QueryResult res = new MetricsCalculator.QueryResult(
                 List.of("a"), List.of("a"), 1.0, 2L);
         Map<String, Object> metric = invokeBuildQueryMetric(evaluator, res, qd, Map.of());
@@ -433,9 +554,9 @@ class BenchmarkEvaluatorTest {
     @Test
     void buildQueryMetric_recallBranchWhenGroundTruthEmpty() throws Exception {
         Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
-        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, List.class, Map.class);
+        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, String.class, List.class, Map.class);
         ctor.setAccessible(true);
-        Object qd = ctor.newInstance(List.of(1f), List.of(), null);
+        Object qd = ctor.newInstance(List.of(1f), null, List.of(), null);
         MetricsCalculator.QueryResult res = new MetricsCalculator.QueryResult(
                 List.of(), List.of("x"), 1.0, null);
         Map<String, Object> metric = invokeBuildQueryMetric(evaluator, res, qd, Map.of());
@@ -612,9 +733,9 @@ class BenchmarkEvaluatorTest {
     @Test
     void executeQuery_skipsMetaConditionsWhenNull() throws Exception {
         Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
-        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, List.class, Map.class);
+        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, String.class, List.class, Map.class);
         ctor.setAccessible(true);
-        Object qd = ctor.newInstance(List.of(1f, 2f), List.of("a"), null);
+        Object qd = ctor.newInstance(List.of(1f, 2f), null, List.of("a"), null);
         Method m = BenchmarkEvaluator.class.getDeclaredMethod(
                 "executeQuery", qdClass, DatasetConfig.class, Map.class);
         m.setAccessible(true);
@@ -623,6 +744,113 @@ class BenchmarkEvaluatorTest {
         assertEquals(before + 1, mockEngine.queryCount);
         QueryParams last = mockEngine.receivedParams.get(mockEngine.receivedParams.size() - 1);
         assertNull(last.get("meta_conditions"));
+    }
+
+    @Test
+    void executeQuery_firstTextQuery_emitsDebugLogPath() throws Exception {
+        Field flag = BenchmarkEvaluator.class.getDeclaredField("debugLoggedOnce");
+        flag.setAccessible(true);
+        flag.setBoolean(null, false);
+
+        Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
+        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, String.class, List.class, Map.class);
+        ctor.setAccessible(true);
+        Object qd = ctor.newInstance(null, "benchmark debug phrase", List.of("doc-0"), null);
+        Method m = BenchmarkEvaluator.class.getDeclaredMethod(
+                "executeQuery", qdClass, DatasetConfig.class, Map.class);
+        m.setAccessible(true);
+        m.invoke(evaluator, qd, jingraConfig.getActiveDataset(), Map.of("size", 10));
+
+        assertTrue((Boolean) flag.get(null), "debug path should set debugLoggedOnce");
+        QueryParams last = mockEngine.receivedParams.get(mockEngine.receivedParams.size() - 1);
+        assertEquals("benchmark debug phrase", last.getString("query_text"));
+    }
+
+    /**
+     * Covers the inner {@code if (!debugLoggedOnce)} false branch: two threads may both pass the outer
+     * check while {@code debugLoggedOnce} is still false; the second acquires the monitor after the first
+     * sets the flag and then skips the logging body.
+     */
+    @Test
+    void executeQuery_concurrentFirstTextQuery_secondCallerSkipsInnerDebugBlock() throws Exception {
+        Field flag = BenchmarkEvaluator.class.getDeclaredField("debugLoggedOnce");
+        flag.setAccessible(true);
+        flag.setBoolean(null, false);
+
+        Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
+        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, String.class, List.class, Map.class);
+        ctor.setAccessible(true);
+        Object qdA = ctor.newInstance(null, "parallel-a", List.of("a"), null);
+        Object qdB = ctor.newInstance(null, "parallel-b", List.of("b"), null);
+
+        Method m = BenchmarkEvaluator.class.getDeclaredMethod(
+                "executeQuery", qdClass, DatasetConfig.class, Map.class);
+        m.setAccessible(true);
+        DatasetConfig dataset = jingraConfig.getActiveDataset();
+        Map<String, Object> params = Map.of("size", 10);
+
+        int queriesBefore = mockEngine.queryCount;
+        CountDownLatch go = new CountDownLatch(1);
+        List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> f1 = pool.submit(() -> {
+                try {
+                    go.await();
+                    m.invoke(evaluator, qdA, dataset, params);
+                } catch (Throwable t) {
+                    errors.add(t);
+                }
+            });
+            Future<?> f2 = pool.submit(() -> {
+                try {
+                    go.await();
+                    m.invoke(evaluator, qdB, dataset, params);
+                } catch (Throwable t) {
+                    errors.add(t);
+                }
+            });
+            go.countDown();
+            f1.get(30, TimeUnit.SECONDS);
+            f2.get(30, TimeUnit.SECONDS);
+        } finally {
+            pool.shutdown();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertTrue(errors.isEmpty(), () -> String.valueOf(errors));
+        assertEquals(queriesBefore + 2, mockEngine.queryCount);
+        assertTrue((Boolean) flag.get(null));
+    }
+
+    @Test
+    void executeQuery_putsMetaConditionsWhenNonNull() throws Exception {
+        Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
+        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, String.class, List.class, Map.class);
+        ctor.setAccessible(true);
+        Object qd = ctor.newInstance(
+                List.of(1f, 2f), null, List.of("a"), Map.of("region", "us-west"));
+        Method m = BenchmarkEvaluator.class.getDeclaredMethod(
+                "executeQuery", qdClass, DatasetConfig.class, Map.class);
+        m.setAccessible(true);
+        m.invoke(evaluator, qd, jingraConfig.getActiveDataset(), Map.of("size", 10));
+        QueryParams last = mockEngine.receivedParams.get(mockEngine.receivedParams.size() - 1);
+        assertEquals(Map.of("region", "us-west"), last.get("meta_conditions"));
+    }
+
+    @Test
+    void executeQuery_putsVectorAndTextWhenBothPresent() throws Exception {
+        Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
+        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, String.class, List.class, Map.class);
+        ctor.setAccessible(true);
+        Object qd = ctor.newInstance(List.of(0.5f), "hybrid", List.of("a"), null);
+        Method m = BenchmarkEvaluator.class.getDeclaredMethod(
+                "executeQuery", qdClass, DatasetConfig.class, Map.class);
+        m.setAccessible(true);
+        m.invoke(evaluator, qd, jingraConfig.getActiveDataset(), Map.of("size", 10));
+        QueryParams last = mockEngine.receivedParams.get(mockEngine.receivedParams.size() - 1);
+        assertEquals(List.of(0.5f), last.getFloatList("query_vector"));
+        assertEquals("hybrid", last.getString("query_text"));
     }
 
     private BenchmarkResult invokeCalculateMetrics(
@@ -794,7 +1022,7 @@ class BenchmarkEvaluatorTest {
 
     private static List<Object> buildQueryDocuments(int n) throws Exception {
         Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
-        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, List.class, Map.class);
+        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, String.class, List.class, Map.class);
         ctor.setAccessible(true);
         List<Float> vec = new ArrayList<>();
         for (int i = 0; i < 128; i++) {
@@ -802,7 +1030,7 @@ class BenchmarkEvaluatorTest {
         }
         List<Object> list = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
-            list.add(ctor.newInstance(vec, List.of("doc-" + i), null));
+            list.add(ctor.newInstance(vec, null, List.of("doc-" + i), null));
         }
         return list;
     }

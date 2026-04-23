@@ -1,0 +1,42 @@
+engine: elasticsearch
+
+elasticsearch:
+  url_env: ES_URL
+  dump_first_query: true
+
+dataset: demo-lexical
+
+datasets:
+  demo-lexical:
+    type: lexical
+    index_name: demo-products
+    schema_name: demo-lexical-schema
+    query_name: demo-lexical-query
+
+    path:
+      data_path: datasets/demo-data.parquet
+      queries_path: datasets/demo-queries.parquet
+
+    data_mapping:
+      id_field: id
+
+    queries_mapping:
+      query_text_field: query_text
+      ground_truth_field: ground_truth
+
+    param_groups:
+      recall@10:
+        - {size: 10}
+      recall@20:
+        - {size: 20}
+
+load:
+  threads: 4
+  batch_size: 1000
+  queue_capacity: 10
+
+evaluation:
+  warmup_workers: 2
+  measurement_workers: 4
+  warmup_rounds: 1
+  measurement_rounds: 1

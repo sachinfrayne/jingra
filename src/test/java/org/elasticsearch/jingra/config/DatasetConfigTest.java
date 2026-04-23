@@ -132,6 +132,46 @@ class DatasetConfigTest {
     }
 
     @Test
+    void queriesMappingSupportsQueryTextField() {
+        DatasetConfig.QueriesMappingConfig queriesMapping = new DatasetConfig.QueriesMappingConfig();
+        queriesMapping.setQueryTextField("query_text");
+        queriesMapping.setGroundTruthField("neighbors");
+
+        assertEquals("query_text", queriesMapping.getQueryTextField());
+        assertEquals("neighbors", queriesMapping.getGroundTruthField());
+    }
+
+    @Test
+    void deserializesYamlWithQueryTextField() throws Exception {
+        String yaml =
+                """
+                type: lexical
+                index_name: products
+                schema_name: lexical_schema
+                query_name: match_query
+                path:
+                  data_path: /data.parquet
+                  queries_path: /queries.parquet
+                data_mapping:
+                  id_field: id
+                queries_mapping:
+                  query_text_field: query_text
+                  ground_truth_field: expected_ids
+                param_groups:
+                  recall@10:
+                    - size: 10
+                """;
+
+        DatasetConfig config = YAML_MAPPER.readValue(yaml, DatasetConfig.class);
+
+        assertEquals("lexical", config.getType());
+        assertEquals("products", config.getIndexName());
+        assertNotNull(config.getQueriesMapping());
+        assertEquals("query_text", config.getQueriesMapping().getQueryTextField());
+        assertEquals("expected_ids", config.getQueriesMapping().getGroundTruthField());
+    }
+
+    @Test
     void yamlRoundTripPreservesMappedFields() throws Exception {
         DatasetConfig original = new DatasetConfig();
         original.setType("t");

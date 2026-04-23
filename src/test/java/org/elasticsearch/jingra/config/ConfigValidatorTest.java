@@ -168,6 +168,35 @@ class ConfigValidatorTest {
     }
 
     @Test
+    void validateForEvaluation_ok_withQueryTextFieldOnly() {
+        JingraConfig c = evalCompleteConfig();
+        DatasetConfig.QueriesMappingConfig qm = c.getActiveDataset().getQueriesMapping();
+        qm.setQueryVectorField(null);
+        qm.setQueryTextField("query_text");
+        ConfigValidator.validateForEvaluation(c);
+    }
+
+    /** {@code query_vector_field} blank (non-null) exercises {@code isBlank()} on the left side of the OR. */
+    @Test
+    void validateForEvaluation_ok_whenVectorFieldWhitespaceOnly_andTextFieldSet() {
+        JingraConfig c = evalCompleteConfig();
+        DatasetConfig.QueriesMappingConfig qm = c.getActiveDataset().getQueriesMapping();
+        qm.setQueryVectorField("  \t  ");
+        qm.setQueryTextField("query_text");
+        ConfigValidator.validateForEvaluation(c);
+    }
+
+    /** Both fields set: left conjunct of the vector/text guard is false without short-circuit ambiguity. */
+    @Test
+    void validateForEvaluation_ok_whenBothVectorAndTextFieldsNonBlank() {
+        JingraConfig c = evalCompleteConfig();
+        DatasetConfig.QueriesMappingConfig qm = c.getActiveDataset().getQueriesMapping();
+        qm.setQueryVectorField("vec_col");
+        qm.setQueryTextField("text_col");
+        ConfigValidator.validateForEvaluation(c);
+    }
+
+    @Test
     void validateForEvaluation_missingEvaluationBlock() {
         JingraConfig c = evalCompleteConfig();
         c.setEvaluation(null);
@@ -292,7 +321,7 @@ class ConfigValidatorTest {
         c.getActiveDataset().getQueriesMapping().setQueryVectorField(null);
         IllegalStateException ex =
                 assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForEvaluation(c));
-        assertEquals("dataset.queries_mapping.query_vector_field is required", ex.getMessage());
+        assertEquals("dataset.queries_mapping.query_vector_field or query_text_field is required", ex.getMessage());
     }
 
     @Test
@@ -301,7 +330,7 @@ class ConfigValidatorTest {
         c.getActiveDataset().getQueriesMapping().setQueryVectorField("");
         IllegalStateException ex =
                 assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForEvaluation(c));
-        assertEquals("dataset.queries_mapping.query_vector_field is required", ex.getMessage());
+        assertEquals("dataset.queries_mapping.query_vector_field or query_text_field is required", ex.getMessage());
     }
 
     @Test

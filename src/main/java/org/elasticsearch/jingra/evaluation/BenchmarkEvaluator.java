@@ -28,6 +28,7 @@ import java.util.stream.Collectors;
 public class BenchmarkEvaluator {
     private static final Logger logger = LoggerFactory.getLogger(BenchmarkEvaluator.class);
     private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static boolean debugLoggedOnce = false;
 
     private final JingraConfig config;
     private final BenchmarkEngine engine;
@@ -247,7 +248,14 @@ public class BenchmarkEvaluator {
     ) {
         // Build query parameters
         QueryParams queryParams = new QueryParams(benchmarkParams);
-        queryParams.put("query_vector", query.queryVector);
+
+        // Add query vector or query text
+        if (query.queryVector != null) {
+            queryParams.put("query_vector", query.queryVector);
+        }
+        if (query.queryText != null) {
+            queryParams.put("query_text", query.queryText);
+        }
 
         // Add metadata conditions if present
         if (query.metaConditions != null) {
@@ -260,6 +268,19 @@ public class BenchmarkEvaluator {
                 dataset.getQueryName(),
                 queryParams
         );
+
+        // Debug logging for first text query only (won't affect vector search)
+        if (!debugLoggedOnce && query.queryText != null) {
+            synchronized (BenchmarkEvaluator.class) {
+                if (!debugLoggedOnce) {  // Double-check after acquiring lock
+                    logger.info("=== DEBUG: First text query comparison ===");
+                    logger.info("Query text: '{}'", query.queryText);
+                    logger.info("Ground truth ({}): {}", query.groundTruth.size(), query.groundTruth);
+                    logger.info("Retrieved ({}): {}", response.getDocumentIds().size(), response.getDocumentIds());
+                    debugLoggedOnce = true;
+                }
+            }
+        }
 
         return new MetricsCalculator.QueryResult(
                 query.groundTruth,
@@ -284,6 +305,7 @@ public class BenchmarkEvaluator {
      */
     private List<QueryDocument> parseQueryDocumentsFromDocuments(List<Document> documents, DatasetConfig dataset) {
         String vectorField = dataset.getQueriesMapping().getQueryVectorField();
+        String textField = dataset.getQueriesMapping().getQueryTextField();
         String groundTruthField = dataset.getQueriesMapping().getGroundTruthField();
         String conditionsField = dataset.getQueriesMapping().getConditionsField();
 
@@ -291,32 +313,52 @@ public class BenchmarkEvaluator {
         int skippedQueries = 0;
 
         for (Document doc : documents) {
-            List<Float> vector = doc.getFloatList(vectorField);
-            if (vector == null) {
-                List<Double> doubleVec = doc.getDoubleList(vectorField);
-                if (doubleVec != null) {
-                    vector = doubleVec.stream().map(Double::floatValue).collect(Collectors.toList());
-                } else {
-                    // Log the actual type to help debug
-                    Object rawVector = doc.get(vectorField);
-                    if (rawVector != null) {
-                        logger.error("Vector field '{}' has unexpected type: {}. First element type: {}. Skipping query.",
-                                vectorField,
-                                rawVector.getClass().getName(),
-                                rawVector instanceof List && !((List<?>)rawVector).isEmpty() ?
-                                        ((List<?>)rawVector).get(0).getClass().getName() : "N/A");
+            List<Float> vector = null;
+            String queryText = null;
 
-                        // Print first element details for debugging
-                        if (rawVector instanceof List && !((List<?>)rawVector).isEmpty()) {
-                            Object firstElement = ((List<?>)rawVector).get(0);
-                            logger.error("First element details: {}", firstElement);
-                        }
-                    } else {
-                        logger.error("Vector field '{}' is null. Skipping query.", vectorField);
-                    }
+            // Check if this is a text query (query_text_field is configured)
+            if (textField != null) {
+                Object textValue = doc.get(textField);
+                if (textValue != null) {
+                    queryText = textValue.toString();
+                } else {
+                    logger.error("Text field '{}' is null. Skipping query.", textField);
                     skippedQueries++;
-                    continue; // Skip this query
+                    continue;
                 }
+            } else if (vectorField != null) {
+                // Vector query
+                vector = doc.getFloatList(vectorField);
+                if (vector == null) {
+                    List<Double> doubleVec = doc.getDoubleList(vectorField);
+                    if (doubleVec != null) {
+                        vector = doubleVec.stream().map(Double::floatValue).collect(Collectors.toList());
+                    } else {
+                        // Log the actual type to help debug
+                        Object rawVector = doc.get(vectorField);
+                        if (rawVector != null) {
+                            logger.error("Vector field '{}' has unexpected type: {}. First element type: {}. Skipping query.",
+                                    vectorField,
+                                    rawVector.getClass().getName(),
+                                    rawVector instanceof List && !((List<?>)rawVector).isEmpty() ?
+                                            ((List<?>)rawVector).get(0).getClass().getName() : "N/A");
+
+                            // Print first element details for debugging
+                            if (rawVector instanceof List && !((List<?>)rawVector).isEmpty()) {
+                                Object firstElement = ((List<?>)rawVector).get(0);
+                                logger.error("First element details: {}", firstElement);
+                            }
+                        } else {
+                            logger.error("Vector field '{}' is null. Skipping query.", vectorField);
+                        }
+                        skippedQueries++;
+                        continue; // Skip this query
+                    }
+                }
+            } else {
+                logger.error("Neither query_text_field nor query_vector_field configured. Skipping query.");
+                skippedQueries++;
+                continue;
             }
 
             @SuppressWarnings("unchecked")
@@ -340,11 +382,11 @@ public class BenchmarkEvaluator {
                 }
             }
 
-            queries.add(new QueryDocument(vector, groundTruth, metaConditions));
+            queries.add(new QueryDocument(vector, queryText, groundTruth, metaConditions));
         }
 
         if (skippedQueries > 0) {
-            logger.warn("Skipped {} queries due to invalid vectors", skippedQueries);
+            logger.warn("Skipped {} queries due to invalid vectors or text", skippedQueries);
         }
 
         return queries;
@@ -400,6 +442,10 @@ public class BenchmarkEvaluator {
             result.addMetric("throughput_aggregate_latency_model", calculator.calculateThroughputAggregateLatencyModel());
         }
         result.addMetric("num_samples", results.size());
+
+        // Add document count
+        long documentCount = engine.getDocumentCount(dataset.getIndexName());
+        result.addMetric("documents_ingested", documentCount);
 
         // Add metadata
         result.addMetadata("recall_label", recallLabel);
@@ -484,15 +530,17 @@ public class BenchmarkEvaluator {
     }
 
     /**
-     * Query document with vector and ground truth.
+     * Query document with vector/text and ground truth.
      */
     private static class QueryDocument {
         final List<Float> queryVector;
+        final String queryText;
         final List<String> groundTruth;
         final Map<String, Object> metaConditions;
 
-        QueryDocument(List<Float> queryVector, List<String> groundTruth, Map<String, Object> metaConditions) {
+        QueryDocument(List<Float> queryVector, String queryText, List<String> groundTruth, Map<String, Object> metaConditions) {
             this.queryVector = queryVector;
+            this.queryText = queryText;
             this.groundTruth = groundTruth != null ? groundTruth : List.of();
             this.metaConditions = metaConditions;
         }

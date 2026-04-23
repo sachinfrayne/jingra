@@ -1,0 +1,10 @@
+{
+  "query": {
+    "multi_match": {
+      "query": "{{query_text}}",
+      "fields": ["title^2", "description", "batch_id^3", "category"],
+      "type": "best_fields"
+    }
+  },
+  "size": {{size}}
+}

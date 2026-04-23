@@ -192,6 +192,9 @@ public class DatasetConfig {
         @JsonProperty("query_vector_field")
         private String queryVectorField;
 
+        @JsonProperty("query_text_field")
+        private String queryTextField;
+
         @JsonProperty("ground_truth_field")
         private String groundTruthField;
 
@@ -204,6 +207,14 @@ public class DatasetConfig {
 
         public void setQueryVectorField(String queryVectorField) {
             this.queryVectorField = queryVectorField;
+        }
+
+        public String getQueryTextField() {
+            return queryTextField;
+        }
+
+        public void setQueryTextField(String queryTextField) {
+            this.queryTextField = queryTextField;
         }
 
         public String getGroundTruthField() {
