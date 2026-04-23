@@ -1,0 +1,79 @@
+engine: elasticsearch
+
+elasticsearch:
+  url_env: ES_URL
+
+dataset: demo-hybrid
+
+datasets:
+  demo-hybrid:
+    type: hybrid
+    index_name: demo-hybrid
+    schema_name: demo-hybrid-schema
+    query_name: demo-hybrid-query
+    vector_size: 10
+    distance: cosine
+
+    path:
+      data_path: data/docs.ndjson
+      queries_path: data/queries.ndjson
+
+    data_mapping:
+      id_field: id
+      vector_field: embedding
+
+    queries_mapping:
+      query_text_field: query_text
+      query_vector_field: embedding
+      ground_truth_field: ground_truth
+
+    param_groups:
+      recall@10:
+        - { size: 10, num_candidates: 10, k: 1 }
+        - { size: 10, num_candidates: 10, k: 2 }
+        - { size: 10, num_candidates: 10, k: 3 }
+        - { size: 10, num_candidates: 10, k: 4 }
+        - { size: 10, num_candidates: 10, k: 5 }
+        - { size: 10, num_candidates: 10, k: 6 }
+        - { size: 10, num_candidates: 10, k: 7 }
+        - { size: 10, num_candidates: 10, k: 8 }
+        - { size: 10, num_candidates: 10, k: 9 }
+        - { size: 10, num_candidates: 10, k: 10 }
+        - { size: 10, num_candidates: 20, k: 10 }
+        - { size: 10, num_candidates: 50, k: 10 }
+        - { size: 10, num_candidates: 100, k: 10 }
+        - { size: 10, num_candidates: 200, k: 10 }
+        - { size: 10, num_candidates: 500, k: 10 }
+        - { size: 10, num_candidates: 1000, k: 10 }
+
+load:
+  threads: 4
+  batch_size: 10
+  queue_capacity: 10
+
+evaluation:
+  run_id: demo-hybrid
+  warmup_workers: 1
+  measurement_workers: 1
+  warmup_rounds: 3
+  measurement_rounds: 1
+
+output:
+  sinks:
+    - type: elasticsearch
+      config:
+        url_env: ES_URL
+        index: jingra-results
+
+analysis:
+  run_id: demo-hybrid
+  engines:
+    - elasticsearch
+  results_cluster:
+    url_env: ES_URL
+    index: jingra-results
+  output_directory: ./output
+  generate_plots: true
+  latency_metrics:
+    - latency_median
+    - latency_avg
