@@ -1,4 +1,4 @@
-.PHONY: help build start load eval analyze clean run
+.PHONY: help build start load eval analyze stop clean run
 
 export ES_VERSION := $(shell cat ../../engine-versions/.elasticsearch | tr -d '[:space:]')
 
@@ -17,7 +17,10 @@ help:
 	@echo "  make load       - Load data into Elasticsearch"
 	@echo "  make eval       - Run benchmark evaluation"
 	@echo "  make analyze    - Analyze benchmark results"
-	@echo "  make clean      - Stop and remove all containers"
+	@echo "  make stop       - Stop Elasticsearch"
+	@echo "  make clean      - Stop Elasticsearch and remove output dir"
+	@echo ""
+	@echo "Full demo lifecycle:"
 	@echo "  make run        - Run the full demo"
 	@echo ""
 
@@ -60,8 +63,14 @@ analyze:
 	@echo "Analyzing benchmark results..."
 	$(COMPOSE) run --rm jingra analyze config.yaml
 
-clean:
+stop stop-end:
 	@echo "Stopping and removing containers..."
 	$(COMPOSE) down -v
 
-run: clean build start load eval analyze clean
+clean: stop
+ifneq ($(strip $(DEMO_OUTPUT_DIRS)),)
+	@echo "Removing output directories..."
+	rm -rf $(foreach d,$(DEMO_OUTPUT_DIRS),$(CURDIR)/$(d))
+endif
+
+run: clean build start load eval analyze stop-end
