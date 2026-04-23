@@ -1,6 +1,6 @@
 .PHONY: help build start load eval analyze clean run
 
-DEMO_NAME := Elasticsearch Lexical Search Demo
+DEMO_NAME := Elasticsearch Vector Search Demo
 export ES_VERSION := $(shell cat ../../engine-versions/.elasticsearch | tr -d '[:space:]')
 
 help:

@@ -1,0 +1,81 @@
+engine: elasticsearch
+
+elasticsearch:
+  url_env: ES_URL
+
+dataset: demo-vector
+
+datasets:
+  demo-vector:
+    type: vector
+    index_name: demo-vector
+    schema_name: demo-vector-schema
+    query_name: demo-vector-query
+    vector_size: 10
+    distance: cosine
+
+    path:
+      data_path: data/docs.ndjson
+      queries_path: data/queries.ndjson
+
+    data_mapping:
+      id_field: id
+      vector_field: embedding
+
+    queries_mapping:
+      query_vector_field: embedding
+      ground_truth_field: ground_truth
+
+    param_groups:
+      recall@10:
+        - { size: 10, num_candidates: 1, k: 1 }
+        - { size: 10, num_candidates: 2, k: 2 }
+        - { size: 10, num_candidates: 3, k: 3 }
+        - { size: 10, num_candidates: 4, k: 4 }
+        - { size: 10, num_candidates: 5, k: 5 }
+        - { size: 10, num_candidates: 6, k: 6 }
+        - { size: 10, num_candidates: 7, k: 7 }
+        - { size: 10, num_candidates: 8, k: 8 }
+        - { size: 10, num_candidates: 9, k: 9 }
+        - { size: 10, num_candidates: 10, k: 10 }
+        - { size: 10, num_candidates: 20, k: 20 }
+        - { size: 10, num_candidates: 30, k: 30 }
+        - { size: 10, num_candidates: 40, k: 40 }
+        - { size: 10, num_candidates: 50, k: 50 }
+        - { size: 10, num_candidates: 60, k: 60 }
+        - { size: 10, num_candidates: 70, k: 70 }
+        - { size: 10, num_candidates: 80, k: 80 }
+        - { size: 10, num_candidates: 90, k: 90 }
+        - { size: 10, num_candidates: 100, k: 100 }
+
+load:
+  threads: 4
+  batch_size: 10
+  queue_capacity: 10
+
+evaluation:
+  run_id: demo-vector
+  warmup_workers: 1
+  measurement_workers: 1
+  warmup_rounds: 3
+  measurement_rounds: 1
+
+output:
+  sinks:
+    - type: elasticsearch
+      config:
+        url_env: ES_URL
+        index: jingra-results
+
+analysis:
+  run_id: demo-vector
+  engines:
+    - elasticsearch
+  results_cluster:
+    url_env: ES_URL
+    index: jingra-results
+  output_directory: ./analysis-output
+  generate_plots: true
+  latency_metrics:
+    - latency_median
+    - latency_avg

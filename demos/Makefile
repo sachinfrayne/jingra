@@ -24,8 +24,6 @@ help:
 	@echo "Available demos:"
 	@for d in $(DEMOS); do echo "  $$d"; done
 
-# Usage: make run-demo <demo-name>  OR  make run-demo all
-# The demo name is passed as a positional Make goal via the % catch-all below.
 run-demo:
 	$(eval DEMO := $(filter-out $@,$(MAKECMDGOALS)))
 	@if [ -z "$(DEMO)" ]; then \
@@ -46,6 +44,5 @@ run-demo:
 		$(MAKE) -C $(DEMO) run; \
 	fi
 
-# Absorb the demo name argument so Make doesn't treat it as an unknown target.
 %:
 	@:
