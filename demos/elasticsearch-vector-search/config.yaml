@@ -28,25 +28,22 @@ datasets:
 
     param_groups:
       recall@10:
-        - { size: 10, num_candidates: 1, k: 1 }
-        - { size: 10, num_candidates: 2, k: 2 }
-        - { size: 10, num_candidates: 3, k: 3 }
-        - { size: 10, num_candidates: 4, k: 4 }
-        - { size: 10, num_candidates: 5, k: 5 }
-        - { size: 10, num_candidates: 6, k: 6 }
-        - { size: 10, num_candidates: 7, k: 7 }
-        - { size: 10, num_candidates: 8, k: 8 }
-        - { size: 10, num_candidates: 9, k: 9 }
+        - { size: 10, num_candidates: 10, k: 1 }
+        - { size: 10, num_candidates: 10, k: 2 }
+        - { size: 10, num_candidates: 10, k: 3 }
+        - { size: 10, num_candidates: 10, k: 4 }
+        - { size: 10, num_candidates: 10, k: 5 }
+        - { size: 10, num_candidates: 10, k: 6 }
+        - { size: 10, num_candidates: 10, k: 7 }
+        - { size: 10, num_candidates: 10, k: 8 }
+        - { size: 10, num_candidates: 10, k: 9 }
         - { size: 10, num_candidates: 10, k: 10 }
-        - { size: 10, num_candidates: 20, k: 20 }
-        - { size: 10, num_candidates: 30, k: 30 }
-        - { size: 10, num_candidates: 40, k: 40 }
-        - { size: 10, num_candidates: 50, k: 50 }
-        - { size: 10, num_candidates: 60, k: 60 }
-        - { size: 10, num_candidates: 70, k: 70 }
-        - { size: 10, num_candidates: 80, k: 80 }
-        - { size: 10, num_candidates: 90, k: 90 }
-        - { size: 10, num_candidates: 100, k: 100 }
+        - { size: 10, num_candidates: 20, k: 10 }
+        - { size: 10, num_candidates: 50, k: 10 }
+        - { size: 10, num_candidates: 100, k: 10 }
+        - { size: 10, num_candidates: 200, k: 10 }
+        - { size: 10, num_candidates: 500, k: 10 }
+        - { size: 10, num_candidates: 1000, k: 10 }
 
 load:
   threads: 4

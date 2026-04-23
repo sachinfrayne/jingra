@@ -2,7 +2,7 @@
   "knn": {
     "field": "embedding",
     "query_vector": "{{query_vector}}",
-    "k": "{{size}}",
+    "k": "{{k}}",
     "num_candidates": "{{num_candidates}}"
   },
   "size": "{{size}}"
