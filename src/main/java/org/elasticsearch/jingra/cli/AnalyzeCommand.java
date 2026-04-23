@@ -70,8 +70,8 @@ public final class AnalyzeCommand {
             String indexName = (String) ac.getResultsCluster().getOrDefault("index", "jingra-results");
             ResultsQuerier querier = new ResultsQuerier(resultsEngine, indexName);
 
-            logger.info("Querying results for run_id: {}", ac.getRunId());
-            List<BenchmarkResult> allResults = querier.queryByRunId(ac.getRunId());
+            logger.info("Querying results for run_id: {}, engines: {}", ac.getRunId(), ac.getEngines());
+            List<BenchmarkResult> allResults = querier.queryByRunId(ac.getRunId(), ac.getEngines());
             logger.info("Found {} results", allResults.size());
 
             if (allResults.isEmpty()) {

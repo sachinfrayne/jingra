@@ -25,7 +25,7 @@ class ResultsQuerierTest {
         ElasticsearchEngine engine = new TestElasticsearchEngine(List.of());
         ResultsQuerier querier = new ResultsQuerier(engine, "jingra-results");
 
-        List<BenchmarkResult> results = querier.queryByRunId("non-existent-run");
+        List<BenchmarkResult> results = querier.queryByRunId("non-existent-run", List.of());
 
         assertTrue(results.isEmpty());
     }
@@ -40,7 +40,7 @@ class ResultsQuerierTest {
         };
         ResultsQuerier querier = new ResultsQuerier(engine, "jingra-results");
 
-        IOException ex = assertThrows(IOException.class, () -> querier.queryByRunId("run-x"));
+        IOException ex = assertThrows(IOException.class, () -> querier.queryByRunId("run-x", List.of()));
         assertTrue(ex.getMessage().contains("run_id: run-x"));
         assertEquals("transport down", ex.getCause().getMessage());
     }
@@ -51,7 +51,7 @@ class ResultsQuerierTest {
         ElasticsearchEngine engine = new TestElasticsearchEngine(List.of(doc1), true);
         ResultsQuerier querier = new ResultsQuerier(engine, "jingra-results");
 
-        List<BenchmarkResult> results = querier.queryByRunId("test-run-123");
+        List<BenchmarkResult> results = querier.queryByRunId("test-run-123", List.of());
 
         assertEquals(1, results.size());
         assertEquals("elasticsearch", results.get(0).getEngine());
@@ -65,7 +65,7 @@ class ResultsQuerierTest {
         ElasticsearchEngine engine = new TestElasticsearchEngine(List.of(doc1, doc2));
         ResultsQuerier querier = new ResultsQuerier(engine, "jingra-results");
 
-        List<BenchmarkResult> results = querier.queryByRunId("test-run-123");
+        List<BenchmarkResult> results = querier.queryByRunId("test-run-123", List.of());
 
         assertEquals(2, results.size());
         assertEquals("elasticsearch", results.get(0).getEngine());
@@ -77,12 +77,43 @@ class ResultsQuerierTest {
         TestElasticsearchEngine engine = new TestElasticsearchEngine(List.of());
         ResultsQuerier querier = new ResultsQuerier(engine, "jingra-results");
 
-        querier.queryByRunId("test-run-123");
+        querier.queryByRunId("test-run-123", List.of());
 
         String queryJson = engine.getLastQueryJson();
         assertNotNull(queryJson);
         assertTrue(queryJson.contains("test-run-123"));
         assertTrue(queryJson.contains("run_id"));
+    }
+
+    /** Covers {@code engines == null} (short-circuit) in {@code buildRunIdQuery}, distinct from an empty list. */
+    @Test
+    void queryByRunId_buildsSimpleTermQuery_whenEnginesArgumentIsNull() throws Exception {
+        TestElasticsearchEngine engine = new TestElasticsearchEngine(List.of());
+        ResultsQuerier querier = new ResultsQuerier(engine, "jingra-results");
+
+        querier.queryByRunId("run-null-engines", null);
+
+        String queryJson = engine.getLastQueryJson();
+        assertNotNull(queryJson);
+        assertTrue(queryJson.contains("run-null-engines"));
+        assertTrue(queryJson.contains("\"term\""));
+        assertFalse(queryJson.contains("\"bool\""), "null engines should use run_id-only term query");
+    }
+
+    @Test
+    void queryByRunId_buildsEngineFilterQuery_whenEnginesProvided() throws Exception {
+        TestElasticsearchEngine engine = new TestElasticsearchEngine(List.of());
+        ResultsQuerier querier = new ResultsQuerier(engine, "jingra-results");
+
+        querier.queryByRunId("test-run-123", List.of("elasticsearch", "qdrant"));
+
+        String queryJson = engine.getLastQueryJson();
+        assertNotNull(queryJson);
+        assertTrue(queryJson.contains("bool"));
+        assertTrue(queryJson.contains("run_id.keyword"));
+        assertTrue(queryJson.contains("engine.keyword"));
+        assertTrue(queryJson.contains("elasticsearch"));
+        assertTrue(queryJson.contains("qdrant"));
     }
 
     @Test
