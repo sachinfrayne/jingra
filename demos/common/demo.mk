@@ -5,6 +5,7 @@ DEMO_MK_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 COMPOSE_OVERRIDES ?=
 ENGINE_SERVICE ?= elasticsearch
 DEMO_OUTPUT_DIRS ?= output
+POST_START_HOOK ?=
 
 export ES_VERSION := $(shell cat $(DEMO_MK_DIR)../../engine-versions/.elasticsearch | tr -d '[:space:]')
 
@@ -57,6 +58,7 @@ start:
 			exit 1; \
 		fi; \
 	fi
+	$(if $(POST_START_HOOK),@$(POST_START_HOOK))
 
 load:
 	@echo "Loading data into Elasticsearch..."
