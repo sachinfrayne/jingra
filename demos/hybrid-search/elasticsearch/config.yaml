@@ -2,6 +2,7 @@ engine: elasticsearch
 
 elasticsearch:
   url_env: ES_URL
+  query_dump_directory: ./output
 
 dataset: demo-hybrid
 
@@ -29,22 +30,14 @@ datasets:
 
     param_groups:
       recall@10:
-        - { size: 10, num_candidates: 10, k: 1 }
-        - { size: 10, num_candidates: 10, k: 2 }
-        - { size: 10, num_candidates: 10, k: 3 }
-        - { size: 10, num_candidates: 10, k: 4 }
-        - { size: 10, num_candidates: 10, k: 5 }
-        - { size: 10, num_candidates: 10, k: 6 }
-        - { size: 10, num_candidates: 10, k: 7 }
-        - { size: 10, num_candidates: 10, k: 8 }
-        - { size: 10, num_candidates: 10, k: 9 }
-        - { size: 10, num_candidates: 10, k: 10 }
-        - { size: 10, num_candidates: 20, k: 10 }
-        - { size: 10, num_candidates: 50, k: 10 }
-        - { size: 10, num_candidates: 100, k: 10 }
-        - { size: 10, num_candidates: 200, k: 10 }
-        - { size: 10, num_candidates: 500, k: 10 }
-        - { size: 10, num_candidates: 1000, k: 10 }
+        - { size: 10, k: 10, num_candidates: 10,   oversample: 1, rank_window_size: 10 }
+        - { size: 10, k: 10, num_candidates: 20,   oversample: 1, rank_window_size: 20 }
+        - { size: 10, k: 10, num_candidates: 40,   oversample: 1, rank_window_size: 40 }
+        - { size: 10, k: 10, num_candidates: 80,   oversample: 1, rank_window_size: 80 }
+        - { size: 10, k: 10, num_candidates: 160,  oversample: 1, rank_window_size: 160 }
+        - { size: 10, k: 10, num_candidates: 320,  oversample: 1, rank_window_size: 320 }
+        - { size: 10, k: 10, num_candidates: 640,  oversample: 1, rank_window_size: 640 }
+        - { size: 10, k: 10, num_candidates: 1280, oversample: 1, rank_window_size: 1280 }
 
 load:
   threads: 4
