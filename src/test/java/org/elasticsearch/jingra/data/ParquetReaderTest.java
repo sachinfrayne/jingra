@@ -22,6 +22,8 @@ class ParquetReaderTest {
     private static final String TEXT_QUERIES_PATH = "src/test/resources/parquet/test_text_queries.parquet";
     private static final String VECTOR_DATA_PATH  = "src/test/resources/parquet/test_vector_data.parquet";
     private static final String VECTOR_QUERIES_PATH = "src/test/resources/parquet/test_vector_queries.parquet";
+    private static final String HYBRID_DATA_PATH = "src/test/resources/parquet/test_hybrid_data.parquet";
+    private static final String HYBRID_QUERIES_PATH = "src/test/resources/parquet/test_hybrid_queries.parquet";
 
     // ===== readAll =====
 
@@ -93,6 +95,26 @@ class ParquetReaderTest {
         Set<String> names = schema.getFields().stream()
                 .map(f -> f.getName())
                 .collect(Collectors.toSet());
+        assertTrue(names.contains("embedding"), () -> "unexpected columns: " + names);
+    }
+
+    @Test
+    void getSchema_includesQueryTextAndEmbeddingForHybridQueries() throws Exception {
+        MessageType schema = new ParquetReader(HYBRID_QUERIES_PATH).getSchema();
+        Set<String> names = schema.getFields().stream()
+                .map(f -> f.getName())
+                .collect(Collectors.toSet());
+        assertTrue(names.contains("query_text"), () -> "unexpected columns: " + names);
+        assertTrue(names.contains("embedding"), () -> "unexpected columns: " + names);
+    }
+
+    @Test
+    void getSchema_includesTitleAndEmbeddingForHybridData() throws Exception {
+        MessageType schema = new ParquetReader(HYBRID_DATA_PATH).getSchema();
+        Set<String> names = schema.getFields().stream()
+                .map(f -> f.getName())
+                .collect(Collectors.toSet());
+        assertTrue(names.contains("title"), () -> "unexpected columns: " + names);
         assertTrue(names.contains("embedding"), () -> "unexpected columns: " + names);
     }
 
@@ -176,6 +198,29 @@ class ParquetReaderTest {
                         "Ground truth ID '" + id + "' not found in " + VECTOR_DATA_PATH);
             }
         }
+    }
+
+    @Test
+    void hybridGroundTruthIdsExistInHybridData() throws Exception {
+        Set<String> docIds = new ParquetReader(HYBRID_DATA_PATH).readAll().stream()
+                .map(d -> d.getString("id"))
+                .collect(Collectors.toSet());
+        for (Document query : new ParquetReader(HYBRID_QUERIES_PATH).readAll()) {
+            @SuppressWarnings("unchecked")
+            List<String> groundTruth = (List<String>) query.get("ground_truth");
+            for (String id : groundTruth) {
+                assertTrue(docIds.contains(id),
+                        "Ground truth ID '" + id + "' not found in " + HYBRID_DATA_PATH);
+            }
+        }
+    }
+
+    @Test
+    void readAll_hybridQueries_matchNdjsonFixtureShape() throws Exception {
+        List<Document> queries = new ParquetReader(HYBRID_QUERIES_PATH).readAll();
+        assertEquals(10, queries.size());
+        assertEquals("coffee", queries.get(0).getString("query_text"));
+        assertEquals(10, queries.get(0).getFloatList("embedding").size());
     }
 
     // ===== thread-count validation =====

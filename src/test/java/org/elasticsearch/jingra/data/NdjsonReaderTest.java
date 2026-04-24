@@ -20,6 +20,8 @@ class NdjsonReaderTest {
     private static final String TEXT_QUERIES_PATH = "src/test/resources/ndjson/test_text_queries.ndjson";
     private static final String VECTOR_DATA_PATH = "src/test/resources/ndjson/test_vector_data.ndjson";
     private static final String VECTOR_QUERIES_PATH = "src/test/resources/ndjson/test_vector_queries.ndjson";
+    private static final String HYBRID_DATA_PATH = "src/test/resources/ndjson/test_hybrid_data.ndjson";
+    private static final String HYBRID_QUERIES_PATH = "src/test/resources/ndjson/test_hybrid_queries.ndjson";
 
     @Test
     void readAll_returnsAllNonBlankLines() throws IOException {
@@ -229,6 +231,33 @@ class NdjsonReaderTest {
                         "Ground truth ID '" + id + "' not found in " + VECTOR_DATA_PATH);
             }
         }
+    }
+
+    @Test
+    void hybridGroundTruthIdsExistInHybridData() throws IOException {
+        Set<String> docIds = new NdjsonReader(HYBRID_DATA_PATH).readAll().stream()
+                .map(d -> d.getString("id"))
+                .collect(Collectors.toSet());
+        for (Document query : new NdjsonReader(HYBRID_QUERIES_PATH).readAll()) {
+            @SuppressWarnings("unchecked")
+            List<String> groundTruth = (List<String>) query.get("ground_truth");
+            for (String id : groundTruth) {
+                assertTrue(docIds.contains(id),
+                        "Ground truth ID '" + id + "' not found in " + HYBRID_DATA_PATH);
+            }
+        }
+    }
+
+    @Test
+    void readAll_hybridQueries_includeTextVectorAndGroundTruth() throws IOException {
+        List<Document> queries = new NdjsonReader(HYBRID_QUERIES_PATH).readAll();
+        assertEquals(10, queries.size());
+        assertEquals("coffee", queries.get(0).getString("query_text"));
+        assertEquals(10, queries.get(0).getFloatList("embedding").size());
+        @SuppressWarnings("unchecked")
+        List<String> gt = (List<String>) queries.get(0).get("ground_truth");
+        assertEquals(List.of(
+                "001", "002", "003", "004", "005", "006", "007", "008", "009", "010"), gt);
     }
 
     @Test

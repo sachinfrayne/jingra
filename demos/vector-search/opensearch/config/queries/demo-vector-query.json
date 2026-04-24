@@ -1,0 +1,11 @@
+{
+  "size": "{{size}}",
+  "query": {
+    "knn": {
+      "embedding": {
+        "vector": "{{query_vector}}",
+        "k": "{{k}}"
+      }
+    }
+  }
+}

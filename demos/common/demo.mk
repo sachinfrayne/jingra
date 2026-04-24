@@ -1,9 +1,16 @@
 .PHONY: help build start load eval analyze stop clean run
 
-export ES_VERSION := $(shell cat ../../engine-versions/.elasticsearch | tr -d '[:space:]')
+DEMO_MK_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 
-COMPOSE := docker-compose \
-    -f ../common/docker-compose.yml \
+COMPOSE_OVERRIDES ?=
+ENGINE_SERVICE ?= elasticsearch
+DEMO_OUTPUT_DIRS ?= output
+
+export ES_VERSION := $(shell cat $(DEMO_MK_DIR)../../engine-versions/.elasticsearch | tr -d '[:space:]')
+
+COMPOSE = docker-compose \
+    -f $(DEMO_MK_DIR)docker-compose.yml \
+    $(COMPOSE_OVERRIDES) \
     --project-directory . \
     --project-name $(notdir $(CURDIR))
 
@@ -26,27 +33,27 @@ help:
 
 build:
 	@echo "Compiling Jingra..."
-	cd ../.. && mvn package -DskipTests -q
+	cd $(DEMO_MK_DIR)../.. && mvn package -DskipTests -q
 	$(COMPOSE) build jingra
 
 start:
-	@echo "Starting Elasticsearch..."
-	$(COMPOSE) up -d --build elasticsearch
-	@if $(COMPOSE) ps elasticsearch | grep -q "healthy"; then \
-		echo "✓ Elasticsearch is ready"; \
+	@echo "Starting $(ENGINE_SERVICE)..."
+	$(COMPOSE) up -d --build elasticsearch $(ENGINE_SERVICE)
+	@if $(COMPOSE) ps $(ENGINE_SERVICE) | grep -q "healthy"; then \
+		echo "✓ $(ENGINE_SERVICE) is ready"; \
 	else \
-		echo "Waiting for Elasticsearch to be healthy..."; \
+		echo "Waiting for $(ENGINE_SERVICE) to be healthy..."; \
 		timeout=60; \
 		while [ $$timeout -gt 0 ]; do \
 			sleep 1; \
 			timeout=$$((timeout - 1)); \
-			if $(COMPOSE) ps elasticsearch | grep -q "healthy"; then \
-				echo "✓ Elasticsearch is ready"; \
+			if $(COMPOSE) ps $(ENGINE_SERVICE) | grep -q "healthy"; then \
+				echo "✓ $(ENGINE_SERVICE) is ready"; \
 				break; \
 			fi; \
 		done; \
 		if [ $$timeout -eq 0 ]; then \
-			echo "❌ Elasticsearch failed to become healthy"; \
+			echo "❌ $(ENGINE_SERVICE) failed to become healthy"; \
 			exit 1; \
 		fi; \
 	fi

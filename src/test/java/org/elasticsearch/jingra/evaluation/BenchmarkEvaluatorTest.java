@@ -33,7 +33,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests for BenchmarkEvaluator.
- * Uses test queries parquet file created in src/test/resources/parquet/test_queries.parquet
+ * Fixture queries and corpora live under {@code src/test/resources/parquet/} and
+ * {@code src/test/resources/ndjson/} (for example {@code test_vector_queries.parquet},
+ * {@code test_hybrid_queries.ndjson}).
  */
 class BenchmarkEvaluatorTest {
 
@@ -278,6 +280,44 @@ class BenchmarkEvaluatorTest {
         // Should not have query_vector
         assertNull(firstQueryParams.getFloatList("query_vector"),
                    "Should not pass query_vector for text queries");
+    }
+
+    @Test
+    void testRunEvaluation_passesHybridQueryTextAndVector() throws Exception {
+        DatasetConfig datasetConfig = new DatasetConfig();
+        datasetConfig.setIndexName("test-index");
+        datasetConfig.setQueryName("test-query");
+
+        DatasetConfig.PathConfig pathConfig = new DatasetConfig.PathConfig();
+        pathConfig.setQueriesPath("src/test/resources/ndjson/test_hybrid_queries.ndjson");
+        datasetConfig.setPath(pathConfig);
+
+        DatasetConfig.QueriesMappingConfig queriesMapping = new DatasetConfig.QueriesMappingConfig();
+        queriesMapping.setQueryTextField("query_text");
+        queriesMapping.setQueryVectorField("embedding");
+        queriesMapping.setGroundTruthField("ground_truth");
+        datasetConfig.setQueriesMapping(queriesMapping);
+
+        Map<String, Object> params = new HashMap<>();
+        params.put("size", 10);
+        Map<String, List<Map<String, Object>>> paramGroups = new HashMap<>();
+        paramGroups.put("default", List.of(params));
+        datasetConfig.setParamGroups(paramGroups);
+
+        Map<String, DatasetConfig> datasets = new HashMap<>();
+        datasets.put("test-dataset", datasetConfig);
+        jingraConfig.setDatasets(datasets);
+
+        MockBenchmarkEngine hybridEngine = new MockBenchmarkEngine();
+        evaluator = new BenchmarkEvaluator(jingraConfig, hybridEngine, List.of(mockSink));
+        evaluator.runEvaluation();
+
+        assertFalse(hybridEngine.receivedParams.isEmpty(), "Should execute hybrid queries");
+        assertEquals(10, hybridEngine.receivedParams.size(), "Hybrid fixture has 10 queries");
+        QueryParams firstParams = hybridEngine.receivedParams.get(0);
+        assertNotNull(firstParams.getString("query_text"), "Hybrid query must include query_text");
+        assertNotNull(firstParams.getFloatList("query_vector"), "Hybrid query must include query_vector");
+        assertEquals(10, firstParams.getFloatList("query_vector").size(), "query_vector must have 10 dimensions");
     }
 
     @Test

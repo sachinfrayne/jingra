@@ -1,0 +1,100 @@
+{"id": "001", "title": "Arabica Coffee Single Origin", "embedding": [0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "002", "title": "Espresso Coffee Dark Roast", "embedding": [0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "003", "title": "Decaf Coffee Smooth Blend", "embedding": [0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "004", "title": "Cold Brew Coffee Concentrate", "embedding": [0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "005", "title": "Organic Coffee Fair Trade", "embedding": [0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "006", "title": "Flavored Coffee Hazelnut", "embedding": [0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "007", "title": "Instant Coffee Travel Pack", "embedding": [0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "008", "title": "Light Roast Coffee Fruity", "embedding": [0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "009", "title": "Whole Bean Coffee Premium", "embedding": [0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "010", "title": "Ground Coffee Breakfast Blend", "embedding": [0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "011", "title": "Green Tea Loose Leaf Tin", "embedding": [0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "012", "title": "Black Tea Breakfast Strong", "embedding": [0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "013", "title": "Chamomile Tea Herbal Calm", "embedding": [0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "014", "title": "Jasmine Tea Floral Aroma", "embedding": [0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "015", "title": "Oolong Tea Traditional Roast", "embedding": [0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "016", "title": "Iced Tea Lemon Refresher", "embedding": [0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "017", "title": "Matcha Tea Ceremonial Grade", "embedding": [0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "018", "title": "Mint Tea Digestive Blend", "embedding": [0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "019", "title": "Earl Grey Tea Bergamot", "embedding": [0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "020", "title": "White Tea Silver Needle Delicate", "embedding": [0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "021", "title": "Red Wine Cabernet Reserve", "embedding": [0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "022", "title": "White Wine Crisp Chardonnay", "embedding": [0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "023", "title": "Sparkling Wine Brut Celebration", "embedding": [0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "024", "title": "Rosé Wine Summer Patio Pour", "embedding": [0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "025", "title": "Dessert Wine Port Style Glass", "embedding": [0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "026", "title": "Organic Wine Biodynamic Vineyard", "embedding": [0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "027", "title": "Box Wine Party Value Pack", "embedding": [0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "028", "title": "Natural Wine Unfiltered Orange", "embedding": [0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "029", "title": "Fortified Wine Sherry Cask Aged", "embedding": [0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "030", "title": "Vintage Wine Cellar Selection", "embedding": [0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "031", "title": "IPA Beer Hoppy Citrus Burst", "embedding": [0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "032", "title": "Stout Beer Dark Chocolate Notes", "embedding": [0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "033", "title": "Lager Beer Crisp Golden Pour", "embedding": [0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "034", "title": "Pilsner Beer Bitter Clean Finish", "embedding": [0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "035", "title": "Wheat Beer Banana Clove Aroma", "embedding": [0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "036", "title": "Sour Beer Tart Cherry Barrel", "embedding": [0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "037", "title": "Amber Beer Malt Caramel Body", "embedding": [0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "038", "title": "Porter Beer Roasted Coffee Edge", "embedding": [0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "039", "title": "Session Beer Light Easy Drink", "embedding": [0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "040", "title": "Craft Beer Small Batch Pilot", "embedding": [0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "041", "title": "Orange Juice Cold Pressed Glass", "embedding": [0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "042", "title": "Apple Juice Orchard Fresh Carton", "embedding": [0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "043", "title": "Grape Juice Concord Sweet Jug", "embedding": [0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "044", "title": "Cranberry Juice Tart Blend Bottle", "embedding": [0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "045", "title": "Tomato Juice Savory Brunch Can", "embedding": [0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "046", "title": "Pomegranate Juice Antioxidant Shot", "embedding": [0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "047", "title": "Pineapple Juice Tropical Sweet Liter", "embedding": [0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "048", "title": "Mango Juice Smoothie Base Pouch", "embedding": [0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "049", "title": "Carrot Juice Garden Fresh Cold", "embedding": [0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "050", "title": "Mixed Berry Juice Fusion Blend", "embedding": [0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0]}
+{"id": "051", "title": "Whole Milk Cream Top Jug", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0]}
+{"id": "052", "title": "Skim Milk Fat Free Carton", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0]}
+{"id": "053", "title": "Oat Milk Barista Foam Carton", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0]}
+{"id": "054", "title": "Almond Milk Unsweetened Shelf", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0]}
+{"id": "055", "title": "Soy Milk Protein Fortified Box", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0]}
+{"id": "056", "title": "Coconut Milk Thai Curry Can", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0]}
+{"id": "057", "title": "Rice Milk Hypoallergenic Drink", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0]}
+{"id": "058", "title": "Cashew Milk Creamy Blend Bottle", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0]}
+{"id": "059", "title": "Lactose Free Milk Digest Easy Quart", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0]}
+{"id": "060", "title": "Chocolate Milk Treat Size Bottle", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0]}
+{"id": "061", "title": "Spring Water Mountain Source Pack", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0]}
+{"id": "062", "title": "Sparkling Water Lime Essence Can", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0]}
+{"id": "063", "title": "Mineral Water Still Glass Bottle", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0]}
+{"id": "064", "title": "Distilled Water Lab Pure Gallon", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0]}
+{"id": "065", "title": "Coconut Water Electrolyte Tetra", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0]}
+{"id": "066", "title": "Flavored Water Berry Zero Bottle", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0]}
+{"id": "067", "title": "Alkaline Water pH Balanced Case", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0]}
+{"id": "068", "title": "Tonic Water Mixer Classic Liter", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0]}
+{"id": "069", "title": "Club Water Soda Stream Syrup", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0]}
+{"id": "070", "title": "Infused Water Cucumber Mint Cold", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0]}
+{"id": "071", "title": "Cola Soda Classic Cane Glass", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0]}
+{"id": "072", "title": "Ginger Soda Spicy Brew Bottle", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0]}
+{"id": "073", "title": "Root Beer Soda Vanilla Float", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0]}
+{"id": "074", "title": "Cream Soda Vanilla Fountain", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0]}
+{"id": "075", "title": "Grape Soda Retro Sweet Can", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0]}
+{"id": "076", "title": "Orange Soda Citrus Burst Pack", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0]}
+{"id": "077", "title": "Cherry Soda Fountain Style Liter", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0]}
+{"id": "078", "title": "Lemon Lime Soda Crisp Cold", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0]}
+{"id": "079", "title": "Citrus Soda Zero Sugar Slim", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0]}
+{"id": "080", "title": "Craft Soda Botanical Blend Bottle", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0]}
+{"id": "081", "title": "Margarita Cocktail Salt Rim Pitcher", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0]}
+{"id": "082", "title": "Old Fashioned Cocktail Whiskey Rock", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0]}
+{"id": "083", "title": "Mojito Cocktail Mint Lime Highball", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0]}
+{"id": "084", "title": "Martini Cocktail Dry Gin Stem", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0]}
+{"id": "085", "title": "Negroni Cocktail Bitter Orange Coupe", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0]}
+{"id": "086", "title": "Manhattan Cocktail Cherry Coupe", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0]}
+{"id": "087", "title": "Paloma Cocktail Grapefruit Salt", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0]}
+{"id": "088", "title": "Cosmopolitan Cocktail Citrus Martini", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0]}
+{"id": "089", "title": "Daiquiri Cocktail Rum Lime Frozen", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0]}
+{"id": "090", "title": "Espresso Cocktail Coffee Kick Shot", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, 0.0]}
+{"id": "091", "title": "Berry Smoothie Antioxidant Blend", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9]}
+{"id": "092", "title": "Green Smoothie Kale Spinach Cup", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9]}
+{"id": "093", "title": "Protein Smoothie Peanut Butter Jar", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9]}
+{"id": "094", "title": "Tropical Smoothie Mango Pineapple", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9]}
+{"id": "095", "title": "Detox Smoothie Celery Apple Bottle", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9]}
+{"id": "096", "title": "Breakfast Smoothie Oat Banana Bowl", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9]}
+{"id": "097", "title": "Acai Smoothie Bowl Thick Spoon", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9]}
+{"id": "098", "title": "Kefir Smoothie Probiotic Drink", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9]}
+{"id": "099", "title": "Chia Smoothie Omega Fiber Cup", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9]}
+{"id": "100", "title": "Post Workout Smoothie Recovery Shake", "embedding": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9]}

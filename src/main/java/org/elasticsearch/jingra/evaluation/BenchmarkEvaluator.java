@@ -316,7 +316,12 @@ public class BenchmarkEvaluator {
             List<Float> vector = null;
             String queryText = null;
 
-            // Check if this is a text query (query_text_field is configured)
+            if (textField == null && vectorField == null) {
+                logger.error("Neither query_text_field nor query_vector_field configured. Skipping query.");
+                skippedQueries++;
+                continue;
+            }
+
             if (textField != null) {
                 Object textValue = doc.get(textField);
                 if (textValue != null) {
@@ -326,15 +331,15 @@ public class BenchmarkEvaluator {
                     skippedQueries++;
                     continue;
                 }
-            } else if (vectorField != null) {
-                // Vector query
+            }
+
+            if (vectorField != null) {
                 vector = doc.getFloatList(vectorField);
                 if (vector == null) {
                     List<Double> doubleVec = doc.getDoubleList(vectorField);
                     if (doubleVec != null) {
                         vector = doubleVec.stream().map(Double::floatValue).collect(Collectors.toList());
                     } else {
-                        // Log the actual type to help debug
                         Object rawVector = doc.get(vectorField);
                         if (rawVector != null) {
                             logger.error("Vector field '{}' has unexpected type: {}. First element type: {}. Skipping query.",
@@ -342,23 +347,16 @@ public class BenchmarkEvaluator {
                                     rawVector.getClass().getName(),
                                     rawVector instanceof List && !((List<?>)rawVector).isEmpty() ?
                                             ((List<?>)rawVector).get(0).getClass().getName() : "N/A");
-
-                            // Print first element details for debugging
                             if (rawVector instanceof List && !((List<?>)rawVector).isEmpty()) {
-                                Object firstElement = ((List<?>)rawVector).get(0);
-                                logger.error("First element details: {}", firstElement);
+                                logger.error("First element details: {}", ((List<?>)rawVector).get(0));
                             }
                         } else {
                             logger.error("Vector field '{}' is null. Skipping query.", vectorField);
                         }
                         skippedQueries++;
-                        continue; // Skip this query
+                        continue;
                     }
                 }
-            } else {
-                logger.error("Neither query_text_field nor query_vector_field configured. Skipping query.");
-                skippedQueries++;
-                continue;
             }
 
             @SuppressWarnings("unchecked")

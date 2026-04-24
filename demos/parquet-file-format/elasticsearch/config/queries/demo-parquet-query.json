@@ -5,11 +5,5 @@
       "fields": ["title", "description"]
     }
   },
-  "knn": {
-    "field": "embedding",
-    "query_vector": "{{query_vector}}",
-    "k": "{{k}}",
-    "num_candidates": "{{num_candidates}}"
-  },
   "size": "{{size}}"
 }

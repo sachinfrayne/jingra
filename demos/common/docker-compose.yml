@@ -13,25 +13,25 @@ services:
       timeout: 5s
       retries: 30
     networks:
-      - es-demo-net
+      - jingra-demo-net
 
   jingra:
     build:
-      context: ../..
+      context: ${BUILD_CONTEXT:-../..}
       dockerfile: demos/common/Dockerfile
     environment:
       - ES_URL=http://elasticsearch:9200
     volumes:
-      - ./data:/app/data
+      - ${DATA_PATH:-./data}:/app/data
       - ./config.yaml:/app/config.yaml
       - ./config:/app/jingra-config
       - ./output:/app/output
     networks:
-      - es-demo-net
+      - jingra-demo-net
     depends_on:
       elasticsearch:
         condition: service_healthy
 
 networks:
-  es-demo-net:
+  jingra-demo-net:
     driver: bridge
