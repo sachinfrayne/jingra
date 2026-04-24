@@ -1,10 +1,119 @@
-{"query_text": "coffee", "ground_truth": ["L001","L002","L003","L004","L005","L006","L007","L008","L009","L010"]}
-{"query_text": "tea", "ground_truth": ["L011","L012","L013","L014","L015","L016","L017","L018","L019","L020"]}
-{"query_text": "wine", "ground_truth": ["L021","L022","L023","L024","L025","L026","L027","L028","L029","L030"]}
-{"query_text": "beer", "ground_truth": ["L031","L032","L033","L034","L035","L036","L037","L038","L039","L040"]}
-{"query_text": "juice", "ground_truth": ["L041","L042","L043","L044","L045","L046","L047","L048","L049","L050"]}
-{"query_text": "water", "ground_truth": ["L051","L052","L053","L054","L055","L056","L057","L058","L059","L060"]}
-{"query_text": "milk", "ground_truth": ["L061","L062","L063","L064","L065","L066","L067","L068","L069","L070"]}
-{"query_text": "smoothie", "ground_truth": ["L071","L072","L073","L074","L075","L076","L077","L078","L079","L080"]}
-{"query_text": "soda", "ground_truth": ["L081","L082","L083","L084","L085","L086","L087","L088","L089","L090"]}
-{"query_text": "lemonade", "ground_truth": ["L091","L092","L093","L094","L095","L096","L097","L098","L099","L100"]}
+{"query_text": "Stopping Heart Disease in Childhood", "ground_truth": ["MED-3254", "MED-3253"]}
+{"query_text": "Food Dyes and ADHD", "ground_truth": ["MED-3378", "MED-3380", "MED-5062", "MED-3382"]}
+{"query_text": "Exploiting Autophagy to Live Longer", "ground_truth": ["MED-2513", "MED-5237", "MED-2517", "MED-2518", "MED-2519", "MED-2520", "MED-2521"]}
+{"query_text": "How Citrus Might Help Keep Your Hands Warm", "ground_truth": ["MED-3474", "MED-3479", "MED-3482", "MED-3484", "MED-3485", "MED-3477"]}
+{"query_text": "Starving Tumors of Their Blood Supply", "ground_truth": ["MED-3549", "MED-3550", "MED-3551", "MED-3554", "MED-3555"]}
+{"query_text": "Are Dental X-Rays Safe?", "ground_truth": ["MED-3618", "MED-3621"]}
+{"query_text": "How Should I Take Probiotics?", "ground_truth": ["MED-3679"]}
+{"query_text": "Breast Cancer & Alcohol: How Much is Safe?", "ground_truth": ["MED-3762", "MED-3763", "MED-3764"]}
+{"query_text": "Diet and Cellulite", "ground_truth": ["MED-3815", "MED-3816", "MED-3820", "MED-3821", "MED-3817"]}
+{"query_text": "Do Cholesterol Statin Drugs Cause Breast Cancer?", "ground_truth": ["MED-2427", "MED-10", "MED-2429", "MED-2430", "MED-2431", "MED-14", "MED-2432"]}
+{"query_text": "How to Reduce Exposure to Alkylphenols Through Your Diet", "ground_truth": ["MED-2644", "MED-2646", "MED-2651", "MED-118", "MED-2652", "MED-2653", "MED-2655", "MED-2659", "MED-2661", "MED-2662"]}
+{"query_text": "Preventing Brain Loss with B Vitamins?", "ground_truth": ["MED-980", "MED-981", "MED-982", "MED-983", "MED-984", "MED-985", "MED-986", "MED-987", "MED-988", "MED-3137", "MED-990", "MED-991", "MED-992", "MED-993", "MED-994"]}
+{"query_text": "Are Organic Foods Safer?", "ground_truth": ["MED-1166", "MED-1167", "MED-1178", "MED-1169", "MED-1170", "MED-1171", "MED-1172", "MED-1173", "MED-1174", "MED-1175", "MED-1176", "MED-1177"]}
+{"query_text": "Diabetes as a Disease of Fat Toxicity", "ground_truth": ["MED-1716", "MED-1236", "MED-1237", "MED-1238", "MED-1474"]}
+{"query_text": "Is Milk Good for Our Bones?", "ground_truth": ["MED-1337", "MED-1338", "MED-1339", "MED-1340", "MED-1341"]}
+{"query_text": "Preventing Ulcerative Colitis with Diet", "ground_truth": ["MED-1418", "MED-1419", "MED-1420", "MED-1421", "MED-3964", "MED-4342", "MED-1581", "MED-1425", "MED-1426"]}
+{"query_text": "The Actual Benefit of Diet vs. Drugs", "ground_truth": ["MED-1486", "MED-1487", "MED-1488", "MED-1489", "MED-1490"]}
+{"query_text": "The Saturated Fat Studies: Buttering Up the Public", "ground_truth": ["MED-1557", "MED-1558"]}
+{"query_text": "Coffee and Artery Function", "ground_truth": ["MED-1634", "MED-1635", "MED-1636", "MED-1637", "MED-1638", "MED-1639", "MED-1640", "MED-1641", "MED-1642", "MED-1643", "MED-5258", "MED-1645", "MED-1646", "MED-1647", "MED-1648", "MED-1649"]}
+{"query_text": "Caloric Restriction vs. Plant-Based Diets", "ground_truth": ["MED-1711", "MED-1712", "MED-2763", "MED-1714", "MED-1715", "MED-1716", "MED-1717", "MED-1718", "MED-1719", "MED-1720", "MED-1721", "MED-1722", "MED-1723", "MED-1724"]}
+{"query_text": "Infectobesity: Adenovirus 36 and Childhood Obesity", "ground_truth": ["MED-1796", "MED-1797", "MED-1798", "MED-1799", "MED-1800", "MED-1801", "MED-1802", "MED-1803", "MED-1804", "MED-4767", "MED-1806", "MED-1807", "MED-1808", "MED-4769", "MED-1810"]}
+{"query_text": "Does Cholesterol Size Matter?", "ground_truth": ["MED-1882", "MED-2884", "MED-1884", "MED-1885", "MED-1886", "MED-1887", "MED-1888", "MED-1889", "MED-1890"]}
+{"query_text": "Barriers to Heart Disease Prevention", "ground_truth": ["MED-2529", "MED-2524", "MED-2525", "MED-2527", "MED-2530", "MED-2528"]}
+{"query_text": "Childhood Constipation and Cow\u2019s Milk", "ground_truth": ["MED-2053", "MED-2054", "MED-2055", "MED-2056", "MED-2057", "MED-2058", "MED-2059", "MED-2060", "MED-2061", "MED-2062", "MED-2063"]}
+{"query_text": "Diabetics Should Take Their Pulses", "ground_truth": ["MED-2140", "MED-2141", "MED-4319", "MED-2143", "MED-2144", "MED-2145", "MED-2146"]}
+{"query_text": "Academy of Nutrition and Dietetics Conflicts of Interest", "ground_truth": ["MED-2219", "MED-2220", "MED-2221"]}
+{"query_text": "Do Vegetarians Get Enough Protein?", "ground_truth": ["MED-2288", "MED-3137", "MED-2290", "MED-2291", "MED-2292", "MED-2293", "MED-2294", "MED-2295", "MED-2296"]}
+{"query_text": "Eggs and Arterial Function", "ground_truth": ["MED-2370", "MED-2371", "MED-2372", "MED-4324"]}
+{"query_text": "Treating Asthma With Plants vs. Supplements?", "ground_truth": ["MED-2445", "MED-2446", "MED-2458", "MED-2448", "MED-2449", "MED-2450", "MED-2451", "MED-2452", "MED-2453", "MED-2472"]}
+{"query_text": "Phytates for the Treatment of Cancer", "ground_truth": ["MED-2568", "MED-4319", "MED-2570", "MED-2571", "MED-2572", "MED-2573", "MED-2574", "MED-2575", "MED-2988", "MED-2577", "MED-2578", "MED-2579", "MED-2580", "MED-2544", "MED-2581", "MED-2546", "MED-2583", "MED-2584", "MED-2585"]}
+{"query_text": "Alkylphenol Endocrine Disruptors and Allergies", "ground_truth": ["MED-4551", "MED-2643", "MED-2644", "MED-2645", "MED-2646", "MED-2647", "MED-2648", "MED-2649", "MED-2650", "MED-2651", "MED-2652", "MED-2653", "MED-2654", "MED-2655", "MED-2656", "MED-2657", "MED-2658", "MED-2659", "MED-2660", "MED-2661", "MED-2662"]}
+{"query_text": "Chicken Salmonella Thanks to Meat Industry Lawsuit", "ground_truth": ["MED-2736", "MED-4131", "MED-2738", "MED-5169", "MED-2740", "MED-2741", "MED-2742", "MED-2744", "MED-2745"]}
+{"query_text": "Turmeric Curcumin and Osteoarthritis", "ground_truth": ["MED-2797", "MED-2809", "MED-2799", "MED-2800", "MED-2801", "MED-2802", "MED-2803", "MED-2804", "MED-2805", "MED-2819", "MED-2807"]}
+{"query_text": "How Long to Detox From Fish Before Pregnancy?", "ground_truth": ["MED-3021", "MED-3023", "MED-2904", "MED-2905", "MED-2906", "MED-2907", "MED-3024", "MED-3025", "MED-2910", "MED-3027", "MED-3028", "MED-2913", "MED-3012", "MED-3013", "MED-3030", "MED-2917", "MED-3033", "MED-3034", "MED-3035", "MED-2921"]}
+{"query_text": "Is Caramel Color Carcinogenic?", "ground_truth": ["MED-2992", "MED-2993", "MED-2994"]}
+{"query_text": "Counteracting the Effects of Dioxins Through Diet", "ground_truth": ["MED-3109", "MED-3098", "MED-3099", "MED-3100", "MED-3112", "MED-3102"]}
+{"query_text": "Chronic Headaches and Pork Tapeworms", "ground_truth": ["MED-3169", "MED-3170", "MED-3171", "MED-3172", "MED-3173", "MED-3174", "MED-3175", "MED-3176", "MED-3177", "MED-3178", "MED-3179", "MED-3180", "MED-3181", "MED-3182"]}
+{"query_text": "Heart Disease Starts in Childhood", "ground_truth": ["MED-3253", "MED-3254", "MED-3255"]}
+{"query_text": "Artificial Food Colors and ADHD", "ground_truth": ["MED-3378", "MED-3379", "MED-3380", "MED-3381", "MED-3382"]}
+{"query_text": "Keeping Your Hands Warm With Citrus", "ground_truth": ["MED-3473", "MED-3474", "MED-3475", "MED-3476", "MED-3477", "MED-3478", "MED-3479", "MED-3480", "MED-3481", "MED-3482", "MED-3483", "MED-3484", "MED-3485"]}
+{"query_text": "Anti-Angiogenesis: Cutting Off Tumor Supply Lines", "ground_truth": ["MED-3548", "MED-3549", "MED-3550", "MED-3551", "MED-3552", "MED-3553", "MED-3554", "MED-3555"]}
+{"query_text": "Cancer Risk From CT Scan Radiation", "ground_truth": ["MED-3623", "MED-3624", "MED-3625", "MED-3626", "MED-3627"]}
+{"query_text": "Preventing the Common Cold with Probiotics?", "ground_truth": ["MED-3680", "MED-3681", "MED-3682", "MED-3683", "MED-3693", "MED-3685", "MED-3686", "MED-3687"]}
+{"query_text": "Eating Healthy on a Budget", "ground_truth": ["MED-3769", "MED-3770"]}
+{"query_text": "Flaxseeds & Breast Cancer Survival: Clinical Evidence", "ground_truth": ["MED-3841", "MED-3832", "MED-3843", "MED-3836", "MED-3853", "MED-3845", "MED-3848", "MED-3830", "MED-3840"]}
+{"query_text": "Do Fruit & Nut Bars Cause Weight Gain?", "ground_truth": ["MED-3896", "MED-3897", "MED-3906", "MED-3908", "MED-3900", "MED-4289", "MED-3910", "MED-4715"]}
+{"query_text": "Titanium Dioxide & Inflammatory Bowel Disease", "ground_truth": ["MED-3960", "MED-3961", "MED-3962", "MED-3963", "MED-3964", "MED-3965", "MED-3966", "MED-3967", "MED-3968", "MED-3969", "MED-3970"]}
+{"query_text": "Prolonged Liver Function Enhancement From Broccoli", "ground_truth": ["MED-4040", "MED-4976", "MED-5197"]}
+{"query_text": "Apple Juice May Be Worse Than Sugar Water", "ground_truth": ["MED-4091", "MED-4089", "MED-5071"]}
+{"query_text": "Preventing Strokes with Diet", "ground_truth": ["MED-4106"]}
+{"query_text": "Neurobiology of Artificial Sweeteners", "ground_truth": ["MED-4120"]}
+{"query_text": "More Antibiotics In White Meat or Dark Meat?", "ground_truth": ["MED-4166"]}
+{"query_text": "BPA Plastic and Male Sexual Dysfunction", "ground_truth": ["MED-4185", "MED-4186"]}
+{"query_text": "Filled Full of Lead", "ground_truth": ["MED-4200"]}
+{"query_text": "The Answer to the Pritikin Puzzle", "ground_truth": ["MED-4612", "MED-4220", "MED-5341"]}
+{"query_text": "To Snack or Not to Snack?", "ground_truth": ["MED-4250"]}
+{"query_text": "Boosting Good Bacteria in the Colon Without Probiotics", "ground_truth": ["MED-4276", "MED-4269", "MED-5332", "MED-4271"]}
+{"query_text": "Optimal Phytosterol Dose", "ground_truth": ["MED-4846", "MED-4295"]}
+{"query_text": "Kiwifruit for Irritable Bowel Syndrome", "ground_truth": ["MED-4325"]}
+{"query_text": "Dietary Treatment of Crohn's Disease", "ground_truth": ["MED-4342", "MED-4349"]}
+{"query_text": "Unsafe at Any Feed", "ground_truth": ["MED-4355"]}
+{"query_text": "Pharmacists Versus Health Food Store Employees: Who Gives Better Advice?", "ground_truth": ["MED-4370"]}
+{"query_text": "Preventing Cataracts with Diet", "ground_truth": ["MED-4382"]}
+{"query_text": "Cheese Mites and Maggots", "ground_truth": ["MED-4403"]}
+{"query_text": "Cholesterol and Lower Back Pain", "ground_truth": ["MED-4423", "MED-4424"]}
+{"query_text": "EPIC Findings on Lymphoma", "ground_truth": ["MED-4436", "MED-4437"]}
+{"query_text": "Sometimes the Enzyme Myth Is True", "ground_truth": ["MED-4454"]}
+{"query_text": "Vitamin C-Enriched Bacon", "ground_truth": ["MED-4470"]}
+{"query_text": "Out of the Lab Onto the Track", "ground_truth": ["MED-4508", "MED-4504", "MED-4505", "MED-4506"]}
+{"query_text": "Dragon's Blood", "ground_truth": ["MED-4525", "MED-4526", "MED-4527"]}
+{"query_text": "Vitamin D: Shedding some light on the new recommendations", "ground_truth": ["MED-714", "MED-919", "MED-716"]}
+{"query_text": "How to Help Prevent Abdominal Aortic Aneurysms", "ground_truth": ["MED-4555"]}
+{"query_text": "The Difficulty of Arriving at a Vitamin D Recommendation", "ground_truth": ["MED-4573", "MED-4570"]}
+{"query_text": "Amyloid and Apple Juice", "ground_truth": ["MED-4590", "MED-4591"]}
+{"query_text": "Dietary Guidelines: From Dairies to Berries", "ground_truth": ["MED-5331"]}
+{"query_text": "Are Avocados Good for You?", "ground_truth": ["MED-4619", "MED-4620", "MED-4621"]}
+{"query_text": "Relieving Yourself of Excess Estrogen", "ground_truth": ["MED-4642", "MED-4643", "MED-4644"]}
+{"query_text": "Too Much Iodine Can Be as Bad as Too Little", "ground_truth": ["MED-4660", "MED-4666", "MED-4662", "MED-4663", "MED-4664"]}
+{"query_text": "Is Milk and Mucus a Myth?", "ground_truth": ["MED-4677"]}
+{"query_text": "Convergence of Evidence", "ground_truth": ["MED-4696"]}
+{"query_text": "Is Distilled Fish Oil Toxin-Free?", "ground_truth": ["MED-4729", "MED-4730", "MED-4731", "MED-4732"]}
+{"query_text": "Acne & Cancer Connection", "ground_truth": ["MED-4752"]}
+{"query_text": "Dietary Theory of Alzheimer's", "ground_truth": ["MED-4790"]}
+{"query_text": "Meat & Multiple Myeloma", "ground_truth": ["MED-4820", "MED-4821"]}
+{"query_text": "Apthous Ulcer Mystery Solved", "ground_truth": ["MED-4841"]}
+{"query_text": "EPIC Study", "ground_truth": ["MED-4861"]}
+{"query_text": "Update on Herbalife\u00ae", "ground_truth": ["MED-4872", "MED-4873", "MED-4874"]}
+{"query_text": "Aluminum in Vaccines vs. Food", "ground_truth": ["MED-4908", "MED-4909"]}
+{"query_text": "Are Multivitamins Good For You?", "ground_truth": ["MED-4925"]}
+{"query_text": "What\u2019s Driving America\u2019s Obesity Problem?", "ground_truth": ["MED-2717", "MED-2715", "MED-2716", "MED-2718", "MED-2721", "MED-2720", "MED-2719", "MED-2723", "MED-2724"]}
+{"query_text": "Fish Fog", "ground_truth": ["MED-4946"]}
+{"query_text": "Sexually Transmitted Fish Toxin", "ground_truth": ["MED-4962", "MED-4963", "MED-4964", "MED-4969", "MED-4966", "MED-4967", "MED-4968"]}
+{"query_text": "Can antioxidant-rich spices counteract the effects of a high-fat meal?", "ground_truth": ["MED-759", "MED-760"]}
+{"query_text": "Alcohol Risks vs. Benefits", "ground_truth": ["MED-4994"]}
+{"query_text": "Is Coconut Milk Good For You?", "ground_truth": ["MED-5012", "MED-5013", "MED-5014"]}
+{"query_text": "Boosting Heart Nerve Control", "ground_truth": ["MED-5026", "MED-5027"]}
+{"query_text": "Kuna Indian Secret", "ground_truth": ["MED-5041", "MED-5042"]}
+{"query_text": "The Healthiest Sweetener", "ground_truth": ["MED-5056"]}
+{"query_text": "Are Artificial Colors Bad for You?", "ground_truth": ["MED-5062", "MED-5063"]}
+{"query_text": "Plant vs. Cow Calcium", "ground_truth": ["MED-5108", "MED-5109"]}
+{"query_text": "Vitamin Supplements Worth Taking", "ground_truth": ["MED-5128", "MED-5129", "MED-5130", "MED-5131", "MED-5132", "MED-5133", "MED-5134", "MED-5135"]}
+{"query_text": "Dioxins Stored in Our Own Fat May Increase Diabetes Risk", "ground_truth": ["MED-2394", "MED-2395", "MED-2397", "MED-2404", "MED-2400"]}
+{"query_text": "The Healthiest Vegetables", "ground_truth": ["MED-5159", "MED-5160", "MED-5161", "MED-5162"]}
+{"query_text": "Bowel Movement Frequency", "ground_truth": ["MED-5177", "MED-5175"]}
+{"query_text": "Olive Oil and Artery Function", "ground_truth": ["MED-5260", "MED-5261", "MED-5262", "MED-5263", "MED-5278", "MED-5265", "MED-5266", "MED-5267", "MED-5268", "MED-5269", "MED-5270", "MED-5271", "MED-5272", "MED-5273", "MED-5274"]}
+{"query_text": "How Doctors Responded to Being Named a Leading Killer", "ground_truth": ["MED-5343", "MED-5344", "MED-5345", "MED-5346", "MED-5347"]}
+{"query_text": "Any update on the scary in vitro avocado data?", "ground_truth": ["MED-861"]}
+{"query_text": "What about pepper plus turmeric in V8 juice?", "ground_truth": ["MED-892", "MED-4390"]}
+{"query_text": "Is annatto food coloring safe?", "ground_truth": ["MED-906"]}
+{"query_text": "Fresh fruit versus frozen--which is better?", "ground_truth": ["MED-3714", "MED-917"]}
+{"query_text": "Are krill oil supplements better than fish oil capsules?", "ground_truth": ["MED-927", "MED-928", "MED-4936", "MED-930", "MED-931"]}
+{"query_text": "Who Should be Careful About Curcumin?", "ground_truth": ["MED-2780", "MED-2810", "MED-2787", "MED-2788", "MED-2777", "MED-2816"]}
+{"query_text": "Is apple cider vinegar good for you?", "ground_truth": ["MED-941", "MED-942"]}
+{"query_text": "How can you believe in any scientific study?", "ground_truth": ["MED-952"]}
+{"query_text": "Is vitamin D3 (cholecalciferol) preferable to D2 (ergocalciferol)?", "ground_truth": ["MED-961", "MED-962"]}
+{"query_text": "Foods for Glaucoma", "ground_truth": ["MED-2896", "MED-2899", "MED-2900", "MED-2901"]}
+{"query_text": "What is Actually in Chicken Nuggets?", "ground_truth": ["MED-2991"]}
+{"query_text": "What Do Meat Purge and Cola Have in Common?", "ground_truth": ["MED-332", "MED-3090", "MED-334", "MED-335", "MED-3092", "MED-3094"]}
+{"query_text": "Chronic Headaches and Pork Parasites", "ground_truth": ["MED-3178", "MED-3169", "MED-3172", "MED-3181", "MED-3174", "MED-3175", "MED-3176", "MED-3182"]}
