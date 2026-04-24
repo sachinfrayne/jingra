@@ -417,10 +417,14 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
                     .setSize(vectorSize)
                     .setDistance(qdrantDistance);
 
-            // Parse and add HNSW config from settings if present
+            // Parse and add HNSW config — check under "settings" (legacy wrapped format) or top-level
+            // (direct Qdrant-console format, e.g. wiki-dpr-e5-768-knn.json).
             JsonNode settings = templateNode.get("settings");
-            if (settings != null && settings.has("hnsw_config")) {
-                JsonNode hnswConfig = settings.get("hnsw_config");
+            JsonNode hnswConfigTop = (settings != null && settings.has("hnsw_config"))
+                    ? settings.get("hnsw_config")
+                    : templateNode.get("hnsw_config");
+            if (hnswConfigTop != null) {
+                JsonNode hnswConfig = hnswConfigTop;
                 HnswConfigDiff.Builder hnswBuilder = HnswConfigDiff.newBuilder();
 
                 if (hnswConfig.has("m")) {
@@ -450,9 +454,13 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
                 createBuilder.setReplicationFactor(replicationFactor);
             }
 
-            // Set quantization config at collection level (not just on vector params)
-            if (settings != null && settings.has("quantization_config")) {
-                JsonNode quantConfig = settings.get("quantization_config");
+            // Set quantization config — check under "settings" (legacy wrapped format) or top-level
+            // (direct Qdrant-console format).
+            JsonNode quantConfigNode = (settings != null && settings.has("quantization_config"))
+                    ? settings.get("quantization_config")
+                    : templateNode.get("quantization_config");
+            if (quantConfigNode != null) {
+                JsonNode quantConfig = quantConfigNode;
 
                 QuantizationConfig.Builder quantBuilder = QuantizationConfig.newBuilder();
 
@@ -480,7 +488,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
                     indexName, schemaName, shardNumber, replicationFactor);
 
             // Verify quantization is enabled
-            if (settings != null && settings.has("quantization_config")) {
+            if (quantConfigNode != null) {
                 try {
                     var collectionInfo = client.getCollectionInfoAsync(indexName).get(grpcTimeoutSeconds, TimeUnit.SECONDS);
                     // Note: Verification requires inspecting the collection config structure

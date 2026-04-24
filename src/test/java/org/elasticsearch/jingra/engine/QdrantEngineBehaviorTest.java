@@ -50,7 +50,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.mockito.ArgumentCaptor;
 
 /**
  * Offline and helper-focused tests for {@link QdrantEngine}; uses a Mockito {@link QdrantClient}
@@ -1338,6 +1340,68 @@ class QdrantEngineBehaviorTest {
         injectClient(e, mockClient);
         QueryParams qp = new QueryParams(Map.of("query_vector", List.of(0.1f)));
         assertNotNull(e.query("c", "q-quant-no-oversampling-key", qp).getClientLatencyMs());
+    }
+
+    @Test
+    void createIndexAppliesBinaryQuantizationFromTopLevelDirectSchema() throws Exception {
+        // Direct Qdrant-console schema format: hnsw_config and quantization_config at top level,
+        // no "template" or "settings" wrapper. This is what wiki-dpr-e5-768-knn.json uses.
+        writeQdrantSchemaFile("test-direct-quant", """
+                {
+                  "vectors": {"size": 2, "distance": "Cosine"},
+                  "shard_number": 3,
+                  "replication_factor": 2,
+                  "hnsw_config": {"m": 16, "ef_construct": 100},
+                  "quantization_config": {"binary": {"always_ram": true}}
+                }
+                """);
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("grpc_timeout_seconds", 1);
+        QdrantEngine e = new QdrantEngine(cfg);
+        QdrantClient mockClient = mock(QdrantClient.class);
+        when(mockClient.listCollectionsAsync()).thenReturn(Futures.immediateFuture(List.of()));
+        ArgumentCaptor<CreateCollection> captor = ArgumentCaptor.forClass(CreateCollection.class);
+        when(mockClient.createCollectionAsync(captor.capture()))
+                .thenReturn(Futures.immediateFuture(CollectionOperationResponse.getDefaultInstance()));
+        when(mockClient.getCollectionInfoAsync(anyString()))
+                .thenReturn(Futures.immediateFuture(CollectionInfo.getDefaultInstance()));
+        injectClient(e, mockClient);
+
+        assertTrue(e.createIndex("col-direct-quant", "test-direct-quant"));
+
+        CreateCollection created = captor.getValue();
+        assertTrue(created.hasQuantizationConfig(),
+                "Binary quantization must be applied when quantization_config is at top level of schema");
+        assertTrue(created.getQuantizationConfig().hasBinary(),
+                "Binary quantization config must be set");
+    }
+
+    @Test
+    void createIndexAppliesHnswConfigFromTopLevelDirectSchema() throws Exception {
+        writeQdrantSchemaFile("test-direct-hnsw", """
+                {
+                  "vectors": {"size": 2, "distance": "Cosine"},
+                  "hnsw_config": {"m": 8, "ef_construct": 200}
+                }
+                """);
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("grpc_timeout_seconds", 1);
+        QdrantEngine e = new QdrantEngine(cfg);
+        QdrantClient mockClient = mock(QdrantClient.class);
+        when(mockClient.listCollectionsAsync()).thenReturn(Futures.immediateFuture(List.of()));
+        ArgumentCaptor<CreateCollection> captor = ArgumentCaptor.forClass(CreateCollection.class);
+        when(mockClient.createCollectionAsync(captor.capture()))
+                .thenReturn(Futures.immediateFuture(CollectionOperationResponse.getDefaultInstance()));
+        injectClient(e, mockClient);
+
+        assertTrue(e.createIndex("col-direct-hnsw", "test-direct-hnsw"));
+
+        CreateCollection created = captor.getValue();
+        var vectorParams = created.getVectorsConfig().getParams();
+        assertTrue(vectorParams.hasHnswConfig(),
+                "HNSW config must be applied when hnsw_config is at top level of schema");
+        assertEquals(8, vectorParams.getHnswConfig().getM());
+        assertEquals(200, vectorParams.getHnswConfig().getEfConstruct());
     }
 
 }
