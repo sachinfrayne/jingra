@@ -6,15 +6,15 @@
       },
       "embedding": {
         "type": "knn_vector",
-        "dimension": 10,
+        "dimension": 384,
         "space_type": "cosinesimil",
         "data_type": "float",
         "method": {
           "name": "hnsw",
           "engine": "lucene",
           "parameters": {
-            "m": 4,
-            "ef_construction": 16
+            "m": 16,
+            "ef_construction": 100
           }
         }
       }

@@ -12,7 +12,7 @@ datasets:
     index_name: demo-vector
     schema_name: demo-vector-schema
     query_name: demo-vector-query
-    vector_size: 10
+    vector_size: 384
     distance: cosine
 
     path:
