@@ -23,9 +23,7 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 DOCS_PATH = os.path.join(DATA_DIR, "docs.ndjson")
 QUERIES_PATH = os.path.join(DATA_DIR, "queries.ndjson")
 
-# Minimum relevance score to include a doc in ground truth.
-# NFCorpus uses: 2 = directly relevant, 1 = partially relevant
-MIN_RELEVANCE = 2
+MIN_RELEVANCE = 1
 
 
 def main():
