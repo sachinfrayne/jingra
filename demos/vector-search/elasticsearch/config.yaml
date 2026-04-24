@@ -29,22 +29,22 @@ datasets:
 
     param_groups:
       recall@10:
-        - { size: 10, num_candidates: 10, k: 1 }
-        - { size: 10, num_candidates: 10, k: 2 }
-        - { size: 10, num_candidates: 10, k: 3 }
-        - { size: 10, num_candidates: 10, k: 4 }
-        - { size: 10, num_candidates: 10, k: 5 }
-        - { size: 10, num_candidates: 10, k: 6 }
-        - { size: 10, num_candidates: 10, k: 7 }
-        - { size: 10, num_candidates: 10, k: 8 }
-        - { size: 10, num_candidates: 10, k: 9 }
-        - { size: 10, num_candidates: 10, k: 10 }
-        - { size: 10, num_candidates: 20, k: 10 }
-        - { size: 10, num_candidates: 50, k: 10 }
-        - { size: 10, num_candidates: 100, k: 10 }
-        - { size: 10, num_candidates: 200, k: 10 }
-        - { size: 10, num_candidates: 500, k: 10 }
-        - { size: 10, num_candidates: 1000, k: 10 }
+        - { size: 10, k: 1, num_candidates: 1, oversample: 1 }
+        - { size: 10, k: 2, num_candidates: 2, oversample: 1 }
+        - { size: 10, k: 3, num_candidates: 3, oversample: 1 }
+        - { size: 10, k: 4, num_candidates: 4, oversample: 1 }
+        - { size: 10, k: 5, num_candidates: 5, oversample: 1 }
+        - { size: 10, k: 6, num_candidates: 6, oversample: 1 }
+        - { size: 10, k: 7, num_candidates: 7, oversample: 1 }
+        - { size: 10, k: 8, num_candidates: 8, oversample: 1 }
+        - { size: 10, k: 9, num_candidates: 9, oversample: 1 }
+        - { size: 10, k: 10, num_candidates: 10, oversample: 1 }
+        - { size: 10, k: 20, num_candidates: 20, oversample: 1 }
+        - { size: 10, k: 50, num_candidates: 50, oversample: 1 }
+        - { size: 10, k: 100, num_candidates: 100, oversample: 1 }
+        - { size: 10, k: 200, num_candidates: 200, oversample: 1 }
+        - { size: 10, k: 500, num_candidates: 500, oversample: 1 }
+        - { size: 10, k: 1000, num_candidates: 1000, oversample: 1 }
 
 load:
   threads: 4

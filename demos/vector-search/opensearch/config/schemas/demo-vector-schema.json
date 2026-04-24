@@ -9,14 +9,12 @@
         "dimension": 10,
         "space_type": "cosinesimil",
         "data_type": "float",
-        "compression_level": "32x",
-        "mode": "in_memory",
         "method": {
           "name": "hnsw",
-          "engine": "faiss",
+          "engine": "lucene",
           "parameters": {
-            "ef_construction": 16,
-            "m": 4
+            "m": 4,
+            "ef_construction": 16
           }
         }
       }
@@ -25,9 +23,6 @@
   "settings": {
     "index.knn": true,
     "number_of_shards": 1,
-    "number_of_replicas": 0,
-    "index": {
-      "refresh_interval": "1s"
-    }
+    "number_of_replicas": 0
   }
 }
