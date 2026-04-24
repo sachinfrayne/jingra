@@ -2,6 +2,7 @@ engine: elasticsearch
 
 elasticsearch:
   url_env: ES_URL
+  query_dump_directory: ./output
 
 dataset: demo-lexical
 

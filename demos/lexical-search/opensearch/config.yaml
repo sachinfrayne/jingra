@@ -2,6 +2,7 @@ engine: opensearch
 
 opensearch:
   url_env: OPENSEARCH_URL
+  query_dump_directory: ./output
 
 dataset: demo-lexical
 
