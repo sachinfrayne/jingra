@@ -52,7 +52,7 @@ output:
   sinks:
     - type: elasticsearch
       config:
-        url_env: ES_URL
+        url_env: SINK_URL
         index: jingra-results
 
 analysis:
@@ -60,7 +60,7 @@ analysis:
   engines:
     - qdrant
   results_cluster:
-    url_env: ES_URL
+    url_env: SINK_URL
     index: jingra-results
   output_directory: ./output
   generate_plots: true

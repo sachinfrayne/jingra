@@ -17,7 +17,7 @@ services:
 
   jingra:
     environment:
-      - ES_URL=http://elasticsearch-sink:9200
+      - SINK_URL=http://elasticsearch-sink:9200
     depends_on:
       elasticsearch-sink:
         condition: service_healthy
