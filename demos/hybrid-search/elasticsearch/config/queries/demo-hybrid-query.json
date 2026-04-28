@@ -24,7 +24,7 @@
           }
         }
       ],
-      "rank_window_size": "{{rank_window_size}}"
+      "rank_window_size": "{{rank}}"
     }
   },
   "size": "{{size}}"

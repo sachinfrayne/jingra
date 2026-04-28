@@ -12,7 +12,7 @@ datasets:
     index_name: demo-hybrid
     schema_name: demo-hybrid-schema
     query_name: demo-hybrid-query
-    vector_size: 10
+    vector_size: 384
     distance: cosine
 
     path:
@@ -30,14 +30,23 @@ datasets:
 
     param_groups:
       recall@10:
-        - { size: 10, k: 10, num_candidates: 10,   oversample: 1, rank_window_size: 10 }
-        - { size: 10, k: 10, num_candidates: 20,   oversample: 1, rank_window_size: 20 }
-        - { size: 10, k: 10, num_candidates: 40,   oversample: 1, rank_window_size: 40 }
-        - { size: 10, k: 10, num_candidates: 80,   oversample: 1, rank_window_size: 80 }
-        - { size: 10, k: 10, num_candidates: 160,  oversample: 1, rank_window_size: 160 }
-        - { size: 10, k: 10, num_candidates: 320,  oversample: 1, rank_window_size: 320 }
-        - { size: 10, k: 10, num_candidates: 640,  oversample: 1, rank_window_size: 640 }
-        - { size: 10, k: 10, num_candidates: 1280, oversample: 1, rank_window_size: 1280 }
+        - { size: 10, k: 10, num_candidates: 10, oversample: 1, rank: 10 }
+        - { size: 10, k: 10, num_candidates: 20, oversample: 1, rank: 20 }
+        - { size: 10, k: 10, num_candidates: 40, oversample: 1, rank: 40 }
+        - { size: 10, k: 10, num_candidates: 80, oversample: 1, rank: 80 }
+        - { size: 10, k: 10, num_candidates: 160, oversample: 1, rank: 160 }
+        - { size: 10, k: 10, num_candidates: 320, oversample: 1, rank: 320 }
+        - { size: 10, k: 10, num_candidates: 640, oversample: 1, rank: 640 }
+        - { size: 10, k: 10, num_candidates: 1280, oversample: 1, rank: 1280 }
+        - { size: 10, k: 10, num_candidates: 2560, oversample: 1, rank: 2560 }
+      recall@50:
+        - { size: 50, k: 50, num_candidates: 50, oversample: 1, rank: 50 }
+        - { size: 50, k: 50, num_candidates: 80, oversample: 1, rank: 80 }
+        - { size: 50, k: 50, num_candidates: 160, oversample: 1, rank: 160 }
+        - { size: 50, k: 50, num_candidates: 320, oversample: 1, rank: 320 }
+        - { size: 50, k: 50, num_candidates: 640, oversample: 1, rank: 640 }
+        - { size: 50, k: 50, num_candidates: 1280, oversample: 1, rank: 1280 }
+        - { size: 50, k: 50, num_candidates: 2560, oversample: 1, rank: 2560 }
 
 load:
   threads: 4

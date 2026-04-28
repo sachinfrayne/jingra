@@ -44,8 +44,12 @@ def main():
 
     print("Downloading Wix/WixQA corpus...")
     corpus = load_dataset("Wix/WixQA", "wix_kb_corpus", split="train")
-    doc_ids = [row["id"] for row in corpus]
-    doc_texts = [f"{row['title']} {row['contents']}".strip() for row in corpus]
+    corpus_list = list(corpus)
+    # Convert hex string IDs to sequential integers so they can be stored natively
+    # as numeric point IDs in Qdrant (which only accepts numeric or UUID point IDs).
+    hex_to_int = {row["id"]: i for i, row in enumerate(corpus_list)}
+    doc_ids = list(range(len(corpus_list)))
+    doc_texts = [f"{row['title']} {row['contents']}".strip() for row in corpus_list]
 
     print(f"Embedding {len(doc_ids):,} documents...")
     doc_embeddings = model.encode(doc_texts, batch_size=64, show_progress_bar=True, convert_to_numpy=True)
@@ -80,7 +84,7 @@ def main():
         for i in range(len(query_texts)):
             record = {
                 "embedding": [round(float(x), 4) for x in query_embeddings[i]],
-                "ground_truth": [doc_ids[j] for j in top_k_indices[i]],
+                "ground_truth": [str(doc_ids[j]) for j in top_k_indices[i]],
             }
             f.write(json.dumps(record) + "\n")
 

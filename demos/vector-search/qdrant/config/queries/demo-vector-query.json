@@ -1,0 +1,13 @@
+{
+  "vector": "{{query_vector}}",
+  "limit": "{{size}}",
+  "with_payload": false,
+  "with_vector": false,
+  "params": {
+    "hnsw_ef": "{{hnsw_ef}}",
+    "quantization": {
+      "rescore": true,
+      "oversampling": "{{oversampling}}"
+    }
+  }
+}

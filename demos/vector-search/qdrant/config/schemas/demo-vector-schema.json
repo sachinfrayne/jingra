@@ -1,0 +1,11 @@
+{
+  "template": {
+    "vectors": {
+      "size": 384,
+      "distance": "Cosine"
+    },
+    "payload_indexes": [
+      {"field_name": "id", "field_schema": "keyword"}
+    ]
+  }
+}

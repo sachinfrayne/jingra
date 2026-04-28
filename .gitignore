@@ -36,6 +36,9 @@ __pycache__/
 # Demo analysis output (generated at runtime)
 demos/*/*/output/
 
+# Demo data files (generated locally by generate_data.py, not committed)
+demos/*/data/
+
 # Local review artifacts
 
 REVIEW*.md

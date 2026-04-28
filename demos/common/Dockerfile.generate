@@ -1,0 +1,10 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+    datasets \
+    sentence-transformers \
+    pyarrow
+
+CMD ["python3", "generate_data.py"]

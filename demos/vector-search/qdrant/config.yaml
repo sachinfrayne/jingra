@@ -1,0 +1,69 @@
+engine: qdrant
+
+qdrant:
+  url_env: QDRANT_URL
+  vector_field: embedding
+
+dataset: demo-vector
+
+datasets:
+  demo-vector:
+    type: vector
+    index_name: demo-vector
+    schema_name: demo-vector-schema
+    query_name: demo-vector-query
+
+    path:
+      data_path: data/docs.ndjson
+      queries_path: data/queries.ndjson
+
+    data_mapping:
+      id_field: id
+
+    queries_mapping:
+      query_vector_field: embedding
+      ground_truth_field: ground_truth
+
+    param_groups:
+      recall@10:
+        - { size: 10, hnsw_ef: 1, oversampling: 1 }
+        - { size: 10, hnsw_ef: 2, oversampling: 1 }
+        - { size: 10, hnsw_ef: 5, oversampling: 1 }
+        - { size: 10, hnsw_ef: 10, oversampling: 1 }
+        - { size: 10, hnsw_ef: 20, oversampling: 1 }
+        - { size: 10, hnsw_ef: 40, oversampling: 1 }
+        - { size: 10, hnsw_ef: 80, oversampling: 1 }
+        - { size: 10, hnsw_ef: 160, oversampling: 1 }
+        - { size: 10, hnsw_ef: 320, oversampling: 1 }
+
+load:
+  threads: 4
+  batch_size: 100
+  queue_capacity: 100
+
+evaluation:
+  run_id: demo-vector-qdrant
+  warmup_workers: 1
+  measurement_workers: 1
+  warmup_rounds: 3
+  measurement_rounds: 1
+
+output:
+  sinks:
+    - type: elasticsearch
+      config:
+        url_env: ES_URL
+        index: jingra-results
+
+analysis:
+  run_id: demo-vector-qdrant
+  engines:
+    - qdrant
+  results_cluster:
+    url_env: ES_URL
+    index: jingra-results
+  output_directory: ./output
+  generate_plots: true
+  latency_metrics:
+    - latency_median
+    - latency_avg
