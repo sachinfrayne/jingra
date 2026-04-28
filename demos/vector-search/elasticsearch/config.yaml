@@ -1,7 +1,7 @@
 engine: elasticsearch
 
 elasticsearch:
-  url_env: ES_URL
+  url_env: ELASTICSEARCH_URL
   query_dump_directory: ./output
 
 dataset: demo-vector

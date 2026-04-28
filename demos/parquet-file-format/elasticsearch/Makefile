@@ -1,4 +1,7 @@
 DEMO_NAME := Elasticsearch Parquet File Format Demo
 export DATA_PATH := ../data
 export BUILD_CONTEXT := ../../..
+export ES_VERSION := $(shell cat ../../../engine-versions/.elasticsearch | tr -d '[:space:]')
+COMPOSE_OVERRIDES = -f ../../common/docker-compose.elasticsearch.yml
+ENGINE_SERVICE := elasticsearch
 include ../../common/demo.mk

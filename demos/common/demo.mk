@@ -4,13 +4,15 @@ DEMO_MK_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 
 COMPOSE_OVERRIDES ?=
 ENGINE_SERVICE ?= elasticsearch
+SINK_SERVICE    ?= elasticsearch-sink
 DEMO_OUTPUT_DIRS ?= output
 POST_START_HOOK ?=
 
-export ES_VERSION := $(shell cat $(DEMO_MK_DIR)../../engine-versions/.elasticsearch | tr -d '[:space:]')
+export SINK_VERSION := $(shell cat $(DEMO_MK_DIR)../../engine-versions/.elasticsearch | tr -d '[:space:]')
 
 COMPOSE = docker-compose \
     -f $(DEMO_MK_DIR)docker-compose.yml \
+    -f $(DEMO_MK_DIR)docker-compose.sink.yml \
     $(COMPOSE_OVERRIDES) \
     --project-directory . \
     --project-name $(notdir $(CURDIR))
@@ -21,12 +23,12 @@ help:
 	@echo ""
 	@echo "Available commands:"
 	@echo "  make build      - Compile Jingra"
-	@echo "  make start      - Start Elasticsearch"
-	@echo "  make load       - Load data into Elasticsearch"
+	@echo "  make start      - Start $(ENGINE_SERVICE)"
+	@echo "  make load       - Load data into $(ENGINE_SERVICE)"
 	@echo "  make eval       - Run benchmark evaluation"
 	@echo "  make analyze    - Analyze benchmark results"
-	@echo "  make stop       - Stop Elasticsearch"
-	@echo "  make clean      - Stop Elasticsearch and remove output dir"
+	@echo "  make stop       - Stop $(ENGINE_SERVICE)"
+	@echo "  make clean      - Stop $(ENGINE_SERVICE) and remove output dir"
 	@echo ""
 	@echo "Full demo lifecycle:"
 	@echo "  make run        - Run the full demo"
@@ -39,7 +41,7 @@ build:
 
 start:
 	@echo "Starting $(ENGINE_SERVICE)..."
-	$(COMPOSE) up -d --build elasticsearch $(ENGINE_SERVICE)
+	$(COMPOSE) up -d --build $(SINK_SERVICE) $(ENGINE_SERVICE)
 	@if $(COMPOSE) ps $(ENGINE_SERVICE) | grep -q "healthy"; then \
 		echo "✓ $(ENGINE_SERVICE) is ready"; \
 	else \
@@ -61,7 +63,7 @@ start:
 	$(if $(POST_START_HOOK),@$(POST_START_HOOK))
 
 load:
-	@echo "Loading data into Elasticsearch..."
+	@echo "Loading data into $(ENGINE_SERVICE)..."
 	$(COMPOSE) run --rm jingra load config.yaml
 
 eval:
