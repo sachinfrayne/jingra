@@ -34,11 +34,14 @@ def main():
 
     print("Downloading BeIR/nfcorpus corpus...")
     corpus = load_dataset("BeIR/nfcorpus", "corpus", split="corpus")
+    corpus_list = list(corpus)
+
+    id_map = {row["_id"]: i for i, row in enumerate(corpus_list)}
 
     docs_df = pd.DataFrame({
-        "id": [row["_id"] for row in corpus],
-        "title": [row["title"] for row in corpus],
-        "description": [row["text"] for row in corpus],
+        "id": [id_map[row["_id"]] for row in corpus_list],
+        "title": [row["title"] for row in corpus_list],
+        "description": [row["text"] for row in corpus_list],
     })
 
     print(f"Writing {len(docs_df):,} docs to {DOCS_PATH}...")
@@ -53,7 +56,9 @@ def main():
     ground_truth: dict[str, list[str]] = {}
     for row in qrels:
         if row["score"] >= MIN_RELEVANCE:
-            ground_truth.setdefault(row["query-id"], []).append(row["corpus-id"])
+            int_id = id_map.get(row["corpus-id"])
+            if int_id is not None:
+                ground_truth.setdefault(row["query-id"], []).append(str(int_id))
 
     test_queries = sorted(
         [(qid, query_map[qid]) for qid in ground_truth if qid in query_map],

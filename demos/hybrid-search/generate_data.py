@@ -67,11 +67,13 @@ def main():
     )
     doc_embeddings = normalise(doc_embeddings)
 
+    id_map = {orig_id: i for i, orig_id in enumerate(doc_ids)}
+
     print(f"Writing {len(doc_ids):,} docs to {DOCS_PATH}...")
     with open(DOCS_PATH, "w") as f:
         for doc_id, title, desc, emb in zip(doc_ids, doc_titles, doc_descs, doc_embeddings):
             record = {
-                "id": doc_id,
+                "id": id_map[doc_id],
                 "title": title,
                 "description": desc,
                 "embedding": [round(float(x), 4) for x in emb],
@@ -89,7 +91,9 @@ def main():
     ground_truth: dict[str, list[str]] = {}
     for row in qrels_ds:
         if row["score"] > 0:
-            ground_truth.setdefault(str(row["query-id"]), []).append(str(row["corpus-id"]))
+            int_id = id_map.get(str(row["corpus-id"]))
+            if int_id is not None:
+                ground_truth.setdefault(str(row["query-id"]), []).append(str(int_id))
 
     test_queries = [
         (qid, sanitize_text(query_map[qid]))

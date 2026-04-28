@@ -31,12 +31,15 @@ def main():
 
     print("Downloading BeIR/nfcorpus corpus...")
     corpus = load_dataset("BeIR/nfcorpus", "corpus", split="corpus")
+    corpus_list = list(corpus)
 
-    print(f"Writing {len(corpus):,} docs to {DOCS_PATH}...")
+    id_map = {row["_id"]: i for i, row in enumerate(corpus_list)}
+
+    print(f"Writing {len(corpus_list):,} docs to {DOCS_PATH}...")
     with open(DOCS_PATH, "w") as f:
-        for row in corpus:
+        for row in corpus_list:
             doc = {
-                "id": row["_id"],
+                "id": id_map[row["_id"]],
                 "title": row["title"],
                 "description": row["text"],
             }
@@ -49,11 +52,13 @@ def main():
     print("Downloading BeIR/nfcorpus-qrels (test split)...")
     qrels = load_dataset("BeIR/nfcorpus-qrels", split="test")
 
-    # Build query_id -> [relevant doc_ids] mapping
+    # Build query_id -> [relevant doc integer ids] mapping
     ground_truth: dict[str, list[str]] = {}
     for row in qrels:
         if row["score"] >= MIN_RELEVANCE:
-            ground_truth.setdefault(row["query-id"], []).append(row["corpus-id"])
+            int_id = id_map.get(row["corpus-id"])
+            if int_id is not None:
+                ground_truth.setdefault(row["query-id"], []).append(str(int_id))
 
     # Only keep queries that have at least one relevant doc
     test_queries = [
@@ -73,7 +78,7 @@ def main():
             f.write(json.dumps(record) + "\n")
 
     print(f"\nDone.")
-    print(f"  docs:    {len(corpus):,}")
+    print(f"  docs:    {len(corpus_list):,}")
     print(f"  queries: {len(test_queries):,}")
     avg_gt = sum(len(v) for v in ground_truth.values()) / len(ground_truth)
     print(f"  avg relevant docs per query: {avg_gt:.1f}")
