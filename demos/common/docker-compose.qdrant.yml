@@ -1,0 +1,25 @@
+services:
+  qdrant:
+    build:
+      context: ../../common
+      dockerfile: Dockerfile.qdrant
+      args:
+        QD_VERSION: ${QD_VERSION}
+    image: jingra-demo-qdrant:v${QD_VERSION}
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - jingra-demo-net
+
+  jingra:
+    environment:
+      - QDRANT_URL=http://qdrant:6334
+    depends_on:
+      qdrant:
+        condition: service_healthy
