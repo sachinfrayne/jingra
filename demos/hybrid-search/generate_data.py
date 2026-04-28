@@ -7,8 +7,15 @@ Corpus:  25,171 Semantic Scholar paper abstracts (title + abstract)
 Queries: ~1,000 paper-title queries with citation-based ground truth
 
 Output:
-  data/docs.ndjson    — { "id", "title", "description", "embedding": [384 floats] }
-  data/queries.ndjson — { "query_text", "embedding": [384 floats], "ground_truth": [doc_id, ...] }
+  data/docs.ndjson    — { "id": int (0-based index), "title", "description", "embedding": [384 floats] }
+  data/queries.ndjson — { "query_text", "embedding": [384 floats], "ground_truth": [str(doc_id), ...] }
+
+Note on doc IDs:
+  The SciDocs corpus uses string IDs, which are not valid as Qdrant point IDs
+  (Qdrant only accepts numeric uint64 or standard UUID format). To keep the benchmark
+  correct across all engines, doc IDs are remapped to sequential integers (0, 1, 2, ...).
+  Ground truth values are written as strings (e.g. "42") because the benchmark evaluator
+  reads them as List<String>.
 
 Usage:
   pip install sentence-transformers datasets

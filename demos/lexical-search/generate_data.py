@@ -6,8 +6,15 @@ Corpus:  3,633 documents (biomedical/nutritional abstracts)
 Queries: 323 test queries with qrels (relevance judgments)
 
 Output:
-  data/docs.ndjson    — { "id", "title", "description" }
-  data/queries.ndjson — { "query_text", "ground_truth": [doc_id, ...] }
+  data/docs.ndjson    — { "id": int (0-based index), "title", "description" }
+  data/queries.ndjson — { "query_text", "ground_truth": [str(doc_id), ...] }
+
+Note on doc IDs:
+  The NFCorpus uses string IDs like "MED-4391", which are not valid as Qdrant point IDs
+  (Qdrant only accepts numeric uint64 or standard UUID format). To keep the benchmark
+  correct across all engines, doc IDs are remapped to sequential integers (0, 1, 2, ...).
+  Ground truth values are written as strings (e.g. "42") because the benchmark evaluator
+  reads them as List<String>.
 
 Usage:
   pip install datasets

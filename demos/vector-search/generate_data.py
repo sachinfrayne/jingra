@@ -8,8 +8,15 @@ Queries: 400 real queries (200 expert-written + 200 simulated from support logs)
 Ground truth = exact brute-force cosine top-k (correct for ANN recall benchmarks).
 
 Output:
-  data/docs.ndjson    — { "id", "embedding": [384 floats] }
-  data/queries.ndjson — { "embedding": [384 floats], "ground_truth": [doc_id, ...] }
+  data/docs.ndjson    — { "id": int (0-based index), "embedding": [384 floats] }
+  data/queries.ndjson — { "embedding": [384 floats], "ground_truth": [str(doc_id), ...] }
+
+Note on doc IDs:
+  The Wix corpus uses 64-char hex strings as IDs, which are not valid as Qdrant point IDs
+  (Qdrant only accepts numeric uint64 or standard UUID format). To keep the benchmark
+  correct across all engines, doc IDs are remapped to sequential integers (0, 1, 2, ...).
+  Ground truth values are written as strings (e.g. "42") because the benchmark evaluator
+  reads them as List<String>.
 
 Usage:
   pip install sentence-transformers datasets
@@ -45,8 +52,6 @@ def main():
     print("Downloading Wix/WixQA corpus...")
     corpus = load_dataset("Wix/WixQA", "wix_kb_corpus", split="train")
     corpus_list = list(corpus)
-    # Convert hex string IDs to sequential integers so they can be stored natively
-    # as numeric point IDs in Qdrant (which only accepts numeric or UUID point IDs).
     hex_to_int = {row["id"]: i for i, row in enumerate(corpus_list)}
     doc_ids = list(range(len(corpus_list)))
     doc_texts = [f"{row['title']} {row['contents']}".strip() for row in corpus_list]

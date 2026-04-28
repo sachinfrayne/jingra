@@ -9,8 +9,15 @@ Corpus:  3,633 documents (biomedical/nutritional abstracts)
 Queries: 119 test queries with relevance judgments (MIN_RELEVANCE=2, directly relevant only)
 
 Output:
-  data/docs.parquet    — columns: id (string), title (string), description (string)
+  data/docs.parquet    — columns: id (int, 0-based index), title (string), description (string)
   data/queries.parquet — columns: query_text (string), ground_truth (list<string>)
+
+Note on doc IDs:
+  The NFCorpus uses string IDs like "MED-4391", which are not valid as Qdrant point IDs
+  (Qdrant only accepts numeric uint64 or standard UUID format). To keep the benchmark
+  correct across all engines, doc IDs are remapped to sequential integers (0, 1, 2, ...).
+  Ground truth values are written as strings (e.g. "42") because the benchmark evaluator
+  reads them as List<String>.
 
 Usage:
   pip install datasets pandas pyarrow
