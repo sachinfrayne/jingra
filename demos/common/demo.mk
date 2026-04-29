@@ -8,7 +8,9 @@ SINK_SERVICE    ?= elasticsearch-sink
 DEMO_OUTPUT_DIRS ?= output
 POST_START_HOOK ?=
 
-export SINK_VERSION := $(shell cat $(DEMO_MK_DIR)../../engine-versions/.elasticsearch | tr -d '[:space:]')
+SINK_ENGINE ?= elasticsearch
+export SINK_ENGINE
+export SINK_VERSION := $(shell cat $(DEMO_MK_DIR)../../engine-versions/.$(SINK_ENGINE) | tr -d '[:space:]')
 
 COMPOSE = docker-compose \
     -f $(DEMO_MK_DIR)docker-compose.yml \
