@@ -38,13 +38,31 @@ public class PlotGenerator {
     private static final Logger logger = LoggerFactory.getLogger(PlotGenerator.class);
 
     private final String outputDirectory;
+    private final Map<String, String> engineVersions;
 
     // Color palette (matching Python visualization)
     private static final Color ES_COLOR = new Color(244, 78, 152);  // #F04E98 Elastic pink
     private static final Color QDRANT_COLOR = new Color(56, 142, 60);  // #388E3C Material Green
 
     public PlotGenerator(String outputDirectory) {
+        this(outputDirectory, Map.of());
+    }
+
+    public PlotGenerator(String outputDirectory, Map<String, String> engineVersions) {
         this.outputDirectory = outputDirectory;
+        this.engineVersions = engineVersions;
+    }
+
+    /**
+     * Returns the series label for an engine, appending its version if configured.
+     * For example: "elasticsearch" + version "9.3.2" → "elasticsearch-9.3.2".
+     */
+    String engineLabel(String engine) {
+        String version = engineVersions.get(engine);
+        if (version != null && !version.isBlank()) {
+            return engine + "-" + version;
+        }
+        return engine;
     }
 
     /**
@@ -122,7 +140,7 @@ public class PlotGenerator {
                 double[] yData = points.stream().mapToDouble(p -> p.y).toArray();
 
                 // Add series
-                XYSeries series = chart.addSeries(engine, xData, yData);
+                XYSeries series = chart.addSeries(engineLabel(engine), xData, yData);
                 series.setMarker(SeriesMarkers.CIRCLE);
                 series.setXYSeriesRenderStyle(XYSeries.XYSeriesRenderStyle.Line);
                 series.setMarkerColor(getEngineColor(engine));
@@ -269,7 +287,7 @@ public class PlotGenerator {
             String engine = entry.getKey();
             List<Double> throughputs = entry.getValue();
 
-            chart.addSeries(engine, sortedRecallValues, throughputs)
+            chart.addSeries(engineLabel(engine), sortedRecallValues, throughputs)
                     .setFillColor(getEngineColor(engine));
         }
 

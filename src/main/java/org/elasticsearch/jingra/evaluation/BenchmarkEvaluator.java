@@ -407,7 +407,7 @@ public class BenchmarkEvaluator {
                 runId,
                 engine.getEngineName(),
                 engine.getVersion(),
-                "vector_search",
+                dataset.getType(),
                 config.getDataset(),
                 paramKey,
                 params

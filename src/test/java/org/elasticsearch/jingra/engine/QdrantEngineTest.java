@@ -44,11 +44,13 @@ class QdrantEngineTest {
         // Qdrant uses gRPC port 6334
         String host = qdrant.getHost();
         Integer grpcPort = qdrant.getMappedPort(6334);
+        Integer httpPort = qdrant.getMappedPort(6333);
         String url = host + ":" + grpcPort;
 
         // Pass URL directly in config to avoid environment variable reflection hacks
         Map<String, Object> config = new HashMap<>();
         config.put("url", url);
+        config.put("rest_url", "http://" + host + ":" + httpPort);  // Testcontainers maps 6333 to a random port
         config.put("vector_field", "embedding");  // Configure to use 'embedding' field in tests
         config.put("grpc_timeout_seconds", 90L);  // Headroom when Docker or Qdrant is slow under load
 
@@ -63,9 +65,6 @@ class QdrantEngineTest {
         }
     }
 
-    /**
-     * Read version from engine-versions directory.
-     */
     private static String readVersionFile(String path) {
         try {
             return java.nio.file.Files.readString(java.nio.file.Paths.get(path)).trim();
@@ -105,7 +104,7 @@ class QdrantEngineTest {
         assertTrue(engine.createIndex(col, "test-schema-qi-generic-128"));
         assertEquals(1, engine.ingest(List.of(
                 new Document(Map.of("id", "p1", "embedding", generateRandomVector(128)))), col, "id"));
-        await().atMost(5, TimeUnit.SECONDS)
+        await().pollInSameThread().atMost(5, TimeUnit.SECONDS)
                 .pollInterval(100, TimeUnit.MILLISECONDS)
                 .untilAsserted(() -> assertTrue(engine.getDocumentCount(col) >= 1));
         return col;
@@ -174,10 +173,10 @@ class QdrantEngineTest {
         int ingested = engine.ingest(docs, TEST_INDEX, "id");
         assertEquals(10, ingested, "Should ingest 10 documents");
 
-        Thread.sleep(1000);
-
-        long count = engine.getDocumentCount(TEST_INDEX);
-        assertTrue(count >= 10, "Document count should be at least 10");
+        await().pollInSameThread().atMost(10, TimeUnit.SECONDS)
+                .pollInterval(200, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .untilAsserted(() -> assertTrue(engine.getDocumentCount(TEST_INDEX) >= 10,
+                        "Document count should be at least 10"));
     }
 
     @Test
@@ -247,7 +246,7 @@ class QdrantEngineTest {
         assertTrue(response.getClientLatencyMs() > 0);
         // Qdrant should return server latency from the SearchResponse.time field
         assertNotNull(response.getServerLatencyMs(), "Server latency should be captured from Qdrant SearchResponse");
-        assertTrue(response.getServerLatencyMs() >= 0, "Server latency should be non-negative (can be zero for sub-millisecond queries)");
+        assertTrue(response.getServerLatencyMs() > 0, "Server latency should be positive");
     }
 
     @Test
@@ -266,7 +265,7 @@ class QdrantEngineTest {
         engine.ingest(docs, TEST_INDEX, "id");
 
         // Wait for indexing
-        await().atMost(3, TimeUnit.SECONDS)
+        await().pollInSameThread().atMost(3, TimeUnit.SECONDS)
                 .pollInterval(100, TimeUnit.MILLISECONDS)
                 .untilAsserted(() -> assertTrue(engine.getDocumentCount(TEST_INDEX) > 0));
 
@@ -318,7 +317,7 @@ class QdrantEngineTest {
     @Order(28)
     void testGetDocumentCount() {
         // Wait for Qdrant to index documents from previous tests (eventual consistency)
-        await().atMost(5, TimeUnit.SECONDS)
+        await().pollInSameThread().atMost(5, TimeUnit.SECONDS)
                 .pollInterval(100, TimeUnit.MILLISECONDS)
                 .untilAsserted(() -> {
                     long count = engine.getDocumentCount(TEST_INDEX);
@@ -379,12 +378,16 @@ class QdrantEngineTest {
 
     @Test
     @Order(33)
-    void testConnect_invalidURL() {
+    void testConnect_invalidURL() throws Exception {
         Map<String, Object> config = new HashMap<>();
         config.put("url", "invalid-host:9999");
 
         QdrantEngine badEngine = new QdrantEngine(config);
-        assertFalse(badEngine.connect(), "Should fail to connect to invalid URL");
+        try {
+            assertFalse(badEngine.connect(), "Should fail to connect to invalid URL");
+        } finally {
+            badEngine.close();
+        }
     }
 
     @Test
@@ -481,7 +484,7 @@ class QdrantEngineTest {
         try {
             assertEquals(1, engine.ingest(List.of(
                     new Document(Map.of("id", "u1", "embedding", generateRandomVector(128)))), col, "id"));
-            await().atMost(15, TimeUnit.SECONDS)
+            await().pollInSameThread().atMost(15, TimeUnit.SECONDS)
                     .pollInterval(100, TimeUnit.MILLISECONDS)
                     .untilAsserted(() -> assertTrue(engine.getDocumentCount(col) >= 1));
             Map<String, Object> p = new HashMap<>();
@@ -508,7 +511,7 @@ class QdrantEngineTest {
         try {
             assertEquals(1, engine.ingest(List.of(
                     new Document(Map.of("id", "e1", "embedding", generateRandomVector(128)))), col, "id"));
-            await().atMost(5, TimeUnit.SECONDS)
+            await().pollInSameThread().atMost(5, TimeUnit.SECONDS)
                     .pollInterval(100, TimeUnit.MILLISECONDS)
                     .untilAsserted(() -> assertTrue(engine.getDocumentCount(col) >= 1));
             Map<String, Object> p = new HashMap<>();
@@ -552,7 +555,7 @@ class QdrantEngineTest {
         try {
             assertEquals(1, engine.ingest(List.of(
                     new Document(Map.of("id", "hq1", "embedding", generateRandomVector(128)))), col, "id"));
-            await().atMost(5, TimeUnit.SECONDS)
+            await().pollInSameThread().atMost(5, TimeUnit.SECONDS)
                     .pollInterval(100, TimeUnit.MILLISECONDS)
                     .untilAsserted(() -> assertTrue(engine.getDocumentCount(col) >= 1));
             Map<String, Object> p = new HashMap<>();
@@ -674,7 +677,7 @@ class QdrantEngineTest {
             fields.put("valid", true);
             fields.put("embedding", generateRandomVector(128));
             assertEquals(1, engine.ingest(List.of(new Document(fields)), col, "id"));
-            await().atMost(5, TimeUnit.SECONDS)
+            await().pollInSameThread().atMost(5, TimeUnit.SECONDS)
                     .pollInterval(100, TimeUnit.MILLISECONDS)
                     .untilAsserted(() -> assertTrue(engine.getDocumentCount(col) >= 1));
             Map<String, Object> p = new HashMap<>();
@@ -742,7 +745,7 @@ class QdrantEngineTest {
                     new Document(Map.of("id", 7_011L, "embedding", generateRandomVector(128)))
             );
             assertEquals(2, engine.ingest(docs, col, "id"));
-            await().atMost(5, TimeUnit.SECONDS)
+            await().pollInSameThread().atMost(5, TimeUnit.SECONDS)
                     .pollInterval(100, TimeUnit.MILLISECONDS)
                     .untilAsserted(() -> assertTrue(engine.getDocumentCount(col) >= 2));
 
@@ -1311,8 +1314,10 @@ class QdrantEngineTest {
         try {
             String host = qdrant.getHost();
             int grpcPort = qdrant.getMappedPort(6334);
+            int httpPort = qdrant.getMappedPort(6333);
             Map<String, Object> cfg = new HashMap<>();
             cfg.put("url", host + ":" + grpcPort);
+            cfg.put("rest_url", "http://" + host + ":" + httpPort);
             cfg.put("vector_field", "embedding");
             cfg.put("grpc_timeout_seconds", 90L);
             cfg.put(AbstractBenchmarkEngine.CONFIG_QUERY_DUMP_DIRECTORY, dumpDir.toString());
@@ -1322,7 +1327,7 @@ class QdrantEngineTest {
             assertTrue(qe.createIndex(col, schemaName));
             assertEquals(1, qe.ingest(List.of(
                     new Document(Map.of("id", "dump-1", "embedding", generateRandomVector(128)))), col, "id"));
-            await().atMost(5, TimeUnit.SECONDS)
+            await().pollInSameThread().atMost(5, TimeUnit.SECONDS)
                     .pollInterval(100, TimeUnit.MILLISECONDS)
                     .untilAsserted(() -> assertTrue(qe.getDocumentCount(col) >= 1));
             writeQdrantQueryFile(queryName, """

@@ -115,7 +115,6 @@ public final class ConfigValidator {
             throw new IllegalStateException(
                 "dataset.queries_mapping.query_vector_field or query_text_field is required");
         }
-
         requireNonBlank(
                 ds.getQueriesMapping().getGroundTruthField(),
                 "dataset.queries_mapping.ground_truth_field is required");

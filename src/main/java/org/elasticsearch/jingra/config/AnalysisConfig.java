@@ -31,6 +31,9 @@ public class AnalysisConfig {
     @JsonProperty("generate_plots")
     private boolean generatePlots = true;
 
+    @JsonProperty("engine_versions")
+    private Map<String, String> engineVersions;
+
     public String getRunId() {
         return runId;
     }
@@ -87,5 +90,13 @@ public class AnalysisConfig {
 
     public void setGeneratePlots(boolean generatePlots) {
         this.generatePlots = generatePlots;
+    }
+
+    public Map<String, String> getEngineVersions() {
+        return engineVersions != null ? engineVersions : Map.of();
+    }
+
+    public void setEngineVersions(Map<String, String> engineVersions) {
+        this.engineVersions = engineVersions;
     }
 }

@@ -616,6 +616,69 @@ class PlotGeneratorTest {
         return result;
     }
 
+    // --- Engine version label tests ---
+
+    @Test
+    void engineLabelIncludesVersionWhenProvided() {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString(), Map.of("elasticsearch", "9.3.2"));
+        assertEquals("elasticsearch-9.3.2", generator.engineLabel("elasticsearch"));
+    }
+
+    @Test
+    void engineLabelReturnsEngineNameWhenNoVersionProvided() {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString(), Map.of());
+        assertEquals("qdrant", generator.engineLabel("qdrant"));
+    }
+
+    @Test
+    void engineLabelReturnsEngineNameWhenVersionMapDoesNotContainEngine() {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString(), Map.of("elasticsearch", "9.3.2"));
+        assertEquals("qdrant", generator.engineLabel("qdrant"));
+    }
+
+    /** Version present but blank: first conjunct of {@code version != null && !version.isBlank()} is true, second is false. */
+    @Test
+    void engineLabelReturnsEngineNameWhenVersionIsWhitespaceOnly() {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString(), Map.of("elasticsearch", "  \t  "));
+        assertEquals("elasticsearch", generator.engineLabel("elasticsearch"));
+    }
+
+    @Test
+    void engineLabelReturnsEngineNameWhenVersionIsEmptyString() {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString(), Map.of("qdrant", ""));
+        assertEquals("qdrant", generator.engineLabel("qdrant"));
+    }
+
+    @Test
+    void generatesRecallVsLatencyPlotWithEngineVersions() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString(),
+                Map.of("elasticsearch", "9.3.2", "qdrant", "1.17.0"));
+
+        Map<String, List<BenchmarkResult>> resultsByEngine = new HashMap<>();
+        resultsByEngine.put("elasticsearch", List.of(createResult("elasticsearch", 0.9, 100.0)));
+        resultsByEngine.put("qdrant", List.of(createResult("qdrant", 0.85, 120.0)));
+
+        generator.generateRecallVsLatencyPlot(resultsByEngine, "recall@100", "latency_avg");
+
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.toString().endsWith(".png")));
+    }
+
+    @Test
+    void generatesThroughputOverviewWithEngineVersions() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString(),
+                Map.of("elasticsearch", "9.3.2", "qdrant", "1.17.0"));
+
+        Map<String, List<BenchmarkResult>> resultsByRecallAt = new HashMap<>();
+        List<BenchmarkResult> results = new ArrayList<>();
+        results.add(createResultWithThroughput("elasticsearch", 0.851, 50.0, 20.0));
+        results.add(createResultWithThroughput("qdrant", 0.849, 40.0, 25.0));
+        resultsByRecallAt.put("recall@100", results);
+
+        generator.generateThroughputOverview(resultsByRecallAt);
+
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().equals("throughput_overview.png")));
+    }
+
     @Test
     void throughputMetric_nullResult() {
         assertNull(PlotGenerator.throughputMetric(null));

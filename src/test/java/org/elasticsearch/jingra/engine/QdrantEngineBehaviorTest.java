@@ -42,15 +42,27 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.mockito.ArgumentCaptor;
 
 /**
  * Offline and helper-focused tests for {@link QdrantEngine}; uses a Mockito {@link QdrantClient}
@@ -87,6 +99,47 @@ class QdrantEngineBehaviorTest {
         Field f = QdrantEngine.class.getDeclaredField("client");
         f.setAccessible(true);
         f.set(engine, client);
+
+        // Set a placeholder REST base URL (actual URL is irrelevant since the HTTP client is mocked)
+        Field restUrlField = QdrantEngine.class.getDeclaredField("restBaseUrl");
+        restUrlField.setAccessible(true);
+        restUrlField.set(engine, "http://localhost:6333");
+
+        // Inject a mock HTTP client that accepts any collection creation and returns 200
+        @SuppressWarnings("unchecked")
+        java.net.http.HttpResponse<String> mockResponse = mock(java.net.http.HttpResponse.class);
+        when(mockResponse.statusCode()).thenReturn(200);
+        java.net.http.HttpClient mockHttpClient = mock(java.net.http.HttpClient.class);
+        // Use doReturn to avoid generic type inference issues with HttpClient.send()'s <T> signature
+        doReturn(mockResponse).when(mockHttpClient).send(any(), any());
+        Field restClientField = QdrantEngine.class.getDeclaredField("restHttpClient");
+        restClientField.setAccessible(true);
+        restClientField.set(engine, mockHttpClient);
+    }
+
+    private static void injectCustomChannel(QdrantEngine engine, ManagedChannel channel) throws Exception {
+        Field f = QdrantEngine.class.getDeclaredField("customChannel");
+        f.setAccessible(true);
+        f.set(engine, channel);
+    }
+
+    private static void injectRestApiKey(QdrantEngine engine, String apiKey) throws Exception {
+        Field f = QdrantEngine.class.getDeclaredField("restApiKey");
+        f.setAccessible(true);
+        f.set(engine, apiKey);
+    }
+
+    /** Overrides the REST HTTP client to return a non-200 status, simulating Qdrant rejecting the request. */
+    private static void injectFailingHttpClient(QdrantEngine engine, int statusCode) throws Exception {
+        @SuppressWarnings("unchecked")
+        java.net.http.HttpResponse<String> mockResponse = mock(java.net.http.HttpResponse.class);
+        when(mockResponse.statusCode()).thenReturn(statusCode);
+        when(mockResponse.body()).thenReturn("simulated error");
+        java.net.http.HttpClient mockHttpClient = mock(java.net.http.HttpClient.class);
+        doReturn(mockResponse).when(mockHttpClient).send(any(), any());
+        Field restClientField = QdrantEngine.class.getDeclaredField("restHttpClient");
+        restClientField.setAccessible(true);
+        restClientField.set(engine, mockHttpClient);
     }
 
     private static void writeQdrantSchemaFile(String schemaBaseName, String json) throws Exception {
@@ -308,6 +361,308 @@ class QdrantEngineBehaviorTest {
         assertFalse((Boolean) invokePrivateStatic("isNotFound", new Class[]{Throwable.class}, new RuntimeException("x")));
         assertFalse((Boolean) invokePrivateStatic("isNotFound", new Class[]{Throwable.class},
                 new RuntimeException("wrap", new IllegalStateException("inner"))));
+    }
+
+    @Test
+    void isBrokenGrpcTransportDetectsInternalEndOfStream() throws Exception {
+        var sre = new StatusRuntimeException(Status.INTERNAL.withDescription("Encountered end-of-stream mid-frame"));
+        assertTrue((Boolean) invokePrivateStatic("isBrokenGrpcTransport", new Class[]{Throwable.class}, sre));
+    }
+
+    @Test
+    void isBrokenGrpcTransportDetectsUnavailable() throws Exception {
+        assertTrue((Boolean) invokePrivateStatic("isBrokenGrpcTransport", new Class[]{Throwable.class},
+                new StatusRuntimeException(Status.UNAVAILABLE.withDescription("refused"))));
+    }
+
+    @Test
+    void isBrokenGrpcTransportUnwrapsExecutionException() throws Exception {
+        var inner = new StatusRuntimeException(Status.INTERNAL.withDescription("Encountered end-of-stream mid-frame"));
+        assertTrue((Boolean) invokePrivateStatic("isBrokenGrpcTransport", new Class[]{Throwable.class},
+                new ExecutionException(inner)));
+    }
+
+    @Test
+    void isBrokenGrpcTransportReturnsFalseForInternalWithoutEndOfStreamPhrase() throws Exception {
+        assertFalse((Boolean) invokePrivateStatic("isBrokenGrpcTransport", new Class[]{Throwable.class},
+                new StatusRuntimeException(Status.INTERNAL.withDescription("other"))));
+    }
+
+    @Test
+    void isBrokenGrpcTransportReturnsFalseWhenInternalDescriptionNull() throws Exception {
+        assertFalse((Boolean) invokePrivateStatic("isBrokenGrpcTransport", new Class[]{Throwable.class},
+                new StatusRuntimeException(Status.INTERNAL)));
+    }
+
+    @Test
+    void resetTransportAfterFailureClosesClientAndChannel() throws Exception {
+        QdrantEngine e = new QdrantEngine(Map.of("url", "localhost:6334"));
+        QdrantClient client = mock(QdrantClient.class);
+        injectClient(e, client);
+        ManagedChannel ch = mock(ManagedChannel.class);
+        when(ch.isShutdown()).thenReturn(false);
+        when(ch.awaitTermination(anyLong(), any())).thenReturn(true);
+        injectCustomChannel(e, ch);
+        invokePrivate(e, "resetTransportAfterFailure", new Class[]{});
+        verify(client).close();
+        verify(ch).shutdown();
+        verify(ch).awaitTermination(eq(5L), eq(TimeUnit.SECONDS));
+        Field cf = QdrantEngine.class.getDeclaredField("client");
+        cf.setAccessible(true);
+        assertNull(cf.get(e));
+        Field chf = QdrantEngine.class.getDeclaredField("customChannel");
+        chf.setAccessible(true);
+        assertNull(chf.get(e));
+    }
+
+    @Test
+    void resetTransportAfterFailureIgnoresClientCloseException() throws Exception {
+        QdrantEngine e = new QdrantEngine(Map.of("url", "localhost:6334"));
+        QdrantClient client = mock(QdrantClient.class);
+        doThrow(new RuntimeException("close failed")).when(client).close();
+        injectClient(e, client);
+        invokePrivate(e, "resetTransportAfterFailure", new Class[]{});
+        verify(client).close();
+        Field cf = QdrantEngine.class.getDeclaredField("client");
+        cf.setAccessible(true);
+        assertNull(cf.get(e));
+    }
+
+    @Test
+    void resetTransportAfterFailureShutdownNowWhenAwaitTimesOut() throws Exception {
+        QdrantEngine e = new QdrantEngine(Map.of("url", "localhost:6334"));
+        injectClient(e, mock(QdrantClient.class));
+        ManagedChannel ch = mock(ManagedChannel.class);
+        when(ch.isShutdown()).thenReturn(false);
+        when(ch.awaitTermination(anyLong(), any())).thenReturn(false);
+        injectCustomChannel(e, ch);
+        invokePrivate(e, "resetTransportAfterFailure", new Class[]{});
+        verify(ch).shutdownNow();
+    }
+
+    @Test
+    void resetTransportAfterFailureIgnoresChannelShutdownException() throws Exception {
+        QdrantEngine e = new QdrantEngine(Map.of("url", "localhost:6334"));
+        injectClient(e, mock(QdrantClient.class));
+        ManagedChannel ch = mock(ManagedChannel.class);
+        when(ch.isShutdown()).thenReturn(false);
+        doThrow(new RuntimeException("shutdown boom")).when(ch).shutdown();
+        injectCustomChannel(e, ch);
+        assertDoesNotThrow(() -> invokePrivate(e, "resetTransportAfterFailure", new Class[]{}));
+        Field chf = QdrantEngine.class.getDeclaredField("customChannel");
+        chf.setAccessible(true);
+        assertNull(chf.get(e));
+    }
+
+    @Test
+    void resetTransportAfterFailureNoOpWhenClientUninitialized() throws Exception {
+        QdrantEngine e = new QdrantEngine(new HashMap<>());
+        assertDoesNotThrow(() -> invokePrivate(e, "resetTransportAfterFailure", new Class[]{}));
+    }
+
+    @Test
+    void resetTransportAfterFailureSkipsShutdownWhenChannelAlreadyShutdown() throws Exception {
+        QdrantEngine e = new QdrantEngine(Map.of("url", "localhost:6334"));
+        injectClient(e, mock(QdrantClient.class));
+        ManagedChannel ch = mock(ManagedChannel.class);
+        when(ch.isShutdown()).thenReturn(true);
+        when(ch.awaitTermination(anyLong(), any())).thenReturn(true);
+        injectCustomChannel(e, ch);
+        invokePrivate(e, "resetTransportAfterFailure", new Class[]{});
+        verify(ch, never()).shutdown();
+        verify(ch).awaitTermination(eq(5L), eq(TimeUnit.SECONDS));
+    }
+
+    @Test
+    void createCollectionViaRestAddsApiKeyHeaderWhenRestApiKeySet() throws Exception {
+        QdrantEngine e = new QdrantEngine(Map.of("url", "localhost:6334"));
+        injectClient(e, mock(QdrantClient.class));
+        injectRestApiKey(e, "integration-test-api-key");
+        ObjectMapper om = new ObjectMapper();
+        JsonNode body = om.readTree("{\"vectors\":{\"size\":2,\"distance\":\"Cosine\"}}");
+        invokePrivate(e, "createCollectionViaRest", new Class[]{String.class, JsonNode.class}, "col-rest", body);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<java.net.http.HttpRequest> reqCap = ArgumentCaptor.forClass(java.net.http.HttpRequest.class);
+        Field restClientField = QdrantEngine.class.getDeclaredField("restHttpClient");
+        restClientField.setAccessible(true);
+        java.net.http.HttpClient mockHttp = (java.net.http.HttpClient) restClientField.get(e);
+        verify(mockHttp, atLeastOnce()).send(reqCap.capture(), any());
+        assertTrue(reqCap.getAllValues().stream()
+                .anyMatch(req -> req.headers().firstValue("api-key").orElse("").equals("integration-test-api-key")));
+    }
+
+    @Test
+    void createCollectionViaRestThrowsWhenHttpStatusNotOk() throws Exception {
+        QdrantEngine e = new QdrantEngine(Map.of("url", "localhost:6334"));
+        injectClient(e, mock(QdrantClient.class));
+        injectFailingHttpClient(e, 503);
+        ObjectMapper om = new ObjectMapper();
+        JsonNode body = om.readTree("{\"vectors\":{\"size\":2,\"distance\":\"Cosine\"}}");
+        Exception wrapper = assertThrows(Exception.class,
+                () -> invokePrivate(e, "createCollectionViaRest", new Class[]{String.class, JsonNode.class}, "col-503", body));
+        Throwable root = wrapper instanceof java.lang.reflect.InvocationTargetException ite
+                ? ite.getCause() : wrapper;
+        assertInstanceOf(RuntimeException.class, root);
+        assertTrue(root.getMessage().contains("503"));
+    }
+
+    @Test
+    void normalizeVectorDistanceReturnsOriginalWhenVectorsOrDistanceMissing() throws Exception {
+        QdrantEngine eng = new QdrantEngine(new HashMap<>());
+        ObjectMapper om = new ObjectMapper();
+        JsonNode noVectors = om.readTree("{\"shard_number\":1}");
+        assertSame(noVectors, invokePrivate(eng, "normalizeVectorDistance", new Class[]{JsonNode.class}, noVectors));
+        JsonNode noDistance = om.readTree("{\"vectors\":{\"size\":3}}");
+        assertSame(noDistance, invokePrivate(eng, "normalizeVectorDistance", new Class[]{JsonNode.class}, noDistance));
+    }
+
+    @Test
+    void normalizeVectorDistanceReturnsOriginalWhenDistanceAlreadyCanonical() throws Exception {
+        QdrantEngine eng = new QdrantEngine(new HashMap<>());
+        ObjectMapper om = new ObjectMapper();
+        JsonNode node = om.readTree("{\"vectors\":{\"size\":3,\"distance\":\"Cosine\"}}");
+        assertSame(node, invokePrivate(eng, "normalizeVectorDistance", new Class[]{JsonNode.class}, node));
+    }
+
+    @Test
+    void convertMappingsToQdrantSchemaMapsEuclidAlias() throws Exception {
+        QdrantEngine e = new QdrantEngine(Map.of("vector_field", "v"));
+        ObjectMapper om = new ObjectMapper();
+        JsonNode root = om.readTree("""
+                {"mappings": {"properties": {"v": {"type": "dense_vector", "size": 2, "distance": "euclid"}}}}
+                """);
+        JsonNode out = (JsonNode) invokePrivate(e, "convertMappingsToQdrantSchema", new Class[]{JsonNode.class}, root);
+        assertNotNull(out);
+        assertEquals("Euclid", out.path("vectors").path("distance").asText());
+    }
+
+    /**
+     * When the template root is not an object, {@code get("mappings")} is Java-null so the
+     * {@code mappings != null ? mappings.get("properties") : null} branch uses the false arm.
+     */
+    @Test
+    void convertMappingsToQdrantSchemaReturnsNullWhenRootIsNonObject() throws Exception {
+        QdrantEngine e = new QdrantEngine(Map.of("vector_field", "emb"));
+        ObjectMapper om = new ObjectMapper();
+        assertNull(invokePrivate(e, "convertMappingsToQdrantSchema", new Class[]{JsonNode.class}, om.readTree("[]")));
+        assertNull(invokePrivate(e, "convertMappingsToQdrantSchema", new Class[]{JsonNode.class}, om.readTree("\"text\"")));
+    }
+
+    /**
+     * Distance values that do not match a switch label after lowercasing hit {@code default -> "Cosine"}.
+     */
+    @Test
+    void convertMappingsToQdrantSchemaDefaultsDistanceWhenUnknownLabel() throws Exception {
+        QdrantEngine e = new QdrantEngine(Map.of("vector_field", "v"));
+        ObjectMapper om = new ObjectMapper();
+        JsonNode root = om.readTree("""
+                {"mappings": {"properties": {"v": {"type": "dense_vector", "size": 2, "distance": "cosine "}}}}
+                """);
+        JsonNode out = (JsonNode) invokePrivate(e, "convertMappingsToQdrantSchema", new Class[]{JsonNode.class}, root);
+        assertNotNull(out);
+        assertEquals("Cosine", out.path("vectors").path("distance").asText());
+    }
+
+    @Test
+    void runOnceWithTransportReconnectRetriesWhenReconnectSucceeds() throws Exception {
+        QdrantEngine raw = new QdrantEngine(Map.of("url", "localhost:6334"));
+        injectClient(raw, mock(QdrantClient.class));
+        QdrantEngine spyEngine = spy(raw);
+        doReturn(true).when(spyEngine).connect();
+        AtomicInteger calls = new AtomicInteger();
+        Callable<String> action = () -> {
+            if (calls.incrementAndGet() == 1) {
+                throw new ExecutionException(new StatusRuntimeException(
+                        Status.INTERNAL.withDescription("Encountered end-of-stream mid-frame")));
+            }
+            return "ok";
+        };
+        assertEquals("ok", invokePrivate(spyEngine, "runOnceWithTransportReconnect", new Class[]{Callable.class}, action));
+        verify(spyEngine, times(1)).connect();
+    }
+
+    @Test
+    void runOnceWithTransportReconnectPropagatesWhenReconnectFails() throws Exception {
+        QdrantEngine raw = new QdrantEngine(Map.of("url", "localhost:6334"));
+        injectClient(raw, mock(QdrantClient.class));
+        QdrantEngine spyEngine = spy(raw);
+        doReturn(false).when(spyEngine).connect();
+        ExecutionException broken = new ExecutionException(new StatusRuntimeException(
+                Status.INTERNAL.withDescription("Encountered end-of-stream mid-frame")));
+        Callable<String> action = () -> {
+            throw broken;
+        };
+        Exception wrapper = assertThrows(Exception.class,
+                () -> invokePrivate(spyEngine, "runOnceWithTransportReconnect", new Class[]{Callable.class}, action));
+        Throwable root = wrapper instanceof java.lang.reflect.InvocationTargetException ite
+                ? ite.getCause() : wrapper;
+        assertInstanceOf(ExecutionException.class, root);
+        assertSame(broken, root);
+    }
+
+    @Test
+    void runOnceWithTransportReconnectPropagatesNonTransportFailures() throws Exception {
+        QdrantEngine e = new QdrantEngine(Map.of("url", "localhost:6334"));
+        injectClient(e, mock(QdrantClient.class));
+        IllegalStateException err = new IllegalStateException("no grpc");
+        Callable<String> action = () -> {
+            throw err;
+        };
+        Exception wrapper = assertThrows(Exception.class,
+                () -> invokePrivate(e, "runOnceWithTransportReconnect", new Class[]{Callable.class}, action));
+        Throwable root = wrapper instanceof java.lang.reflect.InvocationTargetException ite
+                ? ite.getCause() : wrapper;
+        assertInstanceOf(IllegalStateException.class, root);
+        assertSame(err, root);
+    }
+
+    @Test
+    void getDocumentCountReturnsZeroWhenCollectionInfoFailsWithoutBrokenTransport() throws Exception {
+        QdrantEngine e = new QdrantEngine(Map.of("url", "localhost:6334"));
+        QdrantClient c = mock(QdrantClient.class);
+        when(c.getCollectionInfoAsync(anyString()))
+                .thenReturn(Futures.immediateFailedFuture(new RuntimeException("simulated")));
+        injectClient(e, c);
+        assertEquals(0L, e.getDocumentCount("col"));
+    }
+
+    @Test
+    void convertMappingsToQdrantSchemaReturnsNullWhenPropertiesMissing() throws Exception {
+        QdrantEngine e = new QdrantEngine(Map.of("vector_field", "emb"));
+        ObjectMapper om = new ObjectMapper();
+        JsonNode root = om.readTree("{\"mappings\": {}}");
+        assertNull(invokePrivate(e, "convertMappingsToQdrantSchema", new Class[]{JsonNode.class}, root));
+    }
+
+    @Test
+    void convertMappingsToQdrantSchemaReturnsNullWhenVectorFieldMissing() throws Exception {
+        QdrantEngine e = new QdrantEngine(Map.of("vector_field", "missing_vec"));
+        ObjectMapper om = new ObjectMapper();
+        JsonNode root = om.readTree("""
+                {"mappings": {"properties": {"emb": {"type": "dense_vector", "size": 4, "distance": "cosine"}}}}
+                """);
+        assertNull(invokePrivate(e, "convertMappingsToQdrantSchema", new Class[]{JsonNode.class}, root));
+    }
+
+    @Test
+    void convertMappingsToQdrantSchemaNormalizesDistanceAliases() throws Exception {
+        QdrantEngine e = new QdrantEngine(Map.of("vector_field", "v"));
+        ObjectMapper om = new ObjectMapper();
+        record Case(String distance, String expected) {}
+        for (Case c : new Case[]{
+                new Case("l2", "Euclid"),
+                new Case("euclidean", "Euclid"),
+                new Case("dot", "Dot"),
+                new Case("manhattan", "Manhattan"),
+                new Case("WeIrD", "Cosine")
+        }) {
+            JsonNode root = om.readTree(String.format("""
+                    {"mappings": {"properties": {"v": {"type": "dense_vector", "size": 3, "distance": "%s"}}}}
+                    """, c.distance));
+            JsonNode out = (JsonNode) invokePrivate(e, "convertMappingsToQdrantSchema", new Class[]{JsonNode.class}, root);
+            assertNotNull(out);
+            assertEquals(c.expected, out.path("vectors").path("distance").asText());
+        }
     }
 
     @Test
@@ -734,6 +1089,8 @@ class QdrantEngineBehaviorTest {
         QdrantClient mockClient = mock(QdrantClient.class);
         when(mockClient.listCollectionsAsync()).thenReturn(Futures.immediateFuture(List.of()));
         injectClient(e, mockClient);
+        // Simulate Qdrant rejecting the malformed schema
+        injectFailingHttpClient(e, 400);
         assertFalse(e.createIndex("col", "bad-shape"));
     }
 
@@ -747,9 +1104,9 @@ class QdrantEngineBehaviorTest {
         QdrantEngine e = new QdrantEngine(cfg);
         QdrantClient mockClient = mock(QdrantClient.class);
         when(mockClient.listCollectionsAsync()).thenReturn(Futures.immediateFuture(List.of()));
-        when(mockClient.createCollectionAsync(any(CreateCollection.class)))
-                .thenReturn(Futures.immediateFailedFuture(new RuntimeException("cc")));
         injectClient(e, mockClient);
+        // Simulate Qdrant returning an error for collection creation
+        injectFailingHttpClient(e, 500);
         assertFalse(e.createIndex("col", "test-direct"));
     }
 
@@ -1338,6 +1695,51 @@ class QdrantEngineBehaviorTest {
         injectClient(e, mockClient);
         QueryParams qp = new QueryParams(Map.of("query_vector", List.of(0.1f)));
         assertNotNull(e.query("c", "q-quant-no-oversampling-key", qp).getClientLatencyMs());
+    }
+
+    @Test
+    void createIndexAppliesBinaryQuantizationFromTopLevelDirectSchema() throws Exception {
+        // Direct Qdrant-console schema format: hnsw_config and quantization_config at top level,
+        // no "template" or "settings" wrapper. This is what wiki-dpr-e5-768-knn.json uses.
+        // Collection creation now uses REST passthrough — the schema JSON is sent verbatim to Qdrant,
+        // so field-level assertions are covered by integration tests against a real Qdrant instance.
+        writeQdrantSchemaFile("test-direct-quant", """
+                {
+                  "vectors": {"size": 2, "distance": "Cosine"},
+                  "shard_number": 3,
+                  "replication_factor": 2,
+                  "hnsw_config": {"m": 16, "ef_construct": 100},
+                  "quantization_config": {"binary": {"always_ram": true}}
+                }
+                """);
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("grpc_timeout_seconds", 1);
+        QdrantEngine e = new QdrantEngine(cfg);
+        QdrantClient mockClient = mock(QdrantClient.class);
+        when(mockClient.listCollectionsAsync()).thenReturn(Futures.immediateFuture(List.of()));
+        injectClient(e, mockClient);
+
+        assertTrue(e.createIndex("col-direct-quant", "test-direct-quant"));
+    }
+
+    @Test
+    void createIndexAppliesHnswConfigFromTopLevelDirectSchema() throws Exception {
+        // Collection creation now uses REST passthrough — the schema JSON is sent verbatim to Qdrant,
+        // so field-level assertions are covered by integration tests against a real Qdrant instance.
+        writeQdrantSchemaFile("test-direct-hnsw", """
+                {
+                  "vectors": {"size": 2, "distance": "Cosine"},
+                  "hnsw_config": {"m": 8, "ef_construct": 200}
+                }
+                """);
+        Map<String, Object> cfg = new HashMap<>();
+        cfg.put("grpc_timeout_seconds", 1);
+        QdrantEngine e = new QdrantEngine(cfg);
+        QdrantClient mockClient = mock(QdrantClient.class);
+        when(mockClient.listCollectionsAsync()).thenReturn(Futures.immediateFuture(List.of()));
+        injectClient(e, mockClient);
+
+        assertTrue(e.createIndex("col-direct-hnsw", "test-direct-hnsw"));
     }
 
 }

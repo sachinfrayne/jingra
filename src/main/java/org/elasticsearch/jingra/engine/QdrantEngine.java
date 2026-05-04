@@ -8,14 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.QdrantGrpcClient;
-import io.qdrant.client.grpc.Collections.BinaryQuantization;
-import io.qdrant.client.grpc.Collections.CreateCollection;
-import io.qdrant.client.grpc.Collections.Distance;
-import io.qdrant.client.grpc.Collections.HnswConfigDiff;
 import io.qdrant.client.grpc.Collections.PayloadSchemaType;
-import io.qdrant.client.grpc.Collections.QuantizationConfig;
-import io.qdrant.client.grpc.Collections.VectorParams;
-import io.qdrant.client.grpc.Collections.VectorsConfig;
 import io.grpc.Grpc;
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
@@ -45,6 +38,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -56,6 +50,9 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
     private QdrantClient client;
     private ManagedChannel customChannel;  // Track custom channel for cleanup
     private final long grpcTimeoutSeconds;
+    private String restBaseUrl;
+    private String restApiKey;
+    private java.net.http.HttpClient restHttpClient;
     private final ConcurrentHashMap<String, CompiledQueryTemplate> compiledQueryTemplates = new ConcurrentHashMap<>();
 
     private static final WithPayloadSelector NO_PAYLOAD =
@@ -323,6 +320,28 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
 
             client = new QdrantClient(builder.build());
 
+            // Store REST base URL for collection creation.
+            // Allow explicit override via "rest_url" config (required when Testcontainers maps ports).
+            // Otherwise default to standard Qdrant HTTP port 6333.
+            String restUrlOverride = getConfigString("rest_url", null);
+            if (restUrlOverride != null) {
+                restBaseUrl = restUrlOverride;
+            } else {
+                String scheme = useTls ? "https" : "http";
+                restBaseUrl = scheme + "://" + host + ":6333";
+            }
+            restApiKey = apiKey;
+
+            // Build REST HTTP client (stored so it can be replaced in tests)
+            java.net.http.HttpClient.Builder httpClientBuilder = java.net.http.HttpClient.newBuilder();
+            if (useTls && TlsSettings.insecureTlsEnabled()) {
+                javax.net.ssl.X509TrustManager trustAll = TlsSettings.insecureTrustAllX509TrustManager();
+                javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("TLS");
+                sslContext.init(null, new javax.net.ssl.TrustManager[]{trustAll}, null);
+                httpClientBuilder.sslContext(sslContext);
+            }
+            restHttpClient = httpClientBuilder.build();
+
             // Test connection
             client.listCollectionsAsync().get(grpcTimeoutSeconds, TimeUnit.SECONDS);
             logger.info("Connected to Qdrant at {}:{}", host, port);
@@ -330,6 +349,87 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
         } catch (Exception e) {
             logger.error("Failed to connect to Qdrant", e);
             return false;
+        }
+    }
+
+    /**
+     * Returns a copy of templateNode with vectors.distance normalized to Qdrant's capitalized form
+     * (e.g. "dot" → "Dot", "l2" / "euclidean" → "Euclid"). Unknown values default to "Cosine".
+     * Returns the original node unchanged if no normalization is needed.
+     */
+    private JsonNode normalizeVectorDistance(JsonNode templateNode) {
+        JsonNode vectors = templateNode.get("vectors");
+        if (vectors == null || !vectors.has("distance")) {
+            return templateNode;
+        }
+        String raw = vectors.get("distance").asText("");
+        String normalized = switch (raw.toLowerCase()) {
+            case "cosine" -> "Cosine";
+            case "euclid", "euclidean", "l2" -> "Euclid";
+            case "dot" -> "Dot";
+            case "manhattan" -> "Manhattan";
+            default -> "Cosine";
+        };
+        if (normalized.equals(raw)) {
+            return templateNode;
+        }
+        com.fasterxml.jackson.databind.node.ObjectNode copy = templateNode.deepCopy();
+        ((com.fasterxml.jackson.databind.node.ObjectNode) copy.get("vectors")).put("distance", normalized);
+        return copy;
+    }
+
+    /**
+     * Converts an ES/OS-format schema (mappings.properties) into a minimal Qdrant REST schema.
+     * Returns null and logs an error if the vector field cannot be found.
+     */
+    private JsonNode convertMappingsToQdrantSchema(JsonNode templateNode) {
+        JsonNode mappings = templateNode.get("mappings");
+        JsonNode properties = mappings != null ? mappings.get("properties") : null;
+        if (properties == null) {
+            logger.error("ES/OS-format schema missing 'mappings.properties'. Schema: {}", templateNode.toPrettyString());
+            return null;
+        }
+        String vectorField = getConfigString("vector_field", "search_catalog_embedding");
+        JsonNode vectorProp = properties.get(vectorField);
+        if (vectorProp == null) {
+            logger.error("ES/OS-format schema missing vector field '{}' in mappings.properties. Schema: {}",
+                    vectorField, templateNode.toPrettyString());
+            return null;
+        }
+        int vectorSize = vectorProp.path("size").asInt(128);
+        String rawDistance = vectorProp.path("distance").asText("Cosine");
+        String distance = switch (rawDistance.toLowerCase()) {
+            case "cosine" -> "Cosine";
+            case "euclid", "euclidean", "l2" -> "Euclid";
+            case "dot" -> "Dot";
+            case "manhattan" -> "Manhattan";
+            default -> "Cosine";
+        };
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        com.fasterxml.jackson.databind.node.ObjectNode qdrantSchema = mapper.createObjectNode();
+        com.fasterxml.jackson.databind.node.ObjectNode vectorsNode = mapper.createObjectNode();
+        vectorsNode.put("size", vectorSize);
+        vectorsNode.put("distance", distance);
+        qdrantSchema.set("vectors", vectorsNode);
+        return qdrantSchema;
+    }
+
+    private void createCollectionViaRest(String indexName, JsonNode templateNode) throws Exception {
+        java.net.http.HttpRequest.Builder reqBuilder = java.net.http.HttpRequest.newBuilder()
+                .uri(java.net.URI.create(restBaseUrl + "/collections/" + indexName))
+                .header("Content-Type", "application/json")
+                .PUT(java.net.http.HttpRequest.BodyPublishers.ofString(templateNode.toString()));
+
+        if (restApiKey != null && !restApiKey.isEmpty()) {
+            reqBuilder.header("api-key", restApiKey);
+        }
+
+        java.net.http.HttpResponse<String> response = restHttpClient
+                .send(reqBuilder.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() != 200) {
+            throw new RuntimeException("Qdrant REST PUT /collections/" + indexName
+                    + " returned HTTP " + response.statusCode() + ": " + response.body());
         }
     }
 
@@ -357,138 +457,30 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
             // Support both legacy Jingra-wrapped schemas ({name, template:{...}}) and direct Qdrant-console schemas ({...}).
             JsonNode templateNode = template.has("template") ? template.get("template") : template;
 
-            // Parse schema configuration
-            // Support both direct Qdrant format and ES/OS-shaped format
-            JsonNode vectors = templateNode.get("vectors");
-            int vectorSize;
-            String distance;
-
-            if (vectors == null) {
-                // Try ES/OS-shaped format: template.mappings.properties.{vector_field}
-                JsonNode mappings = templateNode.get("mappings");
-                if (mappings == null || mappings.get("properties") == null) {
-                    logger.error("Schema missing 'vectors' or 'mappings.properties' field under 'template'. Schema content: {}", template.toPrettyString());
+            // Pre-process the schema before sending to Qdrant REST:
+            // 1. Require either "vectors" (direct format) or "mappings" (ES/OS format).
+            // 2. Normalize the distance string to Qdrant's expected capitalization
+            //    (e.g. "dot" -> "Dot", "l2" -> "Euclid") so schemas can use lowercase aliases.
+            JsonNode schemaForRest;
+            if (templateNode.has("vectors")) {
+                schemaForRest = normalizeVectorDistance(templateNode);
+            } else if (templateNode.has("mappings")) {
+                schemaForRest = convertMappingsToQdrantSchema(templateNode);
+                if (schemaForRest == null) {
                     return false;
                 }
-
-                // Find the vector field in properties
-                String vectorField = getConfigString("vector_field", "search_catalog_embedding");
-                JsonNode vectorProp = mappings.get("properties").get(vectorField);
-                if (vectorProp == null) {
-                    logger.error("Schema missing vector field '{}' in mappings.properties. Schema content: {}", vectorField, template.toPrettyString());
-                    return false;
-                }
-
-                vectorSize = vectorProp.get("size").asInt(128);
-                distance = vectorProp.get("distance").asText("Cosine");
             } else {
-                // Direct Qdrant format
-                vectorSize = vectors.get("size").asInt(128);
-                distance = vectors.get("distance").asText("Cosine");
+                logger.error("Schema must have 'vectors' (direct Qdrant format) or 'mappings' (ES/OS format). Schema: {}",
+                        templateNode.toPrettyString());
+                return false;
             }
 
-            // Parse shard/replication settings
-            int shardNumber = 1;
-            int replicationFactor = 1;
+            // Create collection by posting the schema JSON directly to the Qdrant REST API.
+            // This means any field in the schema file is passed through as-is — no code
+            // changes needed when Qdrant adds new quantization or config options.
+            createCollectionViaRest(indexName, schemaForRest);
 
-            if (templateNode.has("shard_number")) {
-                shardNumber = templateNode.get("shard_number").asInt(1);
-            } else if (templateNode.has("settings")) {
-                JsonNode settings = templateNode.get("settings");
-                shardNumber = settings.has("shard_number") ? settings.get("shard_number").asInt(1) : 1;
-                replicationFactor = settings.has("replication_factor") ? settings.get("replication_factor").asInt(1) : 1;
-            }
-
-            if (templateNode.has("replication_factor")) {
-                replicationFactor = templateNode.get("replication_factor").asInt(1);
-            }
-
-            // Convert distance string to Qdrant Distance enum
-            Distance qdrantDistance = switch (distance.toLowerCase()) {
-                case "cosine" -> Distance.Cosine;
-                case "euclid", "euclidean", "l2" -> Distance.Euclid;
-                case "dot" -> Distance.Dot;
-                case "manhattan" -> Distance.Manhattan;
-                default -> Distance.Cosine;
-            };
-
-            // Create vector params (unnamed vector)
-            VectorParams.Builder vectorParamsBuilder = VectorParams.newBuilder()
-                    .setSize(vectorSize)
-                    .setDistance(qdrantDistance);
-
-            // Parse and add HNSW config from settings if present
-            JsonNode settings = templateNode.get("settings");
-            if (settings != null && settings.has("hnsw_config")) {
-                JsonNode hnswConfig = settings.get("hnsw_config");
-                HnswConfigDiff.Builder hnswBuilder = HnswConfigDiff.newBuilder();
-
-                if (hnswConfig.has("m")) {
-                    hnswBuilder.setM(hnswConfig.get("m").asLong());
-                }
-                if (hnswConfig.has("ef_construct")) {
-                    hnswBuilder.setEfConstruct(hnswConfig.get("ef_construct").asLong());
-                }
-
-                vectorParamsBuilder.setHnswConfig(hnswBuilder.build());
-                logger.info("Configured HNSW: m={}, ef_construct={}",
-                        hnswConfig.path("m").asInt(16),
-                        hnswConfig.path("ef_construct").asInt(100));
-            }
-
-            VectorParams vectorParams = vectorParamsBuilder.build();
-
-            // Build CreateCollection request
-            CreateCollection.Builder createBuilder = CreateCollection.newBuilder()
-                    .setCollectionName(indexName)
-                    .setVectorsConfig(VectorsConfig.newBuilder().setParams(vectorParams).build());
-
-            if (shardNumber > 0) {
-                createBuilder.setShardNumber(shardNumber);
-            }
-            if (replicationFactor > 0) {
-                createBuilder.setReplicationFactor(replicationFactor);
-            }
-
-            // Set quantization config at collection level (not just on vector params)
-            if (settings != null && settings.has("quantization_config")) {
-                JsonNode quantConfig = settings.get("quantization_config");
-
-                QuantizationConfig.Builder quantBuilder = QuantizationConfig.newBuilder();
-
-                // Support binary quantization
-                if (quantConfig.has("binary")) {
-                    JsonNode binaryConfig = quantConfig.get("binary");
-                    BinaryQuantization.Builder binaryBuilder = BinaryQuantization.newBuilder();
-
-                    if (binaryConfig.has("always_ram")) {
-                        binaryBuilder.setAlwaysRam(binaryConfig.get("always_ram").asBoolean());
-                    }
-
-                    quantBuilder.setBinary(binaryBuilder.build());
-                    logger.info("Configured binary quantization: always_ram={}",
-                            binaryConfig.path("always_ram").asBoolean(true));
-                }
-
-                createBuilder.setQuantizationConfig(quantBuilder.build());
-            }
-
-            // Create collection with full configuration
-            client.createCollectionAsync(createBuilder.build()).get(grpcTimeoutSeconds, TimeUnit.SECONDS);
-
-            logger.info("Created Qdrant collection '{}' with schema '{}' (shards={}, replicas={})",
-                    indexName, schemaName, shardNumber, replicationFactor);
-
-            // Verify quantization is enabled
-            if (settings != null && settings.has("quantization_config")) {
-                try {
-                    var collectionInfo = client.getCollectionInfoAsync(indexName).get(grpcTimeoutSeconds, TimeUnit.SECONDS);
-                    // Note: Verification requires inspecting the collection config structure
-                    logger.info("Collection '{}' created - quantization config applied", indexName);
-                } catch (Exception e) {
-                    logger.warn("Could not verify quantization for collection '{}': {}", indexName, e.getMessage());
-                }
-            }
+            logger.info("Created Qdrant collection '{}' with schema '{}'", indexName, schemaName);
 
             // Create payload indexes if specified
             // Support both direct format (payload_indexes array) and ES/OS format (mappings.properties)
@@ -648,9 +640,10 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
             }
 
             // Upsert points (API changed in 1.17.0 - third parameter is Duration)
-            client.upsertAsync(indexName, points, Duration.ofSeconds(60)).get();
-
-            return points.size();
+            return runOnceWithTransportReconnect(() -> {
+                client.upsertAsync(indexName, points, Duration.ofSeconds(60)).get();
+                return points.size();
+            });
         } catch (Exception e) {
             logger.error("Failed to ingest documents", e);
             return 0;
@@ -742,34 +735,36 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
             }
 
             // Execute search using raw gRPC client to get full SearchResponse with timing
-            long startTime = System.nanoTime();
-            io.qdrant.client.grpc.Points.SearchResponse fullResponse = client.grpcClient()
-                    .points()
-                    .search(searchRequest)
-                    .get(grpcTimeoutSeconds, TimeUnit.SECONDS);
-            double clientLatencyMs = (System.nanoTime() - startTime) / 1_000_000.0;
+            return runOnceWithTransportReconnect(() -> {
+                long startTime = System.nanoTime();
+                io.qdrant.client.grpc.Points.SearchResponse fullResponse = client.grpcClient()
+                        .points()
+                        .search(searchRequest)
+                        .get(grpcTimeoutSeconds, TimeUnit.SECONDS);
+                double clientLatencyMs = (System.nanoTime() - startTime) / 1_000_000.0;
 
-            // Extract server latency (time is in seconds, convert to milliseconds)
-            // Round to nearest millisecond instead of truncating
-            Long serverLatencyMs = Math.round(fullResponse.getTime() * 1000.0);
+                // Extract server latency (time is in seconds, convert to milliseconds)
+                // Round to nearest millisecond instead of truncating
+                Long serverLatencyMs = Math.round(fullResponse.getTime() * 1000.0);
 
-            // Extract document IDs (handle both UUID and numeric IDs)
-            List<String> documentIds = new ArrayList<>();
-            for (var scoredPoint : fullResponse.getResultList()) {
-                PointId id = scoredPoint.getId();
-                String docId;
-                switch (id.getPointIdOptionsCase()) {
-                    case UUID -> docId = id.getUuid();
-                    case NUM -> docId = String.valueOf(id.getNum());
-                    default -> {
-                        logger.warn("Unknown point ID type: {}", id.getPointIdOptionsCase());
-                        docId = id.toString();
+                // Extract document IDs (handle both UUID and numeric IDs)
+                List<String> documentIds = new ArrayList<>();
+                for (var scoredPoint : fullResponse.getResultList()) {
+                    PointId id = scoredPoint.getId();
+                    String docId;
+                    switch (id.getPointIdOptionsCase()) {
+                        case UUID -> docId = id.getUuid();
+                        case NUM -> docId = String.valueOf(id.getNum());
+                        default -> {
+                            logger.warn("Unknown point ID type: {}", id.getPointIdOptionsCase());
+                            docId = id.toString();
+                        }
                     }
+                    documentIds.add(docId);
                 }
-                documentIds.add(docId);
-            }
 
-            return new QueryResponse(documentIds, clientLatencyMs, serverLatencyMs);
+                return new QueryResponse(documentIds, clientLatencyMs, serverLatencyMs);
+            });
         } catch (Exception e) {
             logger.error("Query execution failed", e);
             return new QueryResponse(List.of(), null, null);
@@ -833,8 +828,10 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
             return 0;
         }
         try {
-            var info = client.getCollectionInfoAsync(indexName).get(grpcTimeoutSeconds, TimeUnit.SECONDS);
-            return info.getPointsCount();
+            return runOnceWithTransportReconnect(() -> {
+                var info = client.getCollectionInfoAsync(indexName).get(grpcTimeoutSeconds, TimeUnit.SECONDS);
+                return info.getPointsCount();
+            });
         } catch (Exception e) {
             logger.error("Failed to get document count", e);
             return 0;
@@ -1042,6 +1039,68 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
             cause = cause.getCause();
         }
         return false;
+    }
+
+    /**
+     * Detects transient gRPC transport failures where reopening the channel often succeeds
+     * (e.g. {@code INTERNAL: Encountered end-of-stream mid-frame} with the Java client against Qdrant).
+     */
+    private static boolean isBrokenGrpcTransport(Throwable e) {
+        Throwable cause = e;
+        while (cause != null) {
+            if (cause instanceof StatusRuntimeException sre) {
+                Status.Code code = sre.getStatus().getCode();
+                String desc = sre.getStatus().getDescription();
+                if (code == Status.Code.UNAVAILABLE) {
+                    return true;
+                }
+                if (code == Status.Code.INTERNAL && desc != null && desc.contains("end-of-stream")) {
+                    return true;
+                }
+            }
+            cause = cause.getCause();
+        }
+        return false;
+    }
+
+    private void resetTransportAfterFailure() {
+        try {
+            if (hasClient()) {
+                client.close();
+            }
+        } catch (Exception e) {
+            logger.debug("Ignoring error closing Qdrant client during transport reset: {}", e.toString());
+        }
+        client = null;
+        if (customChannel != null) {
+            try {
+                if (!customChannel.isShutdown()) {
+                    customChannel.shutdown();
+                }
+                if (!customChannel.awaitTermination(5, TimeUnit.SECONDS)) {
+                    customChannel.shutdownNow();
+                }
+            } catch (Exception e) {
+                logger.debug("Ignoring error shutting down gRPC channel during transport reset: {}", e.toString());
+            }
+            customChannel = null;
+        }
+    }
+
+    private boolean reconnectToQdrant() {
+        resetTransportAfterFailure();
+        return connect();
+    }
+
+    private <T> T runOnceWithTransportReconnect(Callable<T> action) throws Exception {
+        try {
+            return action.call();
+        } catch (Exception e) {
+            if (isBrokenGrpcTransport(e) && reconnectToQdrant()) {
+                return action.call();
+            }
+            throw e;
+        }
     }
 
     /**

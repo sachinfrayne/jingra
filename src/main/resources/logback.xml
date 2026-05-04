@@ -14,6 +14,7 @@
 
     <!-- Reduce verbosity of third-party libraries -->
     <logger name="org.apache.hadoop" level="WARN" />
+    <logger name="org.apache.hadoop.util.NativeCodeLoader" level="ERROR" />
     <logger name="org.apache.parquet" level="WARN" />
     <logger name="org.elasticsearch.client" level="WARN" />
     <logger name="org.opensearch.client" level="WARN" />
