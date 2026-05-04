@@ -62,10 +62,22 @@ start:
 			exit 1; \
 		fi; \
 	fi
-	@curl -sf -X PUT "http://localhost:9200/_index_template/jingra-defaults" \
-		-H "Content-Type: application/json" \
-		-d '{"index_patterns":["jingra-*"],"template":{"settings":{"number_of_replicas":0}}}' > /dev/null \
-		&& echo "✓ Sink index template configured (number_of_replicas=0)"
+	@echo "Waiting for sink to accept requests..."; \
+	timeout=30; \
+	while [ $$timeout -gt 0 ]; do \
+		if curl -sf -X PUT "http://localhost:9200/_index_template/jingra-defaults" \
+			-H "Content-Type: application/json" \
+			-d '{"index_patterns":["jingra-*"],"template":{"settings":{"number_of_replicas":0}}}' > /dev/null 2>&1; then \
+			echo "✓ Sink index template configured (number_of_replicas=0)"; \
+			break; \
+		fi; \
+		sleep 1; \
+		timeout=$$((timeout - 1)); \
+		if [ $$timeout -eq 0 ]; then \
+			echo "❌ Sink failed to accept index template request"; \
+			exit 1; \
+		fi; \
+	done
 	$(if $(POST_START_HOOK),@$(POST_START_HOOK))
 
 load:
