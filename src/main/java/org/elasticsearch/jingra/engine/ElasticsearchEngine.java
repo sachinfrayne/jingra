@@ -6,7 +6,6 @@ import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import co.elastic.clients.elasticsearch.core.search.Hit;
-import co.elastic.clients.elasticsearch.indices.CreateIndexRequest;
 import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch.indices.DeleteIndexRequest;
 import co.elastic.clients.elasticsearch.indices.ExistsRequest;
@@ -89,11 +88,14 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
     }
 
     protected void createIndexOperation(String indexName, String schemaJson) throws Exception {
-        CreateIndexRequest request = CreateIndexRequest.of(b -> b
-                .index(indexName)
-                .withJson(new StringReader(schemaJson))
-        );
-        client.indices().create(request);
+        // Use the low-level REST client so the schema JSON is sent as raw bytes.
+        // The typed CreateIndexRequest.withJson() round-trips through the client's object model,
+        // which rejects fields unknown to the current client version (e.g. 'bits' in
+        // DenseVectorIndexOptions when the client lags behind the server).
+        co.elastic.clients.transport.rest5_client.low_level.Request request =
+                new co.elastic.clients.transport.rest5_client.low_level.Request("PUT", "/" + indexName);
+        request.setJsonEntity(schemaJson);
+        restClient.performRequest(request);
     }
 
     protected SearchResponse<Map> searchOperation(String indexName, String queryJson) throws Exception {

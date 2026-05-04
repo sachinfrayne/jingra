@@ -356,6 +356,42 @@ class ElasticsearchEngineBehaviorTest {
     }
 
     @Test
+    void createIndexOperationSendsRawJsonWithoutDeserializing() throws Exception {
+        // The typed CreateIndexRequest.withJson() deserializes JSON through the client model,
+        // which rejects unknown fields like 'bits' in DenseVectorIndexOptions when the client
+        // version is behind the server. createIndexOperation must use the raw REST client instead.
+        com.sun.net.httpserver.HttpServer fakeEs =
+                com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+        AtomicReference<String> receivedBody = new AtomicReference<>();
+        fakeEs.createContext("/", exchange -> {
+            receivedBody.set(new String(exchange.getRequestBody().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8));
+            byte[] ok = "{}".getBytes();
+            exchange.sendResponseHeaders(200, ok.length);
+            exchange.getResponseBody().write(ok);
+            exchange.close();
+        });
+        fakeEs.start();
+        Rest5Client rc = Rest5Client.builder(
+                new HttpHost("http", "127.0.0.1", fakeEs.getAddress().getPort())).build();
+        try {
+            ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+            injectRestClient(e, rc);
+            String schemaWithBits =
+                    "{\"mappings\":{\"properties\":{\"embedding\":{\"type\":\"dense_vector\","
+                    + "\"index_options\":{\"type\":\"bbq_disk\",\"bits\":2}}}}}";
+            // Must not throw JsonpMappingException for unknown 'bits' in index_options
+            assertDoesNotThrow(() -> e.createIndexOperation("test-bits-idx", schemaWithBits));
+            assertNotNull(receivedBody.get(), "Expected HTTP request to reach fake server");
+            assertTrue(receivedBody.get().contains("\"bits\""),
+                    "Raw JSON body must contain 'bits' field unchanged — no typed round-trip");
+        } finally {
+            rc.close();
+            fakeEs.stop(0);
+        }
+    }
+
+    @Test
     void createIndexFalseWhenCreateThrows() throws Exception {
         Path dir = Path.of("jingra-config/schemas");
         Files.createDirectories(dir);
