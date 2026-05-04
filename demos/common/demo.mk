@@ -62,6 +62,10 @@ start:
 			exit 1; \
 		fi; \
 	fi
+	@curl -sf -X PUT "http://localhost:9200/_index_template/jingra-defaults" \
+		-H "Content-Type: application/json" \
+		-d '{"index_patterns":["jingra-*"],"template":{"settings":{"number_of_replicas":0}}}' > /dev/null \
+		&& echo "✓ Sink index template configured (number_of_replicas=0)"
 	$(if $(POST_START_HOOK),@$(POST_START_HOOK))
 
 load:
