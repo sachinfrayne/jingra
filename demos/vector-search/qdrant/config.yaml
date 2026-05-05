@@ -38,8 +38,8 @@ datasets:
 
 load:
   threads: 4
-  batch_size: 100
-  queue_capacity: 100
+  batch_size: 10
+  queue_capacity: 10
 
 evaluation:
   run_id: demo-vector-qdrant
