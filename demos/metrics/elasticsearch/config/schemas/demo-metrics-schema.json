@@ -1,0 +1,58 @@
+{
+  "mappings": {
+    "properties": {
+      "@timestamp": { "type": "date" },
+
+      "host.name":  { "type": "keyword", "time_series_dimension": true },
+      "host.arch":  { "type": "keyword", "time_series_dimension": true },
+      "host.ip":    { "type": "keyword" },
+      "host.mac":   { "type": "keyword" },
+      "os.type":    { "type": "keyword", "time_series_dimension": true },
+      "cpu":        { "type": "keyword", "time_series_dimension": true },
+      "state":      { "type": "keyword", "time_series_dimension": true },
+      "direction":  { "type": "keyword", "time_series_dimension": true },
+      "device":     { "type": "keyword", "time_series_dimension": true },
+      "mountpoint": { "type": "keyword", "time_series_dimension": true },
+      "type":       { "type": "keyword", "time_series_dimension": true },
+      "mode":       { "type": "keyword", "time_series_dimension": true },
+      "status":     { "type": "keyword", "time_series_dimension": true },
+      "protocol":   { "type": "keyword", "time_series_dimension": true },
+
+      "system.cpu.utilization":      { "type": "double", "time_series_metric": "gauge"   },
+      "system.cpu.time":             { "type": "double", "time_series_metric": "counter" },
+      "system.cpu.load_average.1m":  { "type": "double", "time_series_metric": "gauge"   },
+      "system.cpu.load_average.5m":  { "type": "double", "time_series_metric": "gauge"   },
+      "system.cpu.load_average.15m": { "type": "double", "time_series_metric": "gauge"   },
+      "system.cpu.logical.count":    { "type": "long",   "time_series_metric": "gauge"   },
+
+      "system.memory.usage":         { "type": "long",   "time_series_metric": "gauge"   },
+      "system.memory.utilization":   { "type": "double", "time_series_metric": "gauge"   },
+
+      "system.disk.io":              { "type": "long",   "time_series_metric": "counter" },
+      "system.disk.io_time":         { "type": "double", "time_series_metric": "counter" },
+      "system.disk.merged":          { "type": "long",   "time_series_metric": "counter" },
+      "system.disk.operation_time":  { "type": "double", "time_series_metric": "counter" },
+      "system.disk.operations":      { "type": "long",   "time_series_metric": "counter" },
+      "system.disk.pending_operations": { "type": "long", "time_series_metric": "gauge" },
+      "system.disk.weighted_io_time":{ "type": "double", "time_series_metric": "counter" },
+
+      "system.filesystem.usage":        { "type": "long", "time_series_metric": "gauge" },
+      "system.filesystem.inodes.usage": { "type": "long", "time_series_metric": "gauge" },
+
+      "system.network.io":       { "type": "long", "time_series_metric": "counter" },
+      "system.network.packets":  { "type": "long", "time_series_metric": "counter" },
+      "system.network.errors":   { "type": "long", "time_series_metric": "counter" },
+      "system.network.dropped":  { "type": "long", "time_series_metric": "counter" },
+      "system.network.connections": { "type": "long", "time_series_metric": "gauge" },
+
+      "system.processes.count":   { "type": "long", "time_series_metric": "gauge"   },
+      "system.processes.created": { "type": "long", "time_series_metric": "counter" }
+    }
+  },
+  "settings": {
+    "index.mode": "time_series",
+    "index.routing_path": ["host.name"],
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  }
+}

@@ -107,17 +107,21 @@ public final class ConfigValidator {
         requireNonBlank(ds.getPath().getQueriesPath(), "dataset.path.queries_path is required for evaluation");
         requireNonNullState(ds.getQueriesMapping(), "dataset.queries_mapping is required for evaluation");
 
-        String vectorField = ds.getQueriesMapping().getQueryVectorField();
-        String textField = ds.getQueriesMapping().getQueryTextField();
-        boolean vectorFieldMissing = vectorField == null ? true : vectorField.isBlank();
-        boolean textFieldMissing = textField == null ? true : textField.isBlank();
-        if (vectorFieldMissing & textFieldMissing) { // `&`: both booleans already; no short-circuit on the pair
-            throw new IllegalStateException(
-                "dataset.queries_mapping.query_vector_field or query_text_field is required");
+        // ESQL queries need neither a query vector/text field nor a ground truth field
+        boolean isEsql = "esql".equals(ds.getQueryType());
+        if (!isEsql) {
+            String vectorField = ds.getQueriesMapping().getQueryVectorField();
+            String textField = ds.getQueriesMapping().getQueryTextField();
+            boolean vectorFieldMissing = vectorField == null || vectorField.isBlank();
+            boolean textFieldMissing = textField == null || textField.isBlank();
+            if (vectorFieldMissing && textFieldMissing) {
+                throw new IllegalStateException(
+                    "dataset.queries_mapping.query_vector_field or query_text_field is required");
+            }
+            requireNonBlank(
+                    ds.getQueriesMapping().getGroundTruthField(),
+                    "dataset.queries_mapping.ground_truth_field is required");
         }
-        requireNonBlank(
-                ds.getQueriesMapping().getGroundTruthField(),
-                "dataset.queries_mapping.ground_truth_field is required");
         if (ds.getParamGroups() == null || ds.getParamGroups().isEmpty()) {
             throw new IllegalStateException("dataset.param_groups is required for evaluation");
         }
@@ -131,11 +135,15 @@ public final class ConfigValidator {
         DatasetConfig ds = config.getActiveDataset();
         requireNonNullState(ds.getPath(), "dataset.path is required for load");
         requireNonBlank(ds.getPath().getDataPath(), "dataset.path.data_path is required for load");
-        DatasetConfig.DataMappingConfig dm = ds.getDataMapping();
-        if (dm == null) {
-            throw new IllegalStateException("dataset.data_mapping.id_field is required for load");
+        // id_field is optional for metrics datasets (e.g. TSDS) where _id is engine-generated
+        boolean idFieldOptional = "metrics".equals(ds.getType());
+        if (!idFieldOptional) {
+            DatasetConfig.DataMappingConfig dm = ds.getDataMapping();
+            if (dm == null) {
+                throw new IllegalStateException("dataset.data_mapping.id_field is required for load");
+            }
+            requireNonBlank(dm.getIdField(), "dataset.data_mapping.id_field is required for load");
         }
-        requireNonBlank(dm.getIdField(), "dataset.data_mapping.id_field is required for load");
     }
 
     /**

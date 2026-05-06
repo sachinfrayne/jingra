@@ -1,0 +1,9 @@
+FROM demo-metrics
+| WHERE `system.cpu.load_average.1m` IS NOT NULL
+| STATS avg(`system.cpu.load_average.1m`) AS avg_load_1m,
+        max(`system.cpu.load_average.1m`) AS max_load_1m,
+        avg(`system.cpu.load_average.5m`) AS avg_load_5m,
+        avg(`system.cpu.load_average.15m`) AS avg_load_15m
+  BY `host.name`
+| SORT avg_load_1m DESC
+| LIMIT {{size}}

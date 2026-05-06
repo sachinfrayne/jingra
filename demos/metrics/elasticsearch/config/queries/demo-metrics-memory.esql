@@ -1,0 +1,9 @@
+FROM demo-metrics
+| WHERE `system.memory.usage` IS NOT NULL AND state == "used"
+| STATS avg(`system.memory.usage`) AS avg_memory_used,
+        max(`system.memory.usage`) AS max_memory_used,
+        min(`system.memory.usage`) AS min_memory_used,
+        median(`system.memory.usage`) AS median_memory_used
+  BY `host.name`
+| SORT avg_memory_used DESC
+| LIMIT {{size}}

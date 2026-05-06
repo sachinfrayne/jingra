@@ -1,0 +1,7 @@
+FROM demo-metrics
+| WHERE `system.network.io` IS NOT NULL AND device == "eth0"
+| STATS sum(`system.network.io`) AS total_bytes,
+        avg(`system.network.io`) AS avg_bytes
+  BY `host.name`, direction
+| SORT total_bytes DESC
+| LIMIT {{size}}

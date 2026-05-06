@@ -1,0 +1,8 @@
+FROM demo-metrics
+| WHERE `system.disk.io` IS NOT NULL AND device == "disk0"
+| STATS sum(`system.disk.io`) AS total_bytes,
+        avg(`system.disk.io`) AS avg_bytes,
+        max(`system.disk.io`) AS max_bytes
+  BY `host.name`, direction
+| SORT total_bytes DESC
+| LIMIT {{size}}
