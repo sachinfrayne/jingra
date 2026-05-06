@@ -28,7 +28,7 @@
         <surefire.skipAfterFailureCount>0</surefire.skipAfterFailureCount>
 
         <!-- Dependency versions -->
-        <elasticsearch.version>9.3.2</elasticsearch.version>
+        <elasticsearch.version>9.4.0</elasticsearch.version>
         <opensearch.version>3.5.0</opensearch.version>
         <qdrant.version>1.17.0</qdrant.version>
         <parquet.version>1.14.3</parquet.version>

@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -38,7 +39,7 @@ public final class AnalyzeCommand {
     static Function<Map<String, Object>, ElasticsearchEngine> resultsEngineFactory =
             AnalyzeCommand::createResultsEngine;
 
-    static Function<String, PlotGenerator> plotGeneratorFactory = PlotGenerator::new;
+    static BiFunction<String, Map<String, String>, PlotGenerator> plotGeneratorFactory = PlotGenerator::new;
 
     /**
      * Run analysis command with default factory.
@@ -120,9 +121,12 @@ public final class AnalyzeCommand {
 
                 List<BenchmarkResult> resultsForRecallAt = entry.getValue();
 
-                csvExporter.exportAllResults(resultsForRecallAt, recallAt, latencyMetrics, baselineEngine, recallAt + "_full_results.csv");
                 if (multiEngine) {
-                    csvExporter.exportSpeedupSummary(resultsForRecallAt, recallAt, latencyMetrics, baselineEngine, recallAt + "_summary.csv");
+                    csvExporter.exportResultsCsvs(resultsForRecallAt, recallAt, latencyMetrics, baselineEngine,
+                            recallAt + "_full_results.csv", recallAt + "_summary.csv");
+                } else {
+                    csvExporter.exportAllResults(resultsForRecallAt, recallAt, latencyMetrics, baselineEngine,
+                            recallAt + "_full_results.csv");
                 }
 
                 logger.info("Exported {} results for {}", resultsForRecallAt.size(), recallAt);
@@ -172,7 +176,7 @@ public final class AnalyzeCommand {
             // Generate plots
             if (ac.isGeneratePlots()) {
                 logger.info("Generating plots...");
-                PlotGenerator plotter = plotGeneratorFactory.apply(ac.getOutputDirectory());
+                PlotGenerator plotter = plotGeneratorFactory.apply(ac.getOutputDirectory(), ac.getEngineVersions());
 
                 // Generate recall vs latency plots for each recall@N and latency metric
                 for (Map.Entry<String, List<BenchmarkResult>> entry : byRecallAt.entrySet()) {

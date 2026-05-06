@@ -26,9 +26,6 @@ public class DatasetConfig {
     @JsonProperty("query_name")
     private String queryName;
 
-    @JsonProperty("query_type")
-    private String queryType = "search";
-
     private PathConfig path;
 
     @JsonProperty("data_mapping")
@@ -87,14 +84,6 @@ public class DatasetConfig {
 
     public void setQueryName(String queryName) {
         this.queryName = queryName;
-    }
-
-    public String getQueryType() {
-        return queryType;
-    }
-
-    public void setQueryType(String queryType) {
-        this.queryType = queryType;
     }
 
     public PathConfig getPath() {
@@ -212,12 +201,6 @@ public class DatasetConfig {
         @JsonProperty("conditions_field")
         private String conditionsField;
 
-        @JsonProperty("size_field")
-        private String sizeField;
-
-        @JsonProperty("expected_rows_field")
-        private String expectedRowsField;
-
         public String getQueryVectorField() {
             return queryVectorField;
         }
@@ -248,22 +231,6 @@ public class DatasetConfig {
 
         public void setConditionsField(String conditionsField) {
             this.conditionsField = conditionsField;
-        }
-
-        public String getSizeField() {
-            return sizeField;
-        }
-
-        public void setSizeField(String sizeField) {
-            this.sizeField = sizeField;
-        }
-
-        public String getExpectedRowsField() {
-            return expectedRowsField;
-        }
-
-        public void setExpectedRowsField(String expectedRowsField) {
-            this.expectedRowsField = expectedRowsField;
         }
     }
 }

@@ -13,20 +13,15 @@ import co.elastic.clients.elasticsearch.indices.GetIndexRequest;
 import co.elastic.clients.elasticsearch.indices.GetIndexResponse;
 import co.elastic.clients.elasticsearch._types.mapping.Property;
 import co.elastic.clients.elasticsearch._types.mapping.TypeMapping;
-import co.elastic.clients.transport.rest5_client.low_level.Request;
-import co.elastic.clients.transport.rest5_client.low_level.Response;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.elasticsearch.jingra.model.Document;
 import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
 import org.elasticsearch.jingra.utils.TlsSettings;
 
-import java.io.IOException;
 import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -324,11 +319,6 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
         }
 
         try {
-            // ESQL branch: detected by presence of a .esql template file
-            if (hasEsqlTemplate(queryName)) {
-                return executeEsqlQuery(queryName, params);
-            }
-
             // Load and render query template (cached; avoid per-query I/O / JSON parse)
             JsonNode template = loadQueryTemplateCached(queryName);
             if (template == null) {
@@ -391,41 +381,6 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
         } catch (Exception e) {
             throw new IllegalStateException("Failed to render Elasticsearch query template", e);
         }
-    }
-
-    /**
-     * Execute an ESQL query via {@code POST /_query} and return latency + first-row aggregate values.
-     * The ESQL response is columnar: {@code {"columns":[{"name":"..."},...], "values":[[...]], "took":5}}.
-     */
-    @SuppressWarnings("unchecked")
-    private QueryResponse executeEsqlQuery(String queryName, QueryParams params) throws IOException {
-        String esql = renderEsqlTemplate(loadEsqlTemplate(queryName), params.getAll());
-        String body = objectMapper.writeValueAsString(Map.of("query", esql, "format", "json"));
-
-        Request request = new Request("POST", "/_query");
-        request.setJsonEntity(body);
-
-        long start = System.nanoTime();
-        Response response = restClient.performRequest(request);
-        double clientLatencyMs = (System.nanoTime() - start) / 1_000_000.0;
-
-        Map<String, Object> parsed = objectMapper.readValue(
-                response.getEntity().getContent(), new TypeReference<Map<String, Object>>() {});
-        Number took = (Number) parsed.get("took");
-
-        // Flatten first result row into a named map: {"avg_load_1m": 0.45, ...}
-        List<Map<String, Object>> columns = (List<Map<String, Object>>) parsed.get("columns");
-        List<List<Object>> values = (List<List<Object>>) parsed.get("values");
-        Map<String, Object> aggregates = new LinkedHashMap<>();
-        if (columns != null && values != null && !values.isEmpty()) {
-            List<Object> firstRow = values.get(0);
-            for (int i = 0; i < columns.size() && i < firstRow.size(); i++) {
-                aggregates.put((String) columns.get(i).get("name"), firstRow.get(i));
-            }
-        }
-
-        return new QueryResponse(List.of(), clientLatencyMs,
-                took != null ? took.longValue() : null, aggregates);
     }
 
     @Override

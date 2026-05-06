@@ -60,67 +60,11 @@ public class CsvExporter {
             String filename
     ) throws IOException {
         ensureDirectoryExists();
-        Path outputPath = Paths.get(outputDirectory, filename);
-
-        // Sort results by recall ascending
-        List<BenchmarkResult> sortedResults = new java.util.ArrayList<>(results);
-        sortedResults.sort(
-                (a, b) -> compareRecallForSort(a.getMetricAsDouble("recall"), b.getMetricAsDouble("recall")));
-
-        // Build header with all latency metric columns
-        List<String> headers = new java.util.ArrayList<>();
-        headers.add("RecallAtN");
-        headers.add("Engine");
-        headers.add("ParamKey");
-        headers.add("Recall");
-        headers.add("Recall Rounded");
-
-        // Add column for each latency metric
-        for (String metric : latencyMetrics) {
-            headers.add(formatColumnName(metric));
-        }
-
-        headers.add("Throughput");
-        headers.add("Speedup");
-
-        // Build index for speedup lookup: rounded_recall -> engine -> best result
-        // Use regular throughput for consistency with what's displayed in CSV
-        Map<String, Map<String, BenchmarkResult>> speedupIndex = buildSpeedupIndex(sortedResults);
-
-        try (FileWriter writer = new FileWriter(outputPath.toFile());
-             CSVPrinter printer = new CSVPrinter(writer, CSVFormat.DEFAULT.builder()
-                     .setHeader(headers.toArray(new String[0]))
-                     .build())) {
-
-            for (BenchmarkResult result : sortedResults) {
-                List<Object> record = new java.util.ArrayList<>();
-
-                Double recall = result.getMetricAsDouble("recall");
-                String recallRounded = formatRecallRounded(recall);
-
-                record.add(recallAtN);
-                record.add(result.getEngine());
-                record.add(result.getParamKey());
-                record.add(formatNullableDouble(recall));
-                record.add(recallRounded);
-
-                // Extract each latency metric with fallback
-                for (String metric : latencyMetrics) {
-                    Double latency = extractLatencyWithFallback(result, metric);
-                    record.add(formatNullableDouble(latency));
-                }
-
-                // Throughput uses first latency metric's logic
-                Double throughput = extractThroughput(result, latencyMetrics.get(0));
-                record.add(formatNullableDouble(throughput));
-
-                // Calculate speedup for the faster engine (neutral, not baseline-centric)
-                String speedup = calculateSpeedup(result, recallRounded, speedupIndex);
-                record.add(speedup);
-
-                printer.printRecord(record);
-            }
-        }
+        List<BenchmarkResult> sorted = sorted(results);
+        Map<String, Map<String, BenchmarkResult>> index = buildSpeedupIndex(sorted);
+        java.util.IdentityHashMap<BenchmarkResult, String> speedupValues =
+                buildSpeedupValues(buildMatchedPairs(index));
+        writeFullResultsFile(sorted, recallAtN, latencyMetrics, index, speedupValues, filename);
     }
 
     /**
@@ -128,6 +72,8 @@ public class CsvExporter {
      * For each speedup comparison, includes BOTH the faster engine's row (with speedup value)
      * and the slower engine's row (without speedup value).
      * Results are sorted by recall ascending.
+     *
+     * Matching strategy: exact rounded recall first; if no exact match, tries ±0.01, then ±0.02.
      *
      * @param results list of benchmark results
      * @param recallAtN recall label (e.g., "recall@100")
@@ -144,57 +90,175 @@ public class CsvExporter {
             String filename
     ) throws IOException {
         ensureDirectoryExists();
-        Path outputPath = Paths.get(outputDirectory, filename);
+        List<BenchmarkResult> sorted = sorted(results);
+        Map<String, Map<String, BenchmarkResult>> index = buildSpeedupIndex(sorted);
+        List<List<BenchmarkResult>> pairs = buildMatchedPairs(index);
+        java.util.IdentityHashMap<BenchmarkResult, String> speedupValues = buildSpeedupValues(pairs);
+        writeSummaryFile(sorted, recallAtN, latencyMetrics, pairs, speedupValues, filename);
+    }
 
-        // Sort results by recall ascending
-        List<BenchmarkResult> sortedResults = new java.util.ArrayList<>(results);
-        sortedResults.sort(
-                (a, b) -> compareRecallForSort(a.getMetricAsDouble("recall"), b.getMetricAsDouble("recall")));
+    /**
+     * Compute once, write both the full results and speedup summary files.
+     */
+    public void exportResultsCsvs(
+            List<BenchmarkResult> results,
+            String recallAtN,
+            List<String> latencyMetrics,
+            String baselineEngine,
+            String fullResultsFilename,
+            String summaryFilename
+    ) throws IOException {
+        ensureDirectoryExists();
+        List<BenchmarkResult> sorted = sorted(results);
+        Map<String, Map<String, BenchmarkResult>> index = buildSpeedupIndex(sorted);
+        List<List<BenchmarkResult>> pairs = buildMatchedPairs(index);
+        java.util.IdentityHashMap<BenchmarkResult, String> speedupValues = buildSpeedupValues(pairs);
+        writeFullResultsFile(sorted, recallAtN, latencyMetrics, index, speedupValues, fullResultsFilename);
+        writeSummaryFile(sorted, recallAtN, latencyMetrics, pairs, speedupValues, summaryFilename);
+    }
 
-        // Build header with all latency metric columns
+    /**
+     * Build matched pairs for the speedup summary.
+     * First matches exact recall buckets (2 engines at same rounded recall).
+     * Then fuzzy-matches remaining single-engine buckets within ±0.01, then ±0.02.
+     * Each bucket is used in at most one pair.
+     */
+    private java.util.IdentityHashMap<BenchmarkResult, String> buildSpeedupValues(
+            List<List<BenchmarkResult>> pairs
+    ) {
+        java.util.IdentityHashMap<BenchmarkResult, String> map = new java.util.IdentityHashMap<>();
+        for (List<BenchmarkResult> pair : pairs) {
+            BenchmarkResult r0 = pair.get(0);
+            BenchmarkResult r1 = pair.get(1);
+            Double tp0 = r0.getMetricAsDouble("throughput");
+            Double tp1 = r1.getMetricAsDouble("throughput");
+            if (tp0 == null || tp1 == null || tp0 == 0 || tp1 == 0) continue;
+            double ratio = Math.max(tp0, tp1) / Math.min(tp0, tp1);
+            String speedup = String.valueOf(Math.round(ratio));
+            if (tp0 > tp1) {
+                map.put(r0, speedup);
+            } else {
+                map.put(r1, speedup);
+            }
+        }
+        return map;
+    }
+
+    private List<List<BenchmarkResult>> buildMatchedPairs(
+            Map<String, Map<String, BenchmarkResult>> speedupIndex
+    ) {
+        List<List<BenchmarkResult>> pairs = new java.util.ArrayList<>();
+        java.util.Set<String> usedBuckets = new java.util.HashSet<>();
+
+        // Exact matches: buckets with exactly 2 engines
+        for (Map.Entry<String, Map<String, BenchmarkResult>> entry : speedupIndex.entrySet()) {
+            if (entry.getValue().size() == 2) {
+                pairs.add(new java.util.ArrayList<>(entry.getValue().values()));
+                usedBuckets.add(entry.getKey());
+            }
+        }
+
+        // Fuzzy matches: try ±0.01, then ±0.02 for unmatched single-engine buckets
+        // Collect unmatched single-engine buckets sorted by recall
+        List<String> singleBuckets = speedupIndex.entrySet().stream()
+                .filter(e -> !usedBuckets.contains(e.getKey()) && e.getValue().size() == 1)
+                .map(Map.Entry::getKey)
+                .sorted()
+                .collect(java.util.stream.Collectors.toList());
+
+        for (double tolerance : new double[]{0.01, 0.02}) {
+            java.util.Set<String> matchedThisRound = new java.util.LinkedHashSet<>();
+
+            for (int i = 0; i < singleBuckets.size(); i++) {
+                String bucketA = singleBuckets.get(i);
+                if (matchedThisRound.contains(bucketA)) continue;
+
+                Map<String, BenchmarkResult> mapA = speedupIndex.get(bucketA);
+                String engineA = mapA.keySet().iterator().next();
+                double recallA = Double.parseDouble(bucketA);
+
+                for (int j = i + 1; j < singleBuckets.size(); j++) {
+                    String bucketB = singleBuckets.get(j);
+                    if (matchedThisRound.contains(bucketB)) continue;
+
+                    Map<String, BenchmarkResult> mapB = speedupIndex.get(bucketB);
+                    String engineB = mapB.keySet().iterator().next();
+                    if (engineA.equals(engineB)) continue;
+
+                    double recallB = Double.parseDouble(bucketB);
+                    if (Math.abs(recallA - recallB) <= tolerance + 1e-9) {
+                        pairs.add(java.util.List.of(
+                                mapA.values().iterator().next(),
+                                mapB.values().iterator().next()));
+                        matchedThisRound.add(bucketA);
+                        matchedThisRound.add(bucketB);
+                        break;
+                    }
+                }
+            }
+
+            singleBuckets.removeAll(matchedThisRound);
+        }
+
+        // Sort pairs by the minimum recall of the two results
+        pairs.sort((p1, p2) -> {
+            double r1 = p1.stream()
+                    .mapToDouble(r -> {
+                        Double v = r.getMetricAsDouble("recall");
+                        return v != null ? v : Double.MAX_VALUE;
+                    })
+                    .min().orElse(Double.MAX_VALUE);
+            double r2 = p2.stream()
+                    .mapToDouble(r -> {
+                        Double v = r.getMetricAsDouble("recall");
+                        return v != null ? v : Double.MAX_VALUE;
+                    })
+                    .min().orElse(Double.MAX_VALUE);
+            return Double.compare(r1, r2);
+        });
+
+        return pairs;
+    }
+
+    private List<BenchmarkResult> sorted(List<BenchmarkResult> results) {
+        List<BenchmarkResult> s = new java.util.ArrayList<>(results);
+        s.sort((a, b) -> compareRecallForSort(a.getMetricAsDouble("recall"), b.getMetricAsDouble("recall")));
+        return s;
+    }
+
+    private List<String> buildHeaders(List<String> latencyMetrics) {
         List<String> headers = new java.util.ArrayList<>();
         headers.add("RecallAtN");
         headers.add("Engine");
         headers.add("ParamKey");
         headers.add("Recall");
         headers.add("Recall Rounded");
-
-        // Add column for each latency metric
         for (String metric : latencyMetrics) {
             headers.add(formatColumnName(metric));
         }
-
         headers.add("Throughput");
         headers.add("Speedup");
+        return headers;
+    }
 
-        // Build index for speedup lookup
-        Map<String, Map<String, BenchmarkResult>> speedupIndex = buildSpeedupIndex(sortedResults);
-
+    private void writeFullResultsFile(
+            List<BenchmarkResult> sorted,
+            String recallAtN,
+            List<String> latencyMetrics,
+            Map<String, Map<String, BenchmarkResult>> index,
+            java.util.IdentityHashMap<BenchmarkResult, String> speedupValues,
+            String filename
+    ) throws IOException {
+        Path outputPath = Paths.get(outputDirectory, filename);
         try (FileWriter writer = new FileWriter(outputPath.toFile());
              CSVPrinter printer = new CSVPrinter(writer, CSVFormat.DEFAULT.builder()
-                     .setHeader(headers.toArray(new String[0]))
+                     .setHeader(buildHeaders(latencyMetrics).toArray(new String[0]))
                      .build())) {
 
-            for (BenchmarkResult result : sortedResults) {
+            for (BenchmarkResult result : sorted) {
                 Double recall = result.getMetricAsDouble("recall");
                 String recallRounded = formatRecallRounded(recall);
 
-                // Check if this result is part of a speedup comparison (exactly 2 engines at this recall level)
-                Map<String, BenchmarkResult> enginesAtRecall = speedupIndex.get(recallRounded);
-                if (enginesAtRecall == null || enginesAtRecall.size() != 2) {
-                    continue; // Need exactly 2 engines for comparison
-                }
-
-                // Check if current result is in the index (i.e., it was selected as best for its engine)
-                BenchmarkResult indexedResult = enginesAtRecall.get(result.getEngine());
-                if (indexedResult == null || !result.getParamKey().equals(indexedResult.getParamKey())) {
-                    continue; // Not the indexed row for this engine
-                }
-
-                // Calculate speedup (will be empty for slower engine, but we include both rows)
-                String speedup = calculateSpeedup(result, recallRounded, speedupIndex);
-
-                // Build record
                 List<Object> record = new java.util.ArrayList<>();
                 record.add(recallAtN);
                 record.add(result.getEngine());
@@ -202,16 +266,61 @@ public class CsvExporter {
                 record.add(formatNullableDouble(recall));
                 record.add(recallRounded);
 
-                // Extract each latency metric with fallback
                 for (String metric : latencyMetrics) {
-                    Double latency = extractLatencyWithFallback(result, metric);
-                    record.add(formatNullableDouble(latency));
+                    record.add(formatNullableDouble(extractLatencyWithFallback(result, metric)));
                 }
+                record.add(formatNullableDouble(extractThroughput(result, latencyMetrics.get(0))));
 
-                // Throughput uses first latency metric's logic
-                Double throughput = extractThroughput(result, latencyMetrics.get(0));
-                record.add(formatNullableDouble(throughput));
+                BenchmarkResult indexed = index
+                        .getOrDefault(recallRounded, java.util.Map.of())
+                        .get(result.getEngine());
+                String speedup = (indexed != null && result.getParamKey().equals(indexed.getParamKey()))
+                        ? speedupValues.getOrDefault(indexed, "")
+                        : "";
                 record.add(speedup);
+
+                printer.printRecord(record);
+            }
+        }
+    }
+
+    private void writeSummaryFile(
+            List<BenchmarkResult> sorted,
+            String recallAtN,
+            List<String> latencyMetrics,
+            List<List<BenchmarkResult>> pairs,
+            java.util.IdentityHashMap<BenchmarkResult, String> speedupValues,
+            String filename
+    ) throws IOException {
+        java.util.IdentityHashMap<BenchmarkResult, Boolean> inPair = new java.util.IdentityHashMap<>();
+        for (List<BenchmarkResult> pair : pairs) {
+            for (BenchmarkResult r : pair) inPair.put(r, Boolean.TRUE);
+        }
+
+        Path outputPath = Paths.get(outputDirectory, filename);
+        try (FileWriter writer = new FileWriter(outputPath.toFile());
+             CSVPrinter printer = new CSVPrinter(writer, CSVFormat.DEFAULT.builder()
+                     .setHeader(buildHeaders(latencyMetrics).toArray(new String[0]))
+                     .build())) {
+
+            for (BenchmarkResult result : sorted) {
+                if (!inPair.containsKey(result)) continue;
+
+                Double recall = result.getMetricAsDouble("recall");
+                String recallRounded = formatRecallRounded(recall);
+
+                List<Object> record = new java.util.ArrayList<>();
+                record.add(recallAtN);
+                record.add(result.getEngine());
+                record.add(result.getParamKey());
+                record.add(formatNullableDouble(recall));
+                record.add(recallRounded);
+
+                for (String metric : latencyMetrics) {
+                    record.add(formatNullableDouble(extractLatencyWithFallback(result, metric)));
+                }
+                record.add(formatNullableDouble(extractThroughput(result, latencyMetrics.get(0))));
+                record.add(speedupValues.getOrDefault(result, ""));
 
                 printer.printRecord(record);
             }

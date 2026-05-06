@@ -2,7 +2,6 @@ package org.elasticsearch.jingra.evaluation;
 
 import java.util.HashSet;
 import java.util.List;
-import java.util.OptionalDouble;
 import java.util.Set;
 
 /**
@@ -272,18 +271,6 @@ public class MetricsCalculator {
     }
 
     /**
-     * Average aggregate accuracy across all queries that had expected values.
-     * Returns empty if no query had aggregate verification data.
-     */
-    public OptionalDouble calculateAggregateAccuracy() {
-        return results.stream()
-                .map(r -> r.aggregateAccuracy)
-                .filter(a -> a != null && !Double.isNaN(a))
-                .mapToDouble(Double::doubleValue)
-                .average();
-    }
-
-    /**
      * Query execution result.
      */
     static class QueryResult {
@@ -291,20 +278,13 @@ public class MetricsCalculator {
         final List<String> retrieved;
         final Double clientLatencyMs;
         final Long serverLatencyMs;
-        final Double aggregateAccuracy;
 
         QueryResult(List<String> groundTruth, List<String> retrieved,
                     Double clientLatencyMs, Long serverLatencyMs) {
-            this(groundTruth, retrieved, clientLatencyMs, serverLatencyMs, null);
-        }
-
-        QueryResult(List<String> groundTruth, List<String> retrieved,
-                    Double clientLatencyMs, Long serverLatencyMs, Double aggregateAccuracy) {
             this.groundTruth = groundTruth;
             this.retrieved = retrieved;
             this.clientLatencyMs = clientLatencyMs;
             this.serverLatencyMs = serverLatencyMs;
-            this.aggregateAccuracy = aggregateAccuracy;
         }
     }
 }

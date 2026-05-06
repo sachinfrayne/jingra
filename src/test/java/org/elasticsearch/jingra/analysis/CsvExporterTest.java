@@ -852,6 +852,149 @@ class CsvExporterTest {
     }
 
     @Test
+    void calculateSpeedup_returnsEmptyWhenEnginesAtRecallMissing() throws Exception {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult r = bench("elasticsearch", "k=1", 0.95, 5.0, 100.0);
+
+        Method m = CsvExporter.class.getDeclaredMethod(
+                "calculateSpeedup",
+                org.elasticsearch.jingra.model.BenchmarkResult.class,
+                String.class,
+                Map.class);
+        m.setAccessible(true);
+
+        // No entry for recallRounded -> enginesAtRecall == null
+        assertEquals("", m.invoke(exporter, r, "0.95", Map.of()));
+    }
+
+    @Test
+    void calculateSpeedup_returnsEmptyWhenEnginesAtRecallHasNotExactlyTwoEngines() throws Exception {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult r = bench("elasticsearch", "k=1", 0.95, 5.0, 100.0);
+
+        Map<String, Map<String, org.elasticsearch.jingra.model.BenchmarkResult>> index =
+                Map.of("0.95", Map.of("elasticsearch", r)); // size == 1
+
+        Method m = CsvExporter.class.getDeclaredMethod(
+                "calculateSpeedup",
+                org.elasticsearch.jingra.model.BenchmarkResult.class,
+                String.class,
+                Map.class);
+        m.setAccessible(true);
+
+        assertEquals("", m.invoke(exporter, r, "0.95", index));
+    }
+
+    @Test
+    void calculateSpeedup_returnsEmptyWhenIndexedResultMissingForEngine() throws Exception {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult r = bench("elasticsearch", "k=1", 0.95, 5.0, 100.0);
+        org.elasticsearch.jingra.model.BenchmarkResult other = bench("qdrant", "k=2", 0.95, 10.0, 50.0);
+
+        // enginesAtRecall has size==2 but does NOT contain key for r.getEngine()
+        Map<String, Map<String, org.elasticsearch.jingra.model.BenchmarkResult>> index =
+                Map.of("0.95", Map.of("not-elasticsearch", r, "qdrant", other));
+
+        Method m = CsvExporter.class.getDeclaredMethod(
+                "calculateSpeedup",
+                org.elasticsearch.jingra.model.BenchmarkResult.class,
+                String.class,
+                Map.class);
+        m.setAccessible(true);
+
+        assertEquals("", m.invoke(exporter, r, "0.95", index));
+    }
+
+    @Test
+    void calculateSpeedup_returnsEmptyWhenParamKeyIsNotIndexedSelection() throws Exception {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult r = bench("elasticsearch", "k=current", 0.95, 5.0, 100.0);
+        org.elasticsearch.jingra.model.BenchmarkResult indexed = bench("elasticsearch", "k=indexed", 0.95, 4.0, 150.0);
+        org.elasticsearch.jingra.model.BenchmarkResult other = bench("qdrant", "k=2", 0.95, 10.0, 50.0);
+
+        Map<String, Map<String, org.elasticsearch.jingra.model.BenchmarkResult>> index = new HashMap<>();
+        Map<String, org.elasticsearch.jingra.model.BenchmarkResult> atRecall = new LinkedHashMap<>();
+        atRecall.put("elasticsearch", indexed);
+        atRecall.put("qdrant", other);
+        index.put("0.95", atRecall);
+
+        Method m = CsvExporter.class.getDeclaredMethod(
+                "calculateSpeedup",
+                org.elasticsearch.jingra.model.BenchmarkResult.class,
+                String.class,
+                Map.class);
+        m.setAccessible(true);
+
+        assertEquals("", m.invoke(exporter, r, "0.95", index));
+    }
+
+    @Test
+    void calculateSpeedup_returnsEmptyWhenCurrentThroughputIsZero() throws Exception {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult current = bench("elasticsearch", "k=1", 0.95, 5.0, 0.0);
+        org.elasticsearch.jingra.model.BenchmarkResult other = bench("qdrant", "k=2", 0.95, 10.0, 50.0);
+
+        Map<String, Map<String, org.elasticsearch.jingra.model.BenchmarkResult>> index = new HashMap<>();
+        Map<String, org.elasticsearch.jingra.model.BenchmarkResult> atRecall = new LinkedHashMap<>();
+        atRecall.put("elasticsearch", current);
+        atRecall.put("qdrant", other);
+        index.put("0.95", atRecall);
+
+        Method m = CsvExporter.class.getDeclaredMethod(
+                "calculateSpeedup",
+                org.elasticsearch.jingra.model.BenchmarkResult.class,
+                String.class,
+                Map.class);
+        m.setAccessible(true);
+
+        assertEquals("", m.invoke(exporter, current, "0.95", index));
+    }
+
+    @Test
+    void calculateSpeedup_returnsEmptyWhenOtherThroughputIsZero() throws Exception {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult current = bench("elasticsearch", "k=1", 0.95, 5.0, 100.0);
+        org.elasticsearch.jingra.model.BenchmarkResult other = bench("qdrant", "k=2", 0.95, 10.0, 0.0);
+
+        Map<String, Map<String, org.elasticsearch.jingra.model.BenchmarkResult>> index = new HashMap<>();
+        Map<String, org.elasticsearch.jingra.model.BenchmarkResult> atRecall = new LinkedHashMap<>();
+        atRecall.put("elasticsearch", current);
+        atRecall.put("qdrant", other);
+        index.put("0.95", atRecall);
+
+        Method m = CsvExporter.class.getDeclaredMethod(
+                "calculateSpeedup",
+                org.elasticsearch.jingra.model.BenchmarkResult.class,
+                String.class,
+                Map.class);
+        m.setAccessible(true);
+
+        assertEquals("", m.invoke(exporter, current, "0.95", index));
+    }
+
+    @Test
+    void calculateSpeedup_returnsEmptyWhenCurrentIsSlowerOrEqual() throws Exception {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult current = bench("elasticsearch", "k=1", 0.95, 5.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult other = bench("qdrant", "k=2", 0.95, 10.0, 50.0);
+
+        Map<String, Map<String, org.elasticsearch.jingra.model.BenchmarkResult>> index = new HashMap<>();
+        Map<String, org.elasticsearch.jingra.model.BenchmarkResult> atRecall = new LinkedHashMap<>();
+        atRecall.put("elasticsearch", current);
+        atRecall.put("qdrant", other);
+        index.put("0.95", atRecall);
+
+        Method m = CsvExporter.class.getDeclaredMethod(
+                "calculateSpeedup",
+                org.elasticsearch.jingra.model.BenchmarkResult.class,
+                String.class,
+                Map.class);
+        m.setAccessible(true);
+
+        assertEquals("", m.invoke(exporter, current, "0.95", index));
+    }
+
+    @Test
     void exportAllResults_findSpeedupMetricPrefersLatencyMedianWhenServerAbsent() throws IOException {
         CsvExporter exporter = new CsvExporter(tempDir.toString());
         org.elasticsearch.jingra.model.BenchmarkResult es = new org.elasticsearch.jingra.model.BenchmarkResult(
@@ -1169,5 +1312,326 @@ class CsvExporterTest {
         // Last two data rows should have higher recall (0.85)
         assertTrue(lines.get(3).contains("0.85"), "Third row should have recall 0.85");
         assertTrue(lines.get(4).contains("0.85"), "Fourth row should have recall 0.85");
+    }
+
+    @Test
+    void exportSpeedupSummary_includesFuzzyPairWithinOneCentTolerance() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        // ES at 0.92, Qdrant at 0.93 — diff 0.01, no exact match
+        org.elasticsearch.jingra.model.BenchmarkResult es = bench("elasticsearch", "k=a", 0.921, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd = bench("qdrant", "ef=b", 0.929, 50.0, 8.0);
+
+        exporter.exportSpeedupSummary(
+                List.of(es, qd), "recall@100", List.of("latency_median"), "elasticsearch", "summary.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+        assertEquals(3, lines.size(), "header + both rows included via fuzzy ±0.01 match");
+        assertTrue(lines.stream().anyMatch(l -> l.contains("elasticsearch")));
+        assertTrue(lines.stream().anyMatch(l -> l.contains("qdrant")));
+    }
+
+    @Test
+    void exportSpeedupSummary_includesFuzzyPairWithinTwoCentTolerance() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        // ES at 0.89, Qdrant at 0.87 — diff 0.02, no exact or ±0.01 match
+        org.elasticsearch.jingra.model.BenchmarkResult es = bench("elasticsearch", "k=a", 0.888, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd = bench("qdrant", "ef=b", 0.871, 50.0, 12.0);
+
+        exporter.exportSpeedupSummary(
+                List.of(es, qd), "recall@100", List.of("latency_median"), "elasticsearch", "summary.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+        assertEquals(3, lines.size(), "header + both rows included via fuzzy ±0.02 match");
+        assertTrue(lines.stream().anyMatch(l -> l.contains("elasticsearch")));
+        assertTrue(lines.stream().anyMatch(l -> l.contains("qdrant")));
+    }
+
+    @Test
+    void exportSpeedupSummary_excludesFuzzyPairWhenDiffExceedsTwoCents() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        // ES at 0.90, Qdrant at 0.87 — diff 0.03, exceeds tolerance
+        org.elasticsearch.jingra.model.BenchmarkResult es = bench("elasticsearch", "k=a", 0.901, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd = bench("qdrant", "ef=b", 0.871, 50.0, 12.0);
+
+        exporter.exportSpeedupSummary(
+                List.of(es, qd), "recall@100", List.of("latency_median"), "elasticsearch", "summary.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+        assertEquals(1, lines.size(), "only header — no match within tolerance");
+    }
+
+    @Test
+    void exportSpeedupSummary_computesSpeedupCorrectlyForFuzzyPair() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        // ES throughput 50, Qdrant throughput 10 — speedup = 5
+        org.elasticsearch.jingra.model.BenchmarkResult es = bench("elasticsearch", "k=a", 0.921, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd = bench("qdrant", "ef=b", 0.929, 50.0, 10.0);
+
+        exporter.exportSpeedupSummary(
+                List.of(es, qd), "recall@100", List.of("latency_median"), "elasticsearch", "summary.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+        String esRow = lines.stream().filter(l -> l.contains("elasticsearch")).findFirst().orElseThrow();
+        assertTrue(esRow.endsWith(",5") || esRow.contains(",5,"), "ES row should show speedup 5");
+        String qdRow = lines.stream().filter(l -> l.contains("qdrant")).findFirst().orElseThrow();
+        assertFalse(qdRow.replace("\"", "").matches(".*,\\d+$"), "slower engine row has no speedup");
+    }
+
+    @Test
+    void exportSpeedupSummary_prefersExactMatchOverFuzzy() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        // ES at 0.92 and 0.93: 0.92 matches Qdrant at 0.92 exactly; 0.93 should not steal the qdrant
+        org.elasticsearch.jingra.model.BenchmarkResult es1 = bench("elasticsearch", "k=exact", 0.921, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd  = bench("qdrant", "ef=b",  0.919, 50.0, 10.0);
+        org.elasticsearch.jingra.model.BenchmarkResult es2 = bench("elasticsearch", "k=extra", 0.931, 8.0,  40.0);
+
+        exporter.exportSpeedupSummary(
+                List.of(es1, qd, es2), "recall@100", List.of("latency_median"), "elasticsearch", "summary.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+        // Only the exact pair (es1 + qd) should appear; es2 has no remaining partner
+        assertEquals(3, lines.size(), "header + exact pair only");
+        assertTrue(lines.stream().anyMatch(l -> l.contains("k=exact")));
+        assertFalse(lines.stream().anyMatch(l -> l.contains("k=extra")), "es2 should not appear — its partner was already used");
+    }
+
+    @Test
+    void exportSpeedupSummary_handlesNullThroughputOnSecondReadWithoutCrashing() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+
+        // Both rows are indexable (first throughput read is non-null), but one returns null on later reads.
+        // This exercises the short-circuit branches in:
+        //   r0isFaster = tp0 != null && tp1 != null && tp0 > tp1;
+        // and the later speedup-if which also checks tp0/tp1 != null.
+        org.elasticsearch.jingra.model.BenchmarkResult esOdd =
+                benchThroughputSecondReadNull("elasticsearch", "k=odd", 0.751, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd =
+                bench("qdrant", "ef=1", 0.749, 20.0, 10.0);
+
+        exporter.exportSpeedupSummary(
+                List.of(esOdd, qd), "recall@100", List.of("latency_median"), "elasticsearch", "summary.csv");
+
+        // Both rows should still be written (pairing is done from the index created on the first throughput read).
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+        assertEquals(3, lines.size());
+        assertTrue(lines.stream().anyMatch(l -> l.contains("k=odd")));
+        assertTrue(lines.stream().anyMatch(l -> l.contains("qdrant")));
+    }
+
+    @Test
+    void exportSpeedupSummary_handlesNullThroughputOnSecondReadForSecondRow() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+
+        // Make the *second* ordered row return null on subsequent throughput reads.
+        // Sorting by recall puts elasticsearch first (r0) and qdrant second (r1).
+        org.elasticsearch.jingra.model.BenchmarkResult es =
+                bench("elasticsearch", "k=1", 0.749, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qdOdd =
+                benchThroughputSecondReadNull("qdrant", "ef=odd", 0.751, 20.0, 10.0);
+
+        exporter.exportSpeedupSummary(
+                List.of(es, qdOdd), "recall@100", List.of("latency_median"), "elasticsearch", "summary.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+        assertEquals(3, lines.size());
+        assertTrue(lines.stream().anyMatch(l -> l.contains("elasticsearch")));
+        assertTrue(lines.stream().anyMatch(l -> l.contains("ef=odd")));
+    }
+
+    @Test
+    void exportSpeedupSummary_handlesBothThroughputsBecomingNullAfterIndexing() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+
+        org.elasticsearch.jingra.model.BenchmarkResult r0 =
+                benchThroughputSecondReadNull("qdrant", "ef=r0", 0.749, 10.0, 10.0);
+        org.elasticsearch.jingra.model.BenchmarkResult r1 =
+                benchThroughputSecondReadNull("elasticsearch", "k=r1", 0.751, 20.0, 20.0);
+
+        exporter.exportSpeedupSummary(
+                List.of(r0, r1), "recall@100", List.of("latency_median"), "elasticsearch", "summary.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+        assertEquals(3, lines.size());
+    }
+
+    @Test
+    void exportSpeedupSummary_doesNotComputeSpeedupWhenAnyThroughputIsZero() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+
+        // Exact-paired at same rounded recall, but one throughput is zero -> should not print speedup.
+        org.elasticsearch.jingra.model.BenchmarkResult es = bench("elasticsearch", "k=1", 0.751, 10.0, 10.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd = bench("qdrant", "ef=1", 0.749, 20.0, 0.0);
+
+        exporter.exportSpeedupSummary(
+                List.of(es, qd), "recall@100", List.of("latency_median"), "elasticsearch", "summary.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+        String esRow = lines.stream().filter(l -> l.contains("elasticsearch")).findFirst().orElseThrow();
+        String qdRow = lines.stream().filter(l -> l.contains("qdrant")).findFirst().orElseThrow();
+        assertFalse(esRow.replace("\"", "").matches(".*,\\d+$"), "speedup suppressed when other throughput is zero");
+        assertFalse(qdRow.replace("\"", "").matches(".*,\\d+$"), "speedup suppressed when throughput is zero");
+    }
+
+    @Test
+    void exportSpeedupSummary_doesNotComputeSpeedupWhenSlowerThroughputIsZeroAndFasterRowIsFirstByRecall() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+
+        // Ordered by recall: qdrant comes first (r0) and is also faster. The other row has zero throughput.
+        org.elasticsearch.jingra.model.BenchmarkResult qd = bench("qdrant", "ef=fast", 0.749, 10.0, 10.0);
+        org.elasticsearch.jingra.model.BenchmarkResult es = bench("elasticsearch", "k=zero", 0.751, 20.0, 0.0);
+
+        exporter.exportSpeedupSummary(
+                List.of(qd, es), "recall@100", List.of("latency_median"), "elasticsearch", "summary.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+        String qdRow = lines.stream().filter(l -> l.contains("qdrant")).findFirst().orElseThrow();
+        String esRow = lines.stream().filter(l -> l.contains("elasticsearch")).findFirst().orElseThrow();
+        assertFalse(qdRow.replace("\"", "").matches(".*,\\d+$"), "speedup suppressed when slower throughput is zero");
+        assertFalse(esRow.replace("\"", "").matches(".*,\\d+$"));
+    }
+
+    @Test
+    void exportAllResults_showsSpeedupForFuzzyPairWithinOneCentTolerance() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult es = bench("elasticsearch", "k=a", 0.921, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd = bench("qdrant", "ef=b", 0.929, 50.0, 10.0);
+
+        exporter.exportAllResults(List.of(es, qd), "recall@100", List.of("latency_median"), "elasticsearch", "out.csv");
+
+        String esRow = Files.readAllLines(tempDir.resolve("out.csv")).stream()
+                .filter(l -> l.contains("elasticsearch")).findFirst().orElseThrow();
+        assertTrue(esRow.endsWith(",5") || esRow.contains(",5,"), "ES row should show speedup 5 via fuzzy ±0.01");
+    }
+
+    @Test
+    void exportAllResults_showsSpeedupForFuzzyPairWithinTwoCentTolerance() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult es = bench("elasticsearch", "k=a", 0.888, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd = bench("qdrant", "ef=b", 0.871, 50.0, 10.0);
+
+        exporter.exportAllResults(List.of(es, qd), "recall@100", List.of("latency_median"), "elasticsearch", "out.csv");
+
+        String esRow = Files.readAllLines(tempDir.resolve("out.csv")).stream()
+                .filter(l -> l.contains("elasticsearch")).findFirst().orElseThrow();
+        assertTrue(esRow.endsWith(",5") || esRow.contains(",5,"), "ES row should show speedup 5 via fuzzy ±0.02");
+    }
+
+    @Test
+    void exportAllResults_noSpeedupWhenFuzzyDiffExceedsTwoCents() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult es = bench("elasticsearch", "k=a", 0.901, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd = bench("qdrant", "ef=b", 0.871, 50.0, 10.0);
+
+        exporter.exportAllResults(List.of(es, qd), "recall@100", List.of("latency_median"), "elasticsearch", "out.csv");
+
+        String esRow = Files.readAllLines(tempDir.resolve("out.csv")).stream()
+                .filter(l -> l.contains("elasticsearch")).findFirst().orElseThrow();
+        assertFalse(esRow.replace("\"", "").matches(".*,\\d+$"), "no speedup when diff > 0.02");
+    }
+
+    @Test
+    void buildMatchedPairs_coversFilterBranchesAndNullRecallSortBranches() throws Exception {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+
+        // Build a synthetic speedupIndex to drive branches that are impossible via buildSpeedupIndex():
+        // - stream filter short-circuit branches
+        // - inner-loop skip when bucketB already matchedThisRound
+        // - inner-loop continue when engines match
+        // - pair sorting where a result has null recall (v == null branch)
+        Map<String, Map<String, org.elasticsearch.jingra.model.BenchmarkResult>> index = new LinkedHashMap<>();
+
+        // Exact-match bucket (size == 2) so it's added and also populates usedBuckets (exercises filter short-circuit).
+        index.put("0.05", Map.of(
+                "exA", bench("exA", "p1", 0.051, 1.0, 1.0),
+                "exB", bench("exB", "p2", 0.049, 1.0, 2.0)
+        ));
+
+        // Bucket with size != 1 (and not used) to exercise the filter's "size == 1" false branch.
+        index.put("0.06", Map.of(
+                "x1", bench("x1", "p3", 0.060, 1.0, 1.0),
+                "x2", bench("x2", "p4", 0.061, 1.0, 2.0),
+                "x3", bench("x3", "p5", 0.062, 1.0, 3.0)
+        ));
+
+        // Force a fuzzy pair where BOTH results have null recall so the sort comparator must take the null branch.
+        org.elasticsearch.jingra.model.BenchmarkResult nullA =
+                new org.elasticsearch.jingra.model.BenchmarkResult("run", "nA", "1.0", "vector_search", "ds", "pnullA", Map.of());
+        nullA.addMetric("throughput", 1.0);
+        org.elasticsearch.jingra.model.BenchmarkResult nullB =
+                new org.elasticsearch.jingra.model.BenchmarkResult("run", "nB", "1.0", "vector_search", "ds", "pnullB", Map.of());
+        nullB.addMetric("throughput", 1.0);
+        // Keys chosen so they match under ±0.01 tolerance.
+        index.put("0.10", Map.of("nA", nullA));
+        index.put("0.11", Map.of("nB", nullB));
+
+        // Single-engine buckets crafted so:
+        // - A (e1) sees C (e1) first (same engine -> continue), then matches B (e2).
+        // - Later C's inner loop sees B already matchedThisRound -> triggers bucketB skip branch.
+        //
+        // Keys are chosen so C sorts between A and B (string sort).
+        index.put("0.70", Map.of("e1", bench("e1", "pa", 0.70, 1.0, 10.0)));   // A
+        index.put("0.705", Map.of("e1", bench("e1", "pc", 0.705, 1.0, 9.0)));  // C (same engine)
+        index.put("0.709", Map.of("e2", bench("e2", "pb", 0.709, 1.0, 8.0)));  // B
+
+        Method m = CsvExporter.class.getDeclaredMethod("buildMatchedPairs", Map.class);
+        m.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<List<org.elasticsearch.jingra.model.BenchmarkResult>> pairs =
+                (List<List<org.elasticsearch.jingra.model.BenchmarkResult>>) m.invoke(exporter, index);
+
+        assertTrue(pairs.size() >= 2, "expected some matched pairs to be produced");
+    }
+
+    @Test
+    void exportResultsCsvs_writesBothFiles() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult es = bench("elasticsearch", "k=a", 0.951, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd = bench("qdrant", "ef=b", 0.949, 20.0, 10.0);
+
+        exporter.exportResultsCsvs(List.of(es, qd), "recall@100", List.of("latency_median"),
+                "elasticsearch", "full.csv", "summary.csv");
+
+        assertTrue(Files.exists(tempDir.resolve("full.csv")));
+        assertTrue(Files.exists(tempDir.resolve("summary.csv")));
+    }
+
+    @Test
+    void exportResultsCsvs_summaryContainsOnlyPairedRows() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult es1 = bench("elasticsearch", "k=a", 0.951, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd1 = bench("qdrant", "ef=a", 0.949, 20.0, 10.0);
+        // Qdrant alone at 0.80 — no pair, should not appear in summary
+        org.elasticsearch.jingra.model.BenchmarkResult qd2 = bench("qdrant", "ef=b", 0.80, 30.0, 5.0);
+
+        exporter.exportResultsCsvs(List.of(es1, qd1, qd2), "recall@100", List.of("latency_median"),
+                "elasticsearch", "full.csv", "summary.csv");
+
+        List<String> fullLines = Files.readAllLines(tempDir.resolve("full.csv"));
+        List<String> summaryLines = Files.readAllLines(tempDir.resolve("summary.csv"));
+
+        assertEquals(4, fullLines.size(), "header + 3 data rows");
+        assertEquals(3, summaryLines.size(), "header + 2 paired rows only");
+        assertFalse(summaryLines.stream().anyMatch(l -> l.contains("ef=b")), "unpaired qdrant row excluded from summary");
+    }
+
+    @Test
+    void exportResultsCsvs_speedupAgreesInBothFiles() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult es = bench("elasticsearch", "k=a", 0.951, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd = bench("qdrant", "ef=b", 0.949, 20.0, 10.0);
+
+        exporter.exportResultsCsvs(List.of(es, qd), "recall@100", List.of("latency_median"),
+                "elasticsearch", "full.csv", "summary.csv");
+
+        String fullEsRow = Files.readAllLines(tempDir.resolve("full.csv")).stream()
+                .filter(l -> l.contains("elasticsearch")).findFirst().orElseThrow();
+        String summaryEsRow = Files.readAllLines(tempDir.resolve("summary.csv")).stream()
+                .filter(l -> l.contains("elasticsearch")).findFirst().orElseThrow();
+
+        // Both should end with the same speedup value
+        String fullSpeedup = fullEsRow.substring(fullEsRow.lastIndexOf(',') + 1);
+        String summarySpeedup = summaryEsRow.substring(summaryEsRow.lastIndexOf(',') + 1);
+        assertEquals(fullSpeedup, summarySpeedup, "speedup value must be identical in both files");
+        assertEquals("5", fullSpeedup.trim());
     }
 }

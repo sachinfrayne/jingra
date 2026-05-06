@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -105,7 +106,7 @@ class AnalyzeCommandTest {
     @Test
     void run_continuesWhenOnePlotGenerationThrows() throws Exception {
         AtomicInteger plotCalls = new AtomicInteger();
-        AnalyzeCommand.plotGeneratorFactory = out -> new PlotGenerator(out) {
+        AnalyzeCommand.plotGeneratorFactory = (out, versions) -> new PlotGenerator(out, versions) {
             @Override
             public void generateRecallVsLatencyPlot(
                     Map<String, List<BenchmarkResult>> resultsByEngine,
@@ -153,7 +154,7 @@ class AnalyzeCommandTest {
 
     @Test
     void run_logsWarningWhenThroughputOverviewThrows() throws Exception {
-        AnalyzeCommand.plotGeneratorFactory = out -> new PlotGenerator(out) {
+        AnalyzeCommand.plotGeneratorFactory = (out, versions) -> new PlotGenerator(out, versions) {
             @Override
             public void generateThroughputOverview(Map<String, List<BenchmarkResult>> data)
                     throws IOException {
@@ -492,6 +493,27 @@ class AnalyzeCommandTest {
         List<String> recall10Lines = Files.readAllLines(tempDir.resolve("recall@10_full_results.csv"));
         assertEquals(2, recall10Lines.size()); // Header + 1 data row
         assertTrue(recall10Lines.get(1).contains("qdrant"));
+    }
+
+    @Test
+    void run_passesEngineVersionsToPlotGenerator() throws Exception {
+        AtomicReference<Map<String, String>> capturedVersions = new AtomicReference<>();
+        AnalyzeCommand.plotGeneratorFactory = (out, versions) -> {
+            capturedVersions.set(versions);
+            return new PlotGenerator(out, versions);
+        };
+
+        JingraConfig config = createValidConfig();
+        config.getAnalysis().setGeneratePlots(true);
+        config.getAnalysis().setEngineVersions(Map.of("elasticsearch", "9.3.0", "qdrant", "1.17.0"));
+
+        MockResultsEngine mockEngine = new MockResultsEngine();
+        mockEngine.addResult(createResult("elasticsearch", "k=100", 0.95, 5.0, "recall@100"));
+        mockEngine.addResult(createResult("qdrant", "k=100", 0.93, 4.0, "recall@100"));
+
+        AnalyzeCommand.run(config, cfg -> mockEngine);
+
+        assertEquals(Map.of("elasticsearch", "9.3.0", "qdrant", "1.17.0"), capturedVersions.get());
     }
 
     // Helper methods
