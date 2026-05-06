@@ -18,6 +18,7 @@ public class MockBenchmarkEngine implements BenchmarkEngine {
     public boolean shouldFail = false;
     public final List<List<Float>> receivedVectors = new ArrayList<>();
     public final List<QueryParams> receivedParams = new ArrayList<>();
+    public final List<String> receivedQueryNames = new ArrayList<>();
 
     /**
      * Simulated index presence for load/delete flows. {@link #deleteIndex} clears it;
@@ -56,6 +57,7 @@ public class MockBenchmarkEngine implements BenchmarkEngine {
     public QueryResponse query(String indexName, String queryName, QueryParams params) {
         queryCount++;
         receivedParams.add(params);
+        receivedQueryNames.add(queryName);
 
         List<Float> vec = params.getFloatList("query_vector");
         if (vec != null) {

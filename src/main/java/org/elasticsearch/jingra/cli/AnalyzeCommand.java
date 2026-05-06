@@ -178,31 +178,46 @@ public final class AnalyzeCommand {
                 logger.info("Generating plots...");
                 PlotGenerator plotter = plotGeneratorFactory.apply(ac.getOutputDirectory(), ac.getEngineVersions());
 
-                // Generate recall vs latency plots for each recall@N and latency metric
-                for (Map.Entry<String, List<BenchmarkResult>> entry : byRecallAt.entrySet()) {
-                    String recallAt = entry.getKey();
+                boolean isMetrics = allResults.stream()
+                        .allMatch(r -> "metrics".equals(r.getBenchmarkType()));
 
-                    // Group by engine for this recall level
-                    Map<String, List<BenchmarkResult>> engineResults = new HashMap<>();
-                    for (BenchmarkResult result : entry.getValue()) {
-                        engineResults.computeIfAbsent(result.getEngine(), k -> new ArrayList<>()).add(result);
-                    }
-
-                    // Generate plot for each latency metric
-                    for (String latencyMetric : latencyMetrics) {
+                if (isMetrics) {
+                    // Metrics benchmarks: latency bar charts (recall is not a useful dimension)
+                    for (Map.Entry<String, List<BenchmarkResult>> entry : byRecallAt.entrySet()) {
+                        String recallAt = entry.getKey();
+                        Map<String, List<BenchmarkResult>> engineResults = new HashMap<>();
+                        for (BenchmarkResult result : entry.getValue()) {
+                            engineResults.computeIfAbsent(result.getEngine(), k -> new ArrayList<>()).add(result);
+                        }
                         try {
-                            plotter.generateRecallVsLatencyPlot(engineResults, recallAt, latencyMetric);
+                            plotter.generateLatencyBarChart(engineResults, recallAt, latencyMetrics);
                         } catch (Exception e) {
-                            logger.warn("Failed to generate plot for {} with {}: {}", recallAt, latencyMetric, e.getMessage());
+                            logger.warn("Failed to generate latency bar chart for {}: {}", recallAt, e.getMessage());
                         }
                     }
-                }
+                } else {
+                    // Search/vector benchmarks: recall vs latency scatter plots
+                    for (Map.Entry<String, List<BenchmarkResult>> entry : byRecallAt.entrySet()) {
+                        String recallAt = entry.getKey();
+                        Map<String, List<BenchmarkResult>> engineResults = new HashMap<>();
+                        for (BenchmarkResult result : entry.getValue()) {
+                            engineResults.computeIfAbsent(result.getEngine(), k -> new ArrayList<>()).add(result);
+                        }
+                        for (String latencyMetric : latencyMetrics) {
+                            try {
+                                plotter.generateRecallVsLatencyPlot(engineResults, recallAt, latencyMetric);
+                            } catch (Exception e) {
+                                logger.warn("Failed to generate plot for {} with {}: {}", recallAt, latencyMetric, e.getMessage());
+                            }
+                        }
+                    }
 
-                // Generate throughput overview chart using actual recall values
-                try {
-                    plotter.generateThroughputOverview(byRecallAt);
-                } catch (Exception e) {
-                    logger.warn("Failed to generate throughput overview: {}", e.getMessage());
+                    // Generate throughput overview chart using actual recall values
+                    try {
+                        plotter.generateThroughputOverview(byRecallAt);
+                    } catch (Exception e) {
+                        logger.warn("Failed to generate throughput overview: {}", e.getMessage());
+                    }
                 }
 
                 logger.info("Plot generation complete");

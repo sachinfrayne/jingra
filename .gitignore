@@ -40,6 +40,9 @@ demos/.run-start
 # Demo data files (generated locally by generate_data.py, not committed)
 demos/*/data/
 
+# Downloaded binaries (fetched at runtime, not committed)
+demos/*/.bin/
+
 # Local review artifacts
 
 REVIEW*.md

@@ -219,7 +219,36 @@ def parse_batches(batches: list) -> list[dict]:
             for sm in rm.get("scopeMetrics", []):
                 for metric in sm.get("metrics", []):
                     docs.extend(_data_points(metric["name"], metric, resource))
-    return docs
+    return _merge_tsds_docs(docs)
+
+
+def _merge_tsds_docs(docs: list[dict]) -> list[dict]:
+    """Merge documents that share the same TSDS dimension key.
+
+    TSDS computes _id from all dimension (string) fields + @timestamp.  When
+    two metrics share the same set of string fields (e.g. system.cpu.load_average
+    and system.cpu.logical.count both have only host.name/arch/os.type), TSDS
+    would overwrite the earlier document.  We pre-merge such documents so that
+    every unique (string_fields + @timestamp) combination becomes a single doc
+    containing all its metric values.
+    """
+    import collections
+    groups: dict = collections.OrderedDict()
+    for doc in docs:
+        # Split into dimension key (string/array fields + @timestamp) vs metric values
+        dim: dict = {}
+        metrics: dict = {}
+        for k, v in doc.items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                metrics[k] = v
+            else:
+                dim[k] = v
+        # Build a stable hashable key from the dimension fields
+        key = json.dumps(dim, sort_keys=True, default=str)
+        if key not in groups:
+            groups[key] = dict(dim)
+        groups[key].update(metrics)
+    return list(groups.values())
 
 
 def _compute_expected_aggregates(docs: list[dict]) -> dict:

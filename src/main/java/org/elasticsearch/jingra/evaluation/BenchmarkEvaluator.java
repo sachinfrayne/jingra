@@ -262,10 +262,13 @@ public class BenchmarkEvaluator {
             queryParams.put("meta_conditions", query.metaConditions);
         }
 
-        // Execute query
+        // Execute query — query_name in params overrides the dataset-level query_name
+        String queryName = benchmarkParams.containsKey("query_name")
+                ? benchmarkParams.get("query_name").toString()
+                : dataset.getQueryName();
         QueryResponse response = engine.query(
                 dataset.getIndexName(),
-                dataset.getQueryName(),
+                queryName,
                 queryParams
         );
 
@@ -282,11 +285,15 @@ public class BenchmarkEvaluator {
             }
         }
 
+        Double aggregateAccuracy = computeAggregateAccuracy(
+                query.expectedAggregates, response.getAggregateValues());
+
         return new MetricsCalculator.QueryResult(
                 query.groundTruth,
                 response.getDocumentIds(),
                 response.getClientLatencyMs(),
-                response.getServerLatencyMs()
+                response.getServerLatencyMs(),
+                aggregateAccuracy
         );
     }
 
@@ -309,6 +316,7 @@ public class BenchmarkEvaluator {
         String groundTruthField = dataset.getQueriesMapping().getGroundTruthField();
         String conditionsField = dataset.getQueriesMapping().getConditionsField();
 
+        boolean isEsql = "esql".equals(dataset.getQueryType());
         List<QueryDocument> queries = new ArrayList<>();
         int skippedQueries = 0;
 
@@ -316,7 +324,7 @@ public class BenchmarkEvaluator {
             List<Float> vector = null;
             String queryText = null;
 
-            if (textField == null && vectorField == null) {
+            if (!isEsql && textField == null && vectorField == null) {
                 logger.error("Neither query_text_field nor query_vector_field configured. Skipping query.");
                 skippedQueries++;
                 continue;
@@ -380,7 +388,20 @@ public class BenchmarkEvaluator {
                 }
             }
 
-            queries.add(new QueryDocument(vector, queryText, groundTruth, metaConditions));
+            // Extract expected_* fields for ESQL aggregate verification
+            Map<String, Object> expectedAggregates = null;
+            if (isEsql) {
+                expectedAggregates = new HashMap<>();
+                for (String key : doc.getFields().keySet()) {
+                    if (key.startsWith("expected_")) {
+                        Object val = doc.get(key);
+                        if (val != null) expectedAggregates.put(key, val);
+                    }
+                }
+                if (expectedAggregates.isEmpty()) expectedAggregates = null;
+            }
+
+            queries.add(new QueryDocument(vector, queryText, groundTruth, metaConditions, expectedAggregates));
         }
 
         if (skippedQueries > 0) {
@@ -413,11 +434,18 @@ public class BenchmarkEvaluator {
                 params
         );
 
-        // Add quality metrics
-        result.addMetric("precision", calculator.calculatePrecision());
-        result.addMetric("recall", calculator.calculateRecall());
-        result.addMetric("f1", calculator.calculateF1());
-        result.addMetric("mrr", calculator.calculateMRR());
+        // Add quality metrics — not applicable for ESQL/metrics benchmarks
+        boolean isEsql = "esql".equals(dataset.getQueryType());
+        if (!isEsql) {
+            result.addMetric("precision", calculator.calculatePrecision());
+            result.addMetric("recall", calculator.calculateRecall());
+            result.addMetric("f1", calculator.calculateF1());
+            result.addMetric("mrr", calculator.calculateMRR());
+        }
+
+        // ESQL aggregate accuracy (fraction of expected values within 0.1% tolerance)
+        calculator.calculateAggregateAccuracy().ifPresent(
+                acc -> result.addMetric("aggregate_accuracy", acc));
 
         // Add latency metrics (client-side)
         result.addMetric("latency_avg", calculator.calculateLatencyAvg());
@@ -523,24 +551,59 @@ public class BenchmarkEvaluator {
         return metric;
     }
 
+    /**
+     * Compare ESQL actual aggregate values against pre-computed expected values.
+     * Expected keys use the {@code expected_} prefix (e.g., {@code expected_avg_load_1m});
+     * actual keys are the ESQL column aliases (e.g., {@code avg_load_1m}).
+     * Returns fraction within 0.1% relative tolerance, or null if no comparison possible.
+     */
+    private static Double computeAggregateAccuracy(
+            Map<String, Object> expected, Map<String, Object> actual) {
+        if (expected == null || expected.isEmpty() || actual == null || actual.isEmpty()) {
+            return null;
+        }
+        int checked = 0;
+        int correct = 0;
+        for (Map.Entry<String, Object> e : expected.entrySet()) {
+            String expKey = e.getKey();
+            String actKey = expKey.startsWith("expected_") ? expKey.substring("expected_".length()) : expKey;
+            Object actVal = actual.get(actKey);
+            if (!(e.getValue() instanceof Number) || !(actVal instanceof Number)) continue;
+            checked++;
+            double exp = ((Number) e.getValue()).doubleValue();
+            double act = ((Number) actVal).doubleValue();
+            double relErr = exp == 0.0 ? Math.abs(act) : Math.abs(act - exp) / Math.abs(exp);
+            if (relErr <= 0.001) correct++;
+        }
+        return checked > 0 ? (double) correct / checked : null;
+    }
+
     private String generateRunId() {
         return LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
     }
 
     /**
-     * Query document with vector/text and ground truth.
+     * Query document with vector/text, ground truth, and optional expected aggregates (for ESQL).
      */
     private static class QueryDocument {
         final List<Float> queryVector;
         final String queryText;
         final List<String> groundTruth;
         final Map<String, Object> metaConditions;
+        final Map<String, Object> expectedAggregates;
 
-        QueryDocument(List<Float> queryVector, String queryText, List<String> groundTruth, Map<String, Object> metaConditions) {
+        QueryDocument(List<Float> queryVector, String queryText, List<String> groundTruth,
+                      Map<String, Object> metaConditions) {
+            this(queryVector, queryText, groundTruth, metaConditions, null);
+        }
+
+        QueryDocument(List<Float> queryVector, String queryText, List<String> groundTruth,
+                      Map<String, Object> metaConditions, Map<String, Object> expectedAggregates) {
             this.queryVector = queryVector;
             this.queryText = queryText;
             this.groundTruth = groundTruth != null ? groundTruth : List.of();
             this.metaConditions = metaConditions;
+            this.expectedAggregates = expectedAggregates;
         }
     }
 }

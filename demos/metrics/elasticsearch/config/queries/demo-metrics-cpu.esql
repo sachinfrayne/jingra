@@ -1,9 +1,9 @@
 FROM demo-metrics
 | WHERE `system.cpu.utilization` IS NOT NULL AND state == "user"
-| STATS avg(`system.cpu.utilization`) AS avg_cpu,
-        max(`system.cpu.utilization`) AS max_cpu,
-        min(`system.cpu.utilization`) AS min_cpu,
-        median(`system.cpu.utilization`) AS median_cpu
+| STATS avg_cpu = avg(`system.cpu.utilization`),
+        max_cpu = max(`system.cpu.utilization`),
+        min_cpu = min(`system.cpu.utilization`),
+        median_cpu = median(`system.cpu.utilization`)
   BY `host.name`
 | SORT avg_cpu DESC
 | LIMIT {{size}}

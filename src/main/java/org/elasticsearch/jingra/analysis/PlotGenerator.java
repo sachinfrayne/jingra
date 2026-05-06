@@ -299,6 +299,73 @@ public class PlotGenerator {
     }
 
     /**
+     * Generate a latency bar chart for metrics/ESQL benchmarks where recall is not meaningful.
+     * Produces one chart per latency metric: X-axis = param keys, one series per engine.
+     *
+     * @param resultsByEngine results grouped by engine
+     * @param label           group label used in the filename (e.g., "latency@10")
+     * @param latencyMetrics  ordered list of latency metrics to chart
+     * @throws IOException if chart generation fails
+     */
+    public void generateLatencyBarChart(
+            Map<String, List<BenchmarkResult>> resultsByEngine,
+            String label,
+            List<String> latencyMetrics
+    ) throws IOException {
+        ensureDirectoryExists();
+
+        // Collect all param keys across all engines, preserving insertion order
+        Set<String> paramKeySet = new LinkedHashSet<>();
+        for (List<BenchmarkResult> results : resultsByEngine.values()) {
+            for (BenchmarkResult r : results) {
+                paramKeySet.add(r.getParamKey());
+            }
+        }
+        if (paramKeySet.isEmpty()) {
+            logger.warn("No data to plot for latency bar chart ({})", label);
+            return;
+        }
+        List<String> paramKeys = new ArrayList<>(paramKeySet);
+
+        for (String latencyMetric : latencyMetrics) {
+            // Check whether any engine has data for this metric
+            boolean hasData = resultsByEngine.values().stream()
+                    .flatMap(List::stream)
+                    .anyMatch(r -> r.getMetricAsDouble(latencyMetric) != null);
+            if (!hasData) continue;
+
+            CategoryChart chart = new CategoryChartBuilder()
+                    .width(800)
+                    .height(500)
+                    .title(formatAxisLabel(latencyMetric) + " — " + label)
+                    .xAxisTitle("Configuration")
+                    .yAxisTitle(formatAxisLabel(latencyMetric))
+                    .build();
+            customizeCategoryChart(chart);
+
+            for (Map.Entry<String, List<BenchmarkResult>> entry : resultsByEngine.entrySet()) {
+                String engine = entry.getKey();
+                // Build a paramKey -> latency map for quick lookup
+                Map<String, Double> byKey = new java.util.LinkedHashMap<>();
+                for (BenchmarkResult r : entry.getValue()) {
+                    byKey.put(r.getParamKey(), r.getMetricAsDouble(latencyMetric));
+                }
+                List<Double> values = new ArrayList<>();
+                for (String pk : paramKeys) {
+                    values.add(Objects.requireNonNullElse(byKey.get(pk), 0.0));
+                }
+                chart.addSeries(engineLabel(engine), paramKeys, values)
+                        .setFillColor(getEngineColor(engine));
+            }
+
+            String filename = String.format("latency_%s_%s.png", sanitize(latencyMetric), sanitize(label));
+            Path outputPath = Paths.get(outputDirectory, filename);
+            BitmapEncoder.saveBitmap(chart, outputPath.toString(), BitmapEncoder.BitmapFormat.PNG);
+            logger.info("Generated plot: {}", outputPath);
+        }
+    }
+
+    /**
      * Extract latency with fallback from server_* to client metric.
      */
     private Double extractLatency(BenchmarkResult result, String metricName) {

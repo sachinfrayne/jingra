@@ -595,6 +595,48 @@ class PlotGeneratorTest {
         return r;
     }
 
+    @Test
+    void generateLatencyBarChart_createsFileForSingleEngine() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString());
+
+        Map<String, List<BenchmarkResult>> resultsByEngine = new HashMap<>();
+        List<BenchmarkResult> results = new ArrayList<>();
+        BenchmarkResult r = new BenchmarkResult("run", "elasticsearch", "9.4", "metrics", "ds", "size=10", Map.of());
+        r.addMetric("latency_median", 1.5);
+        r.addMetric("latency_avg", 1.8);
+        r.addMetric("latency_p90", 2.1);
+        r.addMetric("throughput", 300.0);
+        results.add(r);
+        resultsByEngine.put("elasticsearch", results);
+
+        generator.generateLatencyBarChart(resultsByEngine, "latency@10",
+                List.of("latency_median", "latency_avg", "latency_p90"));
+
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().startsWith("latency_") && p.toString().endsWith(".png")),
+                "Expected a latency bar chart PNG to be created");
+    }
+
+    @Test
+    void generateLatencyBarChart_createsFileForMultipleEngines() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString());
+
+        Map<String, List<BenchmarkResult>> resultsByEngine = new HashMap<>();
+        for (String engine : List.of("elasticsearch", "qdrant")) {
+            List<BenchmarkResult> results = new ArrayList<>();
+            BenchmarkResult r = new BenchmarkResult("run", engine, "1.0", "metrics", "ds", "size=10", Map.of());
+            r.addMetric("latency_median", engine.equals("elasticsearch") ? 1.5 : 2.0);
+            r.addMetric("latency_avg", engine.equals("elasticsearch") ? 1.8 : 2.3);
+            r.addMetric("throughput", 300.0);
+            results.add(r);
+            resultsByEngine.put(engine, results);
+        }
+
+        generator.generateLatencyBarChart(resultsByEngine, "latency@10",
+                List.of("latency_median", "latency_avg"));
+
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().startsWith("latency_") && p.toString().endsWith(".png")));
+    }
+
     private BenchmarkResult createResult(String engine, double recall, double latency) {
         BenchmarkResult result = new BenchmarkResult(
                 "test-run", engine, "1.0", "vector_search", "test-dataset", "k=1", Map.of());

@@ -6,17 +6,26 @@ elasticsearch:
 
 dataset: demo-metrics
 
-datasets:
+datasets:  
   demo-metrics:
     type: metrics
     query_type: esql
     index_name: demo-metrics
     schema_name: demo-metrics-schema
-    query_name: demo-metrics-load
 
     path:
       data_path: data/docs.ndjson
-      queries_path: data/queries.ndjson
+
+    data_mapping: {}
+
+  demo-metrics-cpu:
+    type: metrics
+    query_type: esql
+    index_name: demo-metrics
+    schema_name: demo-metrics-schema
+
+    path:
+      queries_path: data/metrics-cpu.ndjson
 
     data_mapping: {}
 
@@ -26,7 +35,7 @@ datasets:
 
     param_groups:
       latency@10:
-        - { size: 10 }
+        - { size: 10, query_name: demo-metrics-cpu }
 
 load:
   threads: 4

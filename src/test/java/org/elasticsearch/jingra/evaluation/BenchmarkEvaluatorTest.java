@@ -641,6 +641,20 @@ class BenchmarkEvaluatorTest {
     }
 
     @Test
+    void calculateMetrics_omitsQualityMetricsForEsqlQueryType() throws Exception {
+        jingraConfig.getActiveDataset().setQueryType("esql");
+        MetricsCalculator.QueryResult res = new MetricsCalculator.QueryResult(
+                List.of(), List.of(), 10.0, null);
+        BenchmarkResult br = invokeCalculateMetrics(List.of(res), 1000L);
+        assertNull(br.getMetrics().get("precision"));
+        assertNull(br.getMetrics().get("recall"));
+        assertNull(br.getMetrics().get("f1"));
+        assertNull(br.getMetrics().get("mrr"));
+        assertNotNull(br.getMetrics().get("latency_avg"));
+        assertNotNull(br.getMetrics().get("throughput"));
+    }
+
+    @Test
     void calculateMetrics_setsSchemaWhenSchemaNameConfiguredAndTemplateFound() throws Exception {
         org.elasticsearch.jingra.config.DatasetConfig datasetConfig = jingraConfig.getActiveDataset();
         datasetConfig.setSchemaName("schema-a");
@@ -902,6 +916,19 @@ class BenchmarkEvaluatorTest {
      * {@code !debugLoggedOnce && query.queryText != null}: when the flag is already true, the outer
      * condition short-circuits without re-evaluating {@code queryText}.
      */
+    @Test
+    void executeQuery_queryNameParamOverridesDatasetQueryName() throws Exception {
+        Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
+        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, String.class, List.class, Map.class);
+        ctor.setAccessible(true);
+        Object qd = ctor.newInstance(null, null, List.of(), null);
+        Method m = BenchmarkEvaluator.class.getDeclaredMethod(
+                "executeQuery", qdClass, DatasetConfig.class, Map.class);
+        m.setAccessible(true);
+        m.invoke(evaluator, qd, jingraConfig.getActiveDataset(), Map.of("query_name", "my-custom-query", "size", 10));
+        assertEquals("my-custom-query", mockEngine.receivedQueryNames.get(mockEngine.receivedQueryNames.size() - 1));
+    }
+
     @Test
     void executeQuery_debugOuterShortCircuitsWhenAlreadyLogged() throws Exception {
         Field flag = BenchmarkEvaluator.class.getDeclaredField("debugLoggedOnce");

@@ -198,6 +198,51 @@ public abstract class AbstractBenchmarkEngine implements BenchmarkEngine {
     }
 
     /**
+     * Returns true if a plain-text {@code .esql} template exists for the given query name.
+     */
+    protected boolean hasEsqlTemplate(String queryName) {
+        if (queryName == null) return false;
+        File file = new File(JINGRA_CONFIG_DIR + "/" + queriesPath + "/" + queryName + ".esql");
+        if (file.exists()) return true;
+        return getClass().getResource("/" + queriesPath + "/" + queryName + ".esql") != null;
+    }
+
+    /**
+     * Load a plain-text ESQL query template by name.
+     */
+    protected String loadEsqlTemplate(String queryName) {
+        String filename = queryName + ".esql";
+        File file = new File(JINGRA_CONFIG_DIR + "/" + queriesPath + "/" + filename);
+        if (file.exists()) {
+            try {
+                return Files.readString(file.toPath(), StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                logger.warn("Failed to load ESQL template from file: {}", file.getAbsolutePath(), e);
+            }
+        }
+        String resourcePath = "/" + queriesPath + "/" + filename;
+        try (java.io.InputStream is = getClass().getResourceAsStream(resourcePath)) {
+            if (is != null) {
+                return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            }
+        } catch (IOException e) {
+            logger.warn("Failed to load ESQL template from classpath: {}", resourcePath, e);
+        }
+        throw new IllegalArgumentException("ESQL template '" + queryName + "' not found");
+    }
+
+    /**
+     * Render an ESQL template by replacing {@code {{key}}} placeholders with param values.
+     */
+    protected String renderEsqlTemplate(String template, Map<String, Object> params) {
+        String result = template;
+        for (Map.Entry<String, Object> entry : params.entrySet()) {
+            result = result.replace("{{" + entry.getKey() + "}}", String.valueOf(entry.getValue()));
+        }
+        return result.trim();
+    }
+
+    /**
      * Cached variant of {@link #loadQueryTemplate(String)} to avoid per-query filesystem/classpath I/O and JSON parsing.
      * Cache is per engine instance (safe for typical harness lifecycle) and does not auto-reload changes on disk.
      */
