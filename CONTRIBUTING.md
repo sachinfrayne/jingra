@@ -44,7 +44,9 @@ Do not weaken assertions, remove test cases, or loosen mocks to make tests pass.
 
 ### No fixed sleeps
 
-Do not use `Thread.sleep` or fixed delays for coordination, waiting for readiness, retries, or backpressure. Use `ExecutorService`, `CompletableFuture`, `awaitTermination`, `CountDownLatch`, `Phaser`, bounded blocking queues, or Awaitility for async assertions.
+Avoid arbitrary fixed sleeps for test synchronization, async assertions, and thread coordination. Prefer `ExecutorService`, `CompletableFuture`, `awaitTermination`, `CountDownLatch`, `Phaser`, bounded blocking queues, or Awaitility for those cases.
+
+In production code, `Thread.sleep` may be acceptable for retry backoff or readiness polling only when there is no better event-driven mechanism and the wait is bounded (for example, bounded or exponential backoff with a timeout) and handles interruption correctly. Do not use unbounded fixed-delay loops or sleeps as a substitute for proper backpressure or coordination primitives.
 
 ### Demos for new functionality
 
