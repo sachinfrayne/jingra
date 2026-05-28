@@ -5,7 +5,7 @@
 
     <groupId>org.elasticsearch</groupId>
     <artifactId>jingra</artifactId>
-    <version>0.2.2</version>
+    <version>0.2.3</version>
     <packaging>jar</packaging>
 
     <name>Jingra</name>
@@ -29,8 +29,8 @@
 
         <!-- Dependency versions -->
         <elasticsearch.version>9.4.0</elasticsearch.version>
-        <opensearch.version>3.5.0</opensearch.version>
-        <qdrant.version>1.17.0</qdrant.version>
+        <opensearch.version>3.6.0</opensearch.version>
+        <qdrant.version>1.18.0</qdrant.version>
         <parquet.version>1.14.3</parquet.version>
         <hadoop.version>3.4.1</hadoop.version>
         <jackson.version>2.18.2</jackson.version>

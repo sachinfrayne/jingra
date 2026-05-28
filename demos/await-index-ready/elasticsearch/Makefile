@@ -1,4 +1,4 @@
-DEMO_NAME := Elasticsearch Forcemerge Demo
+DEMO_NAME := Elasticsearch Await Index Ready Demo
 export DATA_PATH := ../data
 export BUILD_CONTEXT := ../../..
 export ES_VERSION := $(shell cat ../../../engine-versions/.elasticsearch | tr -d '[:space:]')
