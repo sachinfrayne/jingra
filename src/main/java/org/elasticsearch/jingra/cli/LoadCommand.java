@@ -268,10 +268,10 @@ public final class LoadCommand {
                         String.format("Ingested %d documents but parquet row count is %d (incomplete load)", finalCount, rowCount));
             }
 
-            if (config.getLoad() != null && config.getLoad().isForcemerge()) {
-                logger.info("Triggering async force merge on index '{}' (fires in background, does not block load command)...", indexName);
-                engine.forcemerge(indexName);
-                logger.info("Force merge submitted; load command complete. Monitor task progress via GET /_tasks?actions=indices:admin/forcemerge");
+            if (config.getLoad() != null && config.getLoad().isAwaitIndexReady()) {
+                logger.info("Waiting for index '{}' to be ready (background merges/optimisation to settle)...", indexName);
+                engine.awaitIndexReady(indexName);
+                logger.info("Index ready; load command complete.");
             }
 
             long endTime = System.currentTimeMillis();

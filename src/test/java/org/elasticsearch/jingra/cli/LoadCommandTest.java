@@ -448,14 +448,14 @@ class LoadCommandTest {
     }
 
     @Test
-    void run_forcemergeTrue_callsForcemergeOnElasticsearchEngine() throws Exception {
+    void run_awaitIndexReadyTrue_callsAwaitIndexReadyOnElasticsearchEngine() throws Exception {
         LoadCommand.datasetReaderFactory = p -> new StubParquetReader(2, oneBatchOf(2));
         JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         LoadConfig load = new LoadConfig();
-        load.setForcemerge(true);
+        load.setAwaitIndexReady(true);
         config.setLoad(load);
 
-        AtomicBoolean forceMergeCalled = new AtomicBoolean(false);
+        AtomicBoolean awaitCalled = new AtomicBoolean(false);
         ElasticsearchEngine esEngine = new ElasticsearchEngine(new HashMap<>()) {
             @Override
             protected boolean hasClient() {
@@ -488,14 +488,9 @@ class LoadCommandTest {
             }
 
             @Override
-            protected String forcemergeOperation(String indexName) {
-                forceMergeCalled.set(true);
-                return "nodeA:1";
-            }
-
-            @Override
-            protected String pollTaskOperation(String taskId) {
-                return "{\"completed\":true}";
+            protected int mergesCurrentOperation(String indexName) {
+                awaitCalled.set(true);
+                return 0;
             }
 
             @Override
@@ -503,16 +498,16 @@ class LoadCommandTest {
         };
 
         LoadCommand.run(config, c -> esEngine);
-        assertTrue(forceMergeCalled.get(), "forcemerge should be called when forcemerge: true and engine is ElasticsearchEngine");
+        assertTrue(awaitCalled.get(), "awaitIndexReady should be called when await_index_ready: true");
     }
 
     @Test
-    void run_forcemergeFalse_skipsForcemerge() throws Exception {
+    void run_awaitIndexReadyFalse_skipsAwaitIndexReady() throws Exception {
         LoadCommand.datasetReaderFactory = p -> new StubParquetReader(2, oneBatchOf(2));
         JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
-        // forcemerge defaults to false — no LoadConfig set, so getLoad() returns null
+        // await_index_ready defaults to false — no LoadConfig set, so getLoad() returns null
 
-        AtomicBoolean forceMergeCalled = new AtomicBoolean(false);
+        AtomicBoolean awaitCalled = new AtomicBoolean(false);
         ElasticsearchEngine esEngine = new ElasticsearchEngine(new HashMap<>()) {
             @Override
             protected boolean hasClient() {
@@ -545,14 +540,9 @@ class LoadCommandTest {
             }
 
             @Override
-            protected String forcemergeOperation(String indexName) {
-                forceMergeCalled.set(true);
-                return "nodeA:1";
-            }
-
-            @Override
-            protected String pollTaskOperation(String taskId) {
-                return "{\"completed\":true}";
+            protected int mergesCurrentOperation(String indexName) {
+                awaitCalled.set(true);
+                return 0;
             }
 
             @Override
@@ -560,18 +550,18 @@ class LoadCommandTest {
         };
 
         LoadCommand.run(config, c -> esEngine);
-        assertFalse(forceMergeCalled.get(), "forcemerge should not be called when forcemerge is false");
+        assertFalse(awaitCalled.get(), "awaitIndexReady should not be called when await_index_ready is false");
     }
 
     @Test
-    void run_forcemergeTrue_nonEsEngineUsesNoOpDefault() throws Exception {
+    void run_awaitIndexReadyTrue_nonEsEngineUsesNoOpDefault() throws Exception {
         LoadCommand.datasetReaderFactory = p -> new StubParquetReader(2, oneBatchOf(2));
         JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         LoadConfig load = new LoadConfig();
-        load.setForcemerge(true);
+        load.setAwaitIndexReady(true);
         config.setLoad(load);
 
-        AtomicBoolean forcemergeCalledOnMock = new AtomicBoolean(false);
+        AtomicBoolean awaitCalledOnMock = new AtomicBoolean(false);
         // Override the default no-op to detect if it is invoked; the no-op itself does nothing
         BenchmarkEngine mockEngine = new MockBenchmarkEngine() {
             @Override
@@ -580,16 +570,16 @@ class LoadCommandTest {
             }
 
             @Override
-            public void forcemerge(String indexName) {
-                forcemergeCalledOnMock.set(true);
+            public void awaitIndexReady(String indexName) {
+                awaitCalledOnMock.set(true);
                 // no-op (mirrors the interface default)
             }
         };
 
-        // Should complete without error; forcemerge dispatches through the interface (no-op)
+        // Should complete without error; awaitIndexReady dispatches through the interface (no-op)
         LoadCommand.run(config, c -> mockEngine);
-        assertTrue(forcemergeCalledOnMock.get(),
-                "forcemerge() should be called on every engine via the interface; non-ES engines use the no-op default");
+        assertTrue(awaitCalledOnMock.get(),
+                "awaitIndexReady() should be called on every engine via the interface; non-ES engines use the no-op default");
     }
 
     @Test

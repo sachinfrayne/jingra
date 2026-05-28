@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 class BenchmarkEngineTest {
 
     /**
-     * Minimal stub: does not override {@link BenchmarkEngine#forcemerge(String)} so the
+     * Minimal stub: does not override {@link BenchmarkEngine#awaitIndexReady(String)} so the
      * interface default no-op runs (JaCoCo records default method bytecode on {@link BenchmarkEngine}).
      */
     private static final class StubEngine implements BenchmarkEngine {
@@ -91,9 +91,9 @@ class BenchmarkEngineTest {
     }
 
     @Test
-    void defaultForcemergeIsNoOp() throws Exception {
+    void defaultAwaitIndexReadyIsNoOp() throws Exception {
         try (BenchmarkEngine engine = new StubEngine()) {
-            assertDoesNotThrow(() -> engine.forcemerge("index-a"));
+            assertDoesNotThrow(() -> engine.awaitIndexReady("index-a"));
         }
     }
 }

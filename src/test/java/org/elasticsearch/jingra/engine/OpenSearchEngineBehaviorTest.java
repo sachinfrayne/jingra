@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.security.cert.X509Certificate;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -729,133 +730,94 @@ class OpenSearchEngineBehaviorTest {
     }
 
     @Test
-    void forcemergeThrowsIllegalStateWhenNoClient() {
+    void awaitIndexReadyThrowsIllegalStateWhenNoClient() {
         OpenSearchEngine e = new OpenSearchEngine(new HashMap<>());
-        assertThrows(IllegalStateException.class, () -> e.forcemerge("my-index"));
+        assertThrows(IllegalStateException.class, () -> e.awaitIndexReady("my-index"));
     }
 
     @Test
-    void forcemergeCallsForcemergeOperationWithCorrectArgs() throws Exception {
+    void awaitIndexReadyReturnsImmediatelyWhenCurrentIsZero() throws Exception {
         AtomicReference<String> capturedIndex = new AtomicReference<>();
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
             @Override
-            protected String forcemergeOperation(String indexName) {
+            protected int mergesCurrentOperation(String indexName) throws Exception {
                 capturedIndex.set(indexName);
-                return "nodeA:42";
+                return 0;
             }
-
-            @Override
-            protected String pollTaskOperation(String taskId) {
-                return "{\"completed\":true}";
-            }
-
-            @Override
-            protected long getPollIntervalMs() { return 0L; }
+            @Override protected long getPollIntervalMs() { return 0L; }
         };
-        e.forcemerge("test-index");
-        assertEquals("test-index", capturedIndex.get());
+        e.awaitIndexReady("my-index");
+        assertEquals("my-index", capturedIndex.get());
     }
 
     @Test
-    void forcemergeWrapsExceptionsAsRuntimeException() {
+    void awaitIndexReadyPollsUntilCurrentIsZero() throws Exception {
+        AtomicInteger callCount = new AtomicInteger();
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
             @Override
-            protected String forcemergeOperation(String indexName) throws Exception {
-                throw new IOException("merge failed");
+            protected int mergesCurrentOperation(String indexName) throws Exception {
+                return callCount.incrementAndGet() <= 2 ? 3 : 0;
             }
-
-            @Override
-            protected long getPollIntervalMs() { return 0L; }
+            @Override protected long getPollIntervalMs() { return 0L; }
         };
-        RuntimeException ex = assertThrows(RuntimeException.class, () -> e.forcemerge("idx"));
+        e.awaitIndexReady("idx");
+        assertEquals(3, callCount.get(), "Expected 2 non-zero polls then 1 zero");
+    }
+
+    @Test
+    void awaitIndexReadyWrapsExceptionsAsRuntimeException() {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected int mergesCurrentOperation(String indexName) throws Exception {
+                throw new IOException("stats failed");
+            }
+            @Override protected long getPollIntervalMs() { return 0L; }
+        };
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> e.awaitIndexReady("idx"));
         assertInstanceOf(IOException.class, ex.getCause());
-        assertTrue(ex.getMessage().contains("Force merge failed"));
+        assertTrue(ex.getMessage().contains("awaitIndexReady failed"));
     }
 
     @Test
-    void isTaskCompleteReturnsTrueWhenCompletedTrue() throws Exception {
+    void awaitIndexReadyRethrowsUncheckedRuntimeException() {
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
             @Override
-            protected String forcemergeOperation(String indexName) { return ""; }
-        };
-        assertTrue(e.isTaskComplete("{\"completed\":true}"));
-    }
-
-    @Test
-    void isTaskCompleteReturnsFalseWhenCompletedFalse() throws Exception {
-        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
-            @Override
-            protected String forcemergeOperation(String indexName) { return ""; }
-        };
-        assertFalse(e.isTaskComplete("{\"completed\":false}"));
-    }
-
-    @Test
-    void isTaskCompleteReturnsFalseWhenCompletedMissing() throws Exception {
-        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
-            @Override
-            protected String forcemergeOperation(String indexName) { return ""; }
-        };
-        assertFalse(e.isTaskComplete("{\"task\":{}}"));
-    }
-
-    @Test
-    void forcemergePolls_notCompleteTwiceThenComplete() throws Exception {
-        java.util.concurrent.atomic.AtomicInteger pollCount = new java.util.concurrent.atomic.AtomicInteger(0);
-        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
-            @Override
-            protected String forcemergeOperation(String indexName) {
-                return "nodeA:99";
+            protected int mergesCurrentOperation(String indexName) {
+                throw new RuntimeException("merge stats unavailable");
             }
 
             @Override
-            protected String pollTaskOperation(String taskId) {
-                int count = pollCount.incrementAndGet();
-                if (count <= 2) {
-                    return "{\"completed\":false}";
-                }
-                return "{\"completed\":true}";
+            protected long getPollIntervalMs() {
+                return 0L;
             }
-
-            @Override
-            protected long getPollIntervalMs() { return 0L; }
         };
-        e.forcemerge("poll-index");
-        assertEquals(3, pollCount.get(), "Expected 2 not-complete polls then 1 complete poll");
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> e.awaitIndexReady("idx"));
+        assertEquals("merge stats unavailable", ex.getMessage());
+        assertNull(ex.getCause());
     }
 
     @Test
-    void getPollIntervalMs_returnsThirtySeconds() throws Exception {
+    void getPollIntervalMsDefaultsThirtySeconds() throws Exception {
         Method m = OpenSearchEngine.class.getDeclaredMethod("getPollIntervalMs");
         m.setAccessible(true);
         assertEquals(30_000L, m.invoke(new OpenSearchEngine(new HashMap<>())));
     }
 
-    /**
-     * Exercises production {@code forcemergeOperation} / {@code pollTaskOperation} (not test overrides)
-     * against a local HTTP stub.
-     */
     @Test
-    void forcemerge_submitsViaRestClientAndPollsTaskUntilComplete() throws Exception {
-        java.util.concurrent.atomic.AtomicInteger pollCalls = new java.util.concurrent.atomic.AtomicInteger();
-        java.util.concurrent.atomic.AtomicReference<String> forcemergeQuery = new java.util.concurrent.atomic.AtomicReference<>();
+    void awaitIndexReady_pollsMergeStatsViaRestClient() throws Exception {
+        AtomicInteger statsCalls = new AtomicInteger();
         com.sun.net.httpserver.HttpServer fakeOs =
                 com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
         fakeOs.createContext("/", exchange -> {
             try {
-                String method = exchange.getRequestMethod();
-                java.net.URI uri = exchange.getRequestURI();
-                String path = uri.getPath();
+                String path = exchange.getRequestURI().getPath();
                 byte[] out;
-                if ("POST".equals(method) && path.endsWith("/_forcemerge")) {
-                    forcemergeQuery.set(uri.getQuery());
-                    exchange.getRequestBody().readAllBytes();
-                    out = "{\"task\":\"tid1\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                } else if ("GET".equals(method) && path.startsWith("/_tasks/")) {
-                    int n = pollCalls.incrementAndGet();
-                    out = (n >= 2
-                            ? "{\"completed\":true}"
-                            : "{\"completed\":false}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                if ("GET".equals(exchange.getRequestMethod()) && path.contains("/_stats/merge")) {
+                    int n = statsCalls.incrementAndGet();
+                    String body = n >= 2
+                            ? "{\"indices\":{\"idx\":{\"primaries\":{\"merges\":{\"current\":0}}}}}"
+                            : "{\"indices\":{\"idx\":{\"primaries\":{\"merges\":{\"current\":2}}}}}";
+                    out = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
                 } else {
                     exchange.sendResponseHeaders(404, -1);
                     return;
@@ -872,18 +834,11 @@ class OpenSearchEngineBehaviorTest {
         RestClient rc = RestClient.builder(new HttpHost("http", "127.0.0.1", port)).build();
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
-                @Override
-                protected long getPollIntervalMs() {
-                    return 0L;
-                }
+                @Override protected long getPollIntervalMs() { return 0L; }
             };
             injectRestClient(e, rc);
-            assertDoesNotThrow(() -> e.forcemerge("idx"));
-            assertEquals(2, pollCalls.get());
-            String q = forcemergeQuery.get();
-            assertNotNull(q);
-            assertFalse(q.contains("max_num_segments"), q);
-            assertTrue(q.contains("wait_for_completion=false"), q);
+            assertDoesNotThrow(() -> e.awaitIndexReady("idx"));
+            assertEquals(2, statsCalls.get());
         } finally {
             rc.close();
             fakeOs.stop(0);
@@ -891,7 +846,7 @@ class OpenSearchEngineBehaviorTest {
     }
 
     @Test
-    void forcemergeOperation_emptyBodyWhenResponseEntityNull() throws Exception {
+    void mergesCurrentOperation_returnsZeroOnNullBody() throws Exception {
         RestClient mockRest = mock(RestClient.class);
         Response mockResp = mock(Response.class);
         when(mockResp.getEntity()).thenReturn(null);
@@ -900,24 +855,9 @@ class OpenSearchEngineBehaviorTest {
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {};
         injectRestClient(e, mockRest);
 
-        Method fm = OpenSearchEngine.class.getDeclaredMethod("forcemergeOperation", String.class);
-        fm.setAccessible(true);
-        assertEquals("", fm.invoke(e, "idx"));
-    }
-
-    @Test
-    void pollTaskOperation_returnsEmptyWhenResponseEntityNull() throws Exception {
-        RestClient mockRest = mock(RestClient.class);
-        Response mockResp = mock(Response.class);
-        when(mockResp.getEntity()).thenReturn(null);
-        when(mockRest.performRequest(any(Request.class))).thenReturn(mockResp);
-
-        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {};
-        injectRestClient(e, mockRest);
-
-        Method pm = OpenSearchEngine.class.getDeclaredMethod("pollTaskOperation", String.class);
-        pm.setAccessible(true);
-        assertEquals("", pm.invoke(e, "tid1"));
+        Method m = OpenSearchEngine.class.getDeclaredMethod("mergesCurrentOperation", String.class);
+        m.setAccessible(true);
+        assertEquals(0, m.invoke(e, "idx"));
     }
 
 }
