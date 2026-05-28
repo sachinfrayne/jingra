@@ -1,0 +1,12 @@
+{
+  "knn": {
+    "field": "embedding",
+    "query_vector": "{{query_vector}}",
+    "k": "{{k}}",
+    "num_candidates": "{{num_candidates}}",
+    "rescore_vector": {
+      "oversample": "{{oversample}}"
+    }
+  },
+  "size": "{{size}}"
+}
