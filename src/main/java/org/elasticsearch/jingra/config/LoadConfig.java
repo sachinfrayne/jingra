@@ -16,8 +16,8 @@ public class LoadConfig {
     @JsonProperty("queue_capacity")
     private Integer queueCapacity;
 
-    @JsonProperty("forcemerge")
-    private boolean forcemerge = false;
+    @JsonProperty("await_index_ready")
+    private boolean awaitIndexReady = false;
 
     public Integer getBatchSize() {
         return batchSize;
@@ -55,11 +55,11 @@ public class LoadConfig {
         return queueCapacity != null && queueCapacity > 0 ? queueCapacity : 20;
     }
 
-    public boolean isForcemerge() {
-        return forcemerge;
+    public boolean isAwaitIndexReady() {
+        return awaitIndexReady;
     }
 
-    public void setForcemerge(boolean forcemerge) {
-        this.forcemerge = forcemerge;
+    public void setAwaitIndexReady(boolean awaitIndexReady) {
+        this.awaitIndexReady = awaitIndexReady;
     }
 }

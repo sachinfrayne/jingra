@@ -1,6 +1,7 @@
 DEMOS := \
-	forcemerge/elasticsearch \
-	forcemerge/opensearch \
+	await-index-ready/elasticsearch \
+	await-index-ready/opensearch \
+	await-index-ready/qdrant \
 	hybrid-search/elasticsearch \
 	lexical-search/elasticsearch \
 	lexical-search/opensearch \

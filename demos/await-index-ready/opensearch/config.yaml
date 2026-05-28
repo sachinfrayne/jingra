@@ -37,10 +37,10 @@ load:
   threads: 4
   batch_size: 10
   queue_capacity: 10
-  forcemerge: true
+  await_index_ready: true
 
 evaluation:
-  run_id: demo-forcemerge
+  run_id: demo-await-index-ready
   warmup_workers: 1
   measurement_workers: 1
   warmup_rounds: 3
@@ -54,7 +54,7 @@ output:
         index: jingra-results
 
 analysis:
-  run_id: demo-forcemerge
+  run_id: demo-await-index-ready
   engines:
     - opensearch
   results_cluster:

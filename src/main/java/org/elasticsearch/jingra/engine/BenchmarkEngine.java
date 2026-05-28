@@ -113,12 +113,12 @@ public interface BenchmarkEngine extends AutoCloseable {
     Map<String, Object> getSchemaTemplate(String schemaName);
 
     /**
-     * Trigger a best-effort force merge on the given index.
-     * Engines that do not support force merge (e.g. Qdrant) can rely on this default no-op implementation.
+     * Wait until the index is ready for querying (all background optimisation / merges have settled).
+     * Engines that do not need to wait can rely on this default no-op implementation.
      *
-     * @param indexName the index to merge
+     * @param indexName the index to wait on
      */
-    default void forcemerge(String indexName) {
-        // no-op by default — only implemented by engines that support force merge
+    default void awaitIndexReady(String indexName) {
+        // no-op by default — only implemented by engines that need to wait for background work
     }
 }

@@ -1,4 +1,4 @@
-DEMO_NAME := OpenSearch Forcemerge Demo
+DEMO_NAME := OpenSearch Await Index Ready Demo
 export DATA_PATH := ../data
 export BUILD_CONTEXT := ../../..
 export OS_VERSION := $(shell cat ../../../engine-versions/.opensearch | tr -d '[:space:]')

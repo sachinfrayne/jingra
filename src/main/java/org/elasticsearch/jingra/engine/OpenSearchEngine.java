@@ -91,59 +91,48 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
         return restClient.performRequest(request);
     }
 
-    protected String forcemergeOperation(String indexName) throws Exception {
-        Request request = new Request("POST",
-                "/" + indexName + "/_forcemerge?wait_for_completion=false");
+    protected int mergesCurrentOperation(String indexName) throws Exception {
+        Request request = new Request("GET", "/" + indexName + "/_stats/merge");
         Response response = performRestRequest(request);
         byte[] bodyBytes = response.getEntity() != null ? response.getEntity().getContent().readAllBytes() : new byte[0];
         String bodyStr = new String(bodyBytes, java.nio.charset.StandardCharsets.UTF_8);
         com.fasterxml.jackson.databind.JsonNode json = objectMapper.readTree(bodyStr);
-        return json.path("task").asText();
+        com.fasterxml.jackson.databind.JsonNode current = json.path("indices").path(indexName)
+                .path("primaries").path("merges").path("current");
+        if (!current.isMissingNode()) {
+            return current.asInt(0);
+        }
+        return json.path("_all").path("primaries").path("merges").path("current").asInt(0);
     }
 
-    protected String pollTaskOperation(String taskId) throws Exception {
-        Request request = new Request("GET", "/_tasks/" + taskId);
-        Response response = performRestRequest(request);
-        byte[] bodyBytes = response.getEntity() != null ? response.getEntity().getContent().readAllBytes() : new byte[0];
-        return new String(bodyBytes, java.nio.charset.StandardCharsets.UTF_8);
-    }
-
-    protected boolean isTaskComplete(String responseBody) throws Exception {
-        com.fasterxml.jackson.databind.JsonNode json = objectMapper.readTree(responseBody);
-        return json.path("completed").asBoolean(false);
-    }
-
-    /**
-     * Hook for tests to override the poll sleep interval (in milliseconds).
-     * The default is 30 seconds.
-     */
+    /** Hook for tests to override the poll sleep interval (in milliseconds). Default is 30 seconds. */
     protected long getPollIntervalMs() {
         return 30_000L;
     }
 
     @Override
-    public void forcemerge(String indexName) {
+    public void awaitIndexReady(String indexName) {
         if (!hasClient()) {
             throw new IllegalStateException("OpenSearch client not initialized");
         }
         try {
-            String taskId = forcemergeOperation(indexName);
-            logger.info("Force merge submitted for index '{}' (best-effort); task ID: {}", indexName, taskId);
+            logger.info("Waiting for background merges to settle on index '{}'...", indexName);
             long startMs = System.currentTimeMillis();
             while (true) {
-                String body = pollTaskOperation(taskId);
-                if (isTaskComplete(body)) {
+                int current = mergesCurrentOperation(indexName);
+                if (current == 0) {
                     long elapsedMin = (System.currentTimeMillis() - startMs) / 60_000;
-                    logger.info("Force merge complete for index '{}'; task {}; elapsed {}m",
-                            indexName, taskId, elapsedMin);
+                    logger.info("Merges settled for index '{}'; elapsed {}m", indexName, elapsedMin);
                     return;
                 }
                 long elapsedMin = (System.currentTimeMillis() - startMs) / 60_000;
-                logger.info("Forcemerge in progress, task {}, elapsed {}m...", taskId, elapsedMin);
+                logger.info("Merges in progress on '{}', current={}, elapsed {}m...", indexName, current, elapsedMin);
                 Thread.sleep(getPollIntervalMs());
             }
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Force merge failed on index '" + indexName + "'", e);
+            throw new RuntimeException("awaitIndexReady failed on index '" + indexName + "'", e);
         }
     }
 

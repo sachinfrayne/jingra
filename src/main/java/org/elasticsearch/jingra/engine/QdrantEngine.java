@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.QdrantGrpcClient;
+import io.qdrant.client.grpc.Collections.CollectionStatus;
 import io.qdrant.client.grpc.Collections.PayloadSchemaType;
 import io.grpc.Grpc;
 import io.grpc.ManagedChannel;
@@ -880,6 +881,54 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
         }
 
         return metadata;
+    }
+
+    /** Hook for tests to override the poll sleep interval (in milliseconds). Default is 10 seconds. */
+    protected long getPollIntervalMs() {
+        return 10_000L;
+    }
+
+    @Override
+    public void awaitIndexReady(String indexName) {
+        if (!hasClient()) {
+            return;
+        }
+        logger.info("Waiting for Qdrant optimizer to settle on collection '{}'...", indexName);
+        long startMs = System.currentTimeMillis();
+        long lastLogMs = 0;
+        while (true) {
+            try {
+                var info = client.getCollectionInfoAsync(indexName).get(grpcTimeoutSeconds, TimeUnit.SECONDS);
+                boolean green = info.getStatus() == CollectionStatus.Green;
+                boolean ok = info.getOptimizerStatus().getOk();
+                long indexed = info.hasIndexedVectorsCount() ? info.getIndexedVectorsCount() : 0;
+                long points = info.hasPointsCount() ? info.getPointsCount() : 0;
+                if (green && ok) {
+                    long elapsedMin = (System.currentTimeMillis() - startMs) / 60_000;
+                    logger.info("Qdrant optimizer settled: collection '{}' is ready (indexed={}/{}, elapsed {}m).",
+                        indexName, indexed, points, elapsedMin);
+                    return;
+                }
+                long now = System.currentTimeMillis();
+                if (now - lastLogMs > 30_000) {
+                    long elapsedMin = (now - startMs) / 60_000;
+                    logger.info("Qdrant collection '{}' status={} optimizer_ok={} indexed={}/{} elapsed {}m; still waiting...",
+                        indexName, info.getStatus(), ok, indexed, points, elapsedMin);
+                    lastLogMs = now;
+                }
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException(
+                    "Error polling Qdrant optimizer status for collection '" + indexName + "'", e);
+            }
+            try {
+                Thread.sleep(getPollIntervalMs());
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Interrupted while waiting for Qdrant optimizer on '" + indexName + "'", ie);
+            }
+        }
     }
 
     @Override
