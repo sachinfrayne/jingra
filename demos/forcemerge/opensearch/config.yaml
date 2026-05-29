@@ -1,0 +1,67 @@
+engine: opensearch
+
+opensearch:
+  url_env: OPENSEARCH_URL
+  query_dump_directory: ./output
+
+dataset: demo-vector
+
+datasets:
+  demo-vector:
+    type: vector
+    index_name: demo-vector
+    schema_name: demo-vector-schema
+    query_name: demo-vector-query
+    vector_size: 384
+    distance: cosine
+
+    path:
+      data_path: data/docs.ndjson
+      queries_path: data/queries.ndjson
+
+    data_mapping:
+      id_field: id
+      vector_field: embedding
+
+    queries_mapping:
+      query_vector_field: embedding
+      ground_truth_field: ground_truth
+
+    param_groups:
+      recall@10:
+        - { size: 10, k: 10, num_candidates: 10, oversample: 1 }
+        - { size: 10, k: 50, num_candidates: 50, oversample: 1 }
+        - { size: 10, k: 100, num_candidates: 100, oversample: 1 }
+
+load:
+  threads: 4
+  batch_size: 10
+  queue_capacity: 10
+  forcemerge: true
+
+evaluation:
+  run_id: demo-forcemerge
+  warmup_workers: 1
+  measurement_workers: 1
+  warmup_rounds: 3
+  measurement_rounds: 1
+
+output:
+  sinks:
+    - type: elasticsearch
+      config:
+        url_env: SINK_URL
+        index: jingra-results
+
+analysis:
+  run_id: demo-forcemerge
+  engines:
+    - opensearch
+  results_cluster:
+    url_env: SINK_URL
+    index: jingra-results
+  output_directory: ./output
+  generate_plots: true
+  latency_metrics:
+    - latency_median
+    - latency_avg

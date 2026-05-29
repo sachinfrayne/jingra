@@ -790,6 +790,23 @@ class BenchmarkEvaluatorTest {
     }
 
     @Test
+    void executeQuery_skipsVectorAndTextWhenBothNull() throws Exception {
+        Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
+        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, String.class, List.class, Map.class);
+        ctor.setAccessible(true);
+        Object qd = ctor.newInstance(null, null, List.of("only-gt"), null);
+        Method m = BenchmarkEvaluator.class.getDeclaredMethod(
+                "executeQuery", qdClass, DatasetConfig.class, Map.class);
+        m.setAccessible(true);
+        int before = mockEngine.queryCount;
+        m.invoke(evaluator, qd, jingraConfig.getActiveDataset(), Map.of("size", 10));
+        assertEquals(before + 1, mockEngine.queryCount);
+        QueryParams last = mockEngine.receivedParams.get(mockEngine.receivedParams.size() - 1);
+        assertNull(last.getFloatList("query_vector"));
+        assertNull(last.getString("query_text"));
+    }
+
+    @Test
     void executeQuery_skipsMetaConditionsWhenNull() throws Exception {
         Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
         Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, String.class, List.class, Map.class);

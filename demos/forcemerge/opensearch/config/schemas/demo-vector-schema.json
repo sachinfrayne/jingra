@@ -1,0 +1,28 @@
+{
+  "mappings": {
+    "properties": {
+      "id": {
+        "type": "keyword"
+      },
+      "embedding": {
+        "type": "knn_vector",
+        "dimension": 384,
+        "space_type": "cosinesimil",
+        "data_type": "float",
+        "method": {
+          "name": "hnsw",
+          "engine": "lucene",
+          "parameters": {
+            "m": 16,
+            "ef_construction": 100
+          }
+        }
+      }
+    }
+  },
+  "settings": {
+    "index.knn": true,
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  }
+}

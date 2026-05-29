@@ -12,7 +12,9 @@ import io.qdrant.client.QdrantClient;
 import io.qdrant.client.QdrantGrpcClient;
 import io.qdrant.client.grpc.Collections.CollectionInfo;
 import io.qdrant.client.grpc.Collections.CollectionOperationResponse;
+import io.qdrant.client.grpc.Collections.CollectionStatus;
 import io.qdrant.client.grpc.Collections.CreateCollection;
+import io.qdrant.client.grpc.Collections.OptimizerStatus;
 import io.qdrant.client.grpc.QdrantOuterClass.HealthCheckReply;
 import io.qdrant.client.grpc.Common.Filter;
 import io.qdrant.client.grpc.Common.Match;
@@ -1740,6 +1742,139 @@ class QdrantEngineBehaviorTest {
         injectClient(e, mockClient);
 
         assertTrue(e.createIndex("col-direct-hnsw", "test-direct-hnsw"));
+    }
+
+    // --- awaitIndexReady ---
+
+    @Test
+    void awaitIndexReadyDoesNothingWhenNoClient() {
+        QdrantEngine e = new QdrantEngine(new HashMap<>());
+        assertDoesNotThrow(() -> e.awaitIndexReady("col"));
+    }
+
+    @Test
+    void awaitIndexReadyReturnsImmediatelyWhenAlreadyGreen() throws Exception {
+        QdrantEngine e = new QdrantEngine(new HashMap<>()) {
+            @Override protected long getPollIntervalMs() { return 0L; }
+        };
+        QdrantClient mockClient = mock(QdrantClient.class);
+        CollectionInfo greenInfo = CollectionInfo.newBuilder()
+                .setStatus(CollectionStatus.Green)
+                .setOptimizerStatus(OptimizerStatus.newBuilder().setOk(true).build())
+                .setIndexedVectorsCount(42)
+                .setPointsCount(100)
+                .build();
+        when(mockClient.getCollectionInfoAsync(eq("col"))).thenReturn(Futures.immediateFuture(greenInfo));
+        injectClient(e, mockClient);
+
+        assertDoesNotThrow(() -> e.awaitIndexReady("col"));
+        verify(mockClient, times(1)).getCollectionInfoAsync("col");
+    }
+
+    @Test
+    void awaitIndexReadyPollsUntilGreen() throws Exception {
+        QdrantEngine e = new QdrantEngine(new HashMap<>()) {
+            @Override protected long getPollIntervalMs() { return 0L; }
+        };
+        QdrantClient mockClient = mock(QdrantClient.class);
+        CollectionInfo notGreen = CollectionInfo.newBuilder()
+                .setStatus(CollectionStatus.Grey)
+                .setOptimizerStatus(OptimizerStatus.newBuilder().setOk(true).build())
+                .build();
+        CollectionInfo greenInfo = CollectionInfo.newBuilder()
+                .setStatus(CollectionStatus.Green)
+                .setOptimizerStatus(OptimizerStatus.newBuilder().setOk(true).build())
+                .build();
+        when(mockClient.getCollectionInfoAsync(eq("col")))
+                .thenReturn(Futures.immediateFuture(notGreen))
+                .thenReturn(Futures.immediateFuture(notGreen))
+                .thenReturn(Futures.immediateFuture(greenInfo));
+        injectClient(e, mockClient);
+
+        assertDoesNotThrow(() -> e.awaitIndexReady("col"));
+        verify(mockClient, times(3)).getCollectionInfoAsync("col");
+    }
+
+    @Test
+    void awaitIndexReadyRethrowsUncheckedRuntimeException() throws Exception {
+        QdrantEngine e = new QdrantEngine(new HashMap<>()) {
+            @Override protected long getPollIntervalMs() { return 0L; }
+        };
+        QdrantClient mockClient = mock(QdrantClient.class);
+        when(mockClient.getCollectionInfoAsync(eq("col")))
+                .thenThrow(new RuntimeException("grpc unavailable"));
+        injectClient(e, mockClient);
+
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> e.awaitIndexReady("col"));
+        assertEquals("grpc unavailable", ex.getMessage());
+        assertNull(ex.getCause());
+    }
+
+    @Test
+    void awaitIndexReadyWrapsCheckedExceptionAsRuntimeException() throws Exception {
+        QdrantEngine e = new QdrantEngine(new HashMap<>()) {
+            @Override protected long getPollIntervalMs() { return 0L; }
+        };
+        QdrantClient mockClient = mock(QdrantClient.class);
+        when(mockClient.getCollectionInfoAsync(anyString()))
+                .thenReturn(Futures.immediateFailedFuture(new Exception("rpc error")));
+        injectClient(e, mockClient);
+
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> e.awaitIndexReady("col"));
+        assertTrue(ex.getMessage().contains("Error polling"));
+    }
+
+    @Test
+    void awaitIndexReadyPollsWhenGreenButOptimizerNotOk() throws Exception {
+        QdrantEngine e = new QdrantEngine(new HashMap<>()) {
+            @Override protected long getPollIntervalMs() { return 0L; }
+        };
+        QdrantClient mockClient = mock(QdrantClient.class);
+        CollectionInfo greenOptimizerBusy = CollectionInfo.newBuilder()
+                .setStatus(CollectionStatus.Green)
+                .setOptimizerStatus(OptimizerStatus.newBuilder().setOk(false).build())
+                .build();
+        CollectionInfo greenReady = CollectionInfo.newBuilder()
+                .setStatus(CollectionStatus.Green)
+                .setOptimizerStatus(OptimizerStatus.newBuilder().setOk(true).build())
+                .build();
+        when(mockClient.getCollectionInfoAsync(eq("col")))
+                .thenReturn(Futures.immediateFuture(greenOptimizerBusy))
+                .thenReturn(Futures.immediateFuture(greenReady));
+        injectClient(e, mockClient);
+
+        assertDoesNotThrow(() -> e.awaitIndexReady("col"));
+        verify(mockClient, times(2)).getCollectionInfoAsync("col");
+    }
+
+    @Test
+    void awaitIndexReadyInterruptedDuringSleep() throws Exception {
+        QdrantEngine e = new QdrantEngine(new HashMap<>()) {
+            @Override protected long getPollIntervalMs() {
+                Thread.currentThread().interrupt();
+                return 1L;
+            }
+        };
+        QdrantClient mockClient = mock(QdrantClient.class);
+        CollectionInfo notReady = CollectionInfo.newBuilder()
+                .setStatus(CollectionStatus.Grey)
+                .setOptimizerStatus(OptimizerStatus.newBuilder().setOk(true).build())
+                .build();
+        when(mockClient.getCollectionInfoAsync(eq("col"))).thenReturn(Futures.immediateFuture(notReady));
+        injectClient(e, mockClient);
+
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> e.awaitIndexReady("col"));
+        assertTrue(ex.getMessage().contains("Interrupted"));
+        assertInstanceOf(InterruptedException.class, ex.getCause());
+        assertTrue(Thread.interrupted(), "interrupt flag should be restored");
+    }
+
+    @Test
+    void getPollIntervalMsDefaultsTenSeconds() throws Exception {
+        QdrantEngine e = new QdrantEngine(new HashMap<>());
+        Method m = QdrantEngine.class.getDeclaredMethod("getPollIntervalMs");
+        m.setAccessible(true);
+        assertEquals(10_000L, m.invoke(e));
     }
 
 }

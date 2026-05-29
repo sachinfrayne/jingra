@@ -24,8 +24,11 @@ import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
 import org.junit.jupiter.api.Test;
 
+import co.elastic.clients.transport.rest5_client.low_level.Response;
+
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -33,9 +36,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -774,6 +779,137 @@ class ElasticsearchEngineBehaviorTest {
         BulkResponse r = e.bulkIndexMaps("target-idx", List.of());
         assertFalse(r.errors());
         assertTrue(r.items().isEmpty());
+    }
+
+    @Test
+    void awaitIndexReadyThrowsIllegalStateWhenNoClient() {
+        ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+        assertThrows(IllegalStateException.class, () -> e.awaitIndexReady("my-index"));
+    }
+
+    @Test
+    void awaitIndexReadyReturnsImmediatelyWhenCurrentIsZero() throws Exception {
+        AtomicReference<String> capturedIndex = new AtomicReference<>();
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected int mergesCurrentOperation(String indexName) {
+                capturedIndex.set(indexName);
+                return 0;
+            }
+            @Override protected long getPollIntervalMs() { return 0L; }
+        };
+        e.awaitIndexReady("my-index");
+        assertEquals("my-index", capturedIndex.get());
+    }
+
+    @Test
+    void awaitIndexReadyPollsUntilCurrentIsZero() throws Exception {
+        AtomicInteger callCount = new AtomicInteger();
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected int mergesCurrentOperation(String indexName) {
+                return callCount.incrementAndGet() <= 2 ? 3 : 0;
+            }
+            @Override protected long getPollIntervalMs() { return 0L; }
+        };
+        e.awaitIndexReady("idx");
+        assertEquals(3, callCount.get(), "Expected 2 non-zero polls then 1 zero");
+    }
+
+    @Test
+    void awaitIndexReadyWrapsExceptionsAsRuntimeException() {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected int mergesCurrentOperation(String indexName) throws Exception {
+                throw new IOException("stats failed");
+            }
+            @Override protected long getPollIntervalMs() { return 0L; }
+        };
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> e.awaitIndexReady("idx"));
+        assertInstanceOf(IOException.class, ex.getCause());
+        assertTrue(ex.getMessage().contains("awaitIndexReady failed"));
+    }
+
+    @Test
+    void awaitIndexReadyRethrowsUncheckedRuntimeException() {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected int mergesCurrentOperation(String indexName) {
+                throw new RuntimeException("merge stats unavailable");
+            }
+
+            @Override
+            protected long getPollIntervalMs() {
+                return 0L;
+            }
+        };
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> e.awaitIndexReady("idx"));
+        assertEquals("merge stats unavailable", ex.getMessage());
+        assertNull(ex.getCause());
+    }
+
+    @Test
+    void getPollIntervalMsDefaultsThirtySeconds() throws Exception {
+        Method m = ElasticsearchEngine.class.getDeclaredMethod("getPollIntervalMs");
+        m.setAccessible(true);
+        assertEquals(30_000L, m.invoke(new ElasticsearchEngine(new HashMap<>())));
+    }
+
+    @Test
+    void awaitIndexReady_pollsMergeStatsViaRestClient() throws Exception {
+        AtomicInteger statsCalls = new AtomicInteger();
+        com.sun.net.httpserver.HttpServer fakeEs =
+                com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+        fakeEs.createContext("/", exchange -> {
+            try {
+                String path = exchange.getRequestURI().getPath();
+                byte[] out;
+                if ("GET".equals(exchange.getRequestMethod()) && path.contains("/_stats/merges")) {
+                    int n = statsCalls.incrementAndGet();
+                    String body = n >= 2
+                            ? "{\"indices\":{\"idx\":{\"primaries\":{\"merges\":{\"current\":0}}}}}"
+                            : "{\"indices\":{\"idx\":{\"primaries\":{\"merges\":{\"current\":2}}}}}";
+                    out = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                } else {
+                    exchange.sendResponseHeaders(404, -1);
+                    return;
+                }
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, out.length);
+                exchange.getResponseBody().write(out);
+            } finally {
+                exchange.close();
+            }
+        });
+        fakeEs.start();
+        int port = fakeEs.getAddress().getPort();
+        Rest5Client rc = Rest5Client.builder(new HttpHost("http", "127.0.0.1", port)).build();
+        try {
+            ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+                @Override protected long getPollIntervalMs() { return 0L; }
+            };
+            injectRestClient(e, rc);
+            assertDoesNotThrow(() -> e.awaitIndexReady("idx"));
+            assertEquals(2, statsCalls.get());
+        } finally {
+            rc.close();
+            fakeEs.stop(0);
+        }
+    }
+
+    @Test
+    void mergesCurrentOperation_returnsZeroOnNullBody() throws Exception {
+        Rest5Client mockRest = mock(Rest5Client.class);
+        Response mockResp = mock(Response.class);
+        when(mockResp.getEntity()).thenReturn(null);
+        when(mockRest.performRequest(any())).thenReturn(mockResp);
+
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {};
+        injectRestClient(e, mockRest);
+
+        Method m = ElasticsearchEngine.class.getDeclaredMethod("mergesCurrentOperation", String.class);
+        m.setAccessible(true);
+        assertEquals(0, m.invoke(e, "idx"));
     }
 
     @Test

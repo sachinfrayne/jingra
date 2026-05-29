@@ -16,6 +16,9 @@ public class LoadConfig {
     @JsonProperty("queue_capacity")
     private Integer queueCapacity;
 
+    @JsonProperty("await_index_ready")
+    private boolean awaitIndexReady = false;
+
     public Integer getBatchSize() {
         return batchSize;
     }
@@ -50,5 +53,13 @@ public class LoadConfig {
 
     public int queueCapacityOrDefault() {
         return queueCapacity != null && queueCapacity > 0 ? queueCapacity : 20;
+    }
+
+    public boolean isAwaitIndexReady() {
+        return awaitIndexReady;
+    }
+
+    public void setAwaitIndexReady(boolean awaitIndexReady) {
+        this.awaitIndexReady = awaitIndexReady;
     }
 }

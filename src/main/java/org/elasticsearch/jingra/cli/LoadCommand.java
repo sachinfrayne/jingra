@@ -261,15 +261,22 @@ public final class LoadCommand {
                         "Data loading completed with " + ingestBatchFailures.get() + " failed ingest batch(es); refusing to report success");
             }
 
-            long endTime = System.currentTimeMillis();
-            double totalTimeSec = (endTime - startTime) / 1000.0;
             int finalCount = totalIngested.get();
-            double avgRate = finalCount / totalTimeSec;
 
             if (finalCount != rowCount) {
                 throw new IllegalStateException(
                         String.format("Ingested %d documents but parquet row count is %d (incomplete load)", finalCount, rowCount));
             }
+
+            if (config.getLoad() != null && config.getLoad().isAwaitIndexReady()) {
+                logger.info("Waiting for index '{}' to be ready (background merges/optimisation to settle)...", indexName);
+                engine.awaitIndexReady(indexName);
+                logger.info("Index ready; load command complete.");
+            }
+
+            long endTime = System.currentTimeMillis();
+            double totalTimeSec = (endTime - startTime) / 1000.0;
+            double avgRate = finalCount / totalTimeSec;
 
             logger.info("=".repeat(80));
             logger.info("Data loading complete!");

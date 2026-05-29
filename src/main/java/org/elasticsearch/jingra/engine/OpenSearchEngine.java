@@ -91,6 +91,51 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
         return restClient.performRequest(request);
     }
 
+    protected int mergesCurrentOperation(String indexName) throws Exception {
+        Request request = new Request("GET", "/" + indexName + "/_stats/merge");
+        Response response = performRestRequest(request);
+        byte[] bodyBytes = response.getEntity() != null ? response.getEntity().getContent().readAllBytes() : new byte[0];
+        String bodyStr = new String(bodyBytes, java.nio.charset.StandardCharsets.UTF_8);
+        com.fasterxml.jackson.databind.JsonNode json = objectMapper.readTree(bodyStr);
+        com.fasterxml.jackson.databind.JsonNode current = json.path("indices").path(indexName)
+                .path("primaries").path("merges").path("current");
+        if (!current.isMissingNode()) {
+            return current.asInt(0);
+        }
+        return json.path("_all").path("primaries").path("merges").path("current").asInt(0);
+    }
+
+    /** Hook for tests to override the poll sleep interval (in milliseconds). Default is 30 seconds. */
+    protected long getPollIntervalMs() {
+        return 30_000L;
+    }
+
+    @Override
+    public void awaitIndexReady(String indexName) {
+        if (!hasClient()) {
+            throw new IllegalStateException("OpenSearch client not initialized");
+        }
+        try {
+            logger.info("Waiting for background merges to settle on index '{}'...", indexName);
+            long startMs = System.currentTimeMillis();
+            while (true) {
+                int current = mergesCurrentOperation(indexName);
+                if (current == 0) {
+                    long elapsedMin = (System.currentTimeMillis() - startMs) / 60_000;
+                    logger.info("Merges settled for index '{}'; elapsed {}m", indexName, elapsedMin);
+                    return;
+                }
+                long elapsedMin = (System.currentTimeMillis() - startMs) / 60_000;
+                logger.info("Merges in progress on '{}', current={}, elapsed {}m...", indexName, current, elapsedMin);
+                Thread.sleep(getPollIntervalMs());
+            }
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("awaitIndexReady failed on index '" + indexName + "'", e);
+        }
+    }
+
     /**
      * Trust strategy used when {@link TlsSettings#insecureTlsEnabled()} is true for HTTPS OpenSearch URLs.
      * Package-private for tests.

@@ -111,4 +111,14 @@ public interface BenchmarkEngine extends AutoCloseable {
      * @return schema template as Map with mappings and settings, or null if not found
      */
     Map<String, Object> getSchemaTemplate(String schemaName);
+
+    /**
+     * Wait until the index is ready for querying (all background optimisation / merges have settled).
+     * Engines that do not need to wait can rely on this default no-op implementation.
+     *
+     * @param indexName the index to wait on
+     */
+    default void awaitIndexReady(String indexName) {
+        // no-op by default — only implemented by engines that need to wait for background work
+    }
 }

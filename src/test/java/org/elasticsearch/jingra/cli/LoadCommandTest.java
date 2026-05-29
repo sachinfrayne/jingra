@@ -6,8 +6,10 @@ import org.elasticsearch.jingra.config.LoadConfig;
 import org.elasticsearch.jingra.data.DatasetReader;
 import org.elasticsearch.jingra.data.ParquetReader;
 import org.elasticsearch.jingra.model.Document;
+import org.elasticsearch.jingra.engine.ElasticsearchEngine;
 import org.elasticsearch.jingra.engine.EngineFactory;
 import org.elasticsearch.jingra.testing.MockBenchmarkEngine;
+import org.elasticsearch.jingra.engine.BenchmarkEngine;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -20,6 +22,7 @@ import java.util.Map;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -442,6 +445,141 @@ class LoadCommandTest {
             }
         };
         LoadCommand.waitUntilIndexAbsent(engine, "idx");
+    }
+
+    @Test
+    void run_awaitIndexReadyTrue_callsAwaitIndexReadyOnElasticsearchEngine() throws Exception {
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(2, oneBatchOf(2));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        LoadConfig load = new LoadConfig();
+        load.setAwaitIndexReady(true);
+        config.setLoad(load);
+
+        AtomicBoolean awaitCalled = new AtomicBoolean(false);
+        ElasticsearchEngine esEngine = new ElasticsearchEngine(new HashMap<>()) {
+            @Override
+            protected boolean hasClient() {
+                return true;
+            }
+
+            @Override
+            public boolean connect() {
+                return true;
+            }
+
+            @Override
+            public boolean indexExists(String indexName) {
+                return false;
+            }
+
+            @Override
+            public boolean createIndex(String indexName, String schemaName) {
+                return true;
+            }
+
+            @Override
+            public int ingest(List<Document> documents, String indexName, String idField) {
+                return documents.size();
+            }
+
+            @Override
+            public long getDocumentCount(String indexName) {
+                return 2;
+            }
+
+            @Override
+            protected int mergesCurrentOperation(String indexName) {
+                awaitCalled.set(true);
+                return 0;
+            }
+
+            @Override
+            protected long getPollIntervalMs() { return 0L; }
+        };
+
+        LoadCommand.run(config, c -> esEngine);
+        assertTrue(awaitCalled.get(), "awaitIndexReady should be called when await_index_ready: true");
+    }
+
+    @Test
+    void run_awaitIndexReadyFalse_skipsAwaitIndexReady() throws Exception {
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(2, oneBatchOf(2));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        // await_index_ready defaults to false — no LoadConfig set, so getLoad() returns null
+
+        AtomicBoolean awaitCalled = new AtomicBoolean(false);
+        ElasticsearchEngine esEngine = new ElasticsearchEngine(new HashMap<>()) {
+            @Override
+            protected boolean hasClient() {
+                return true;
+            }
+
+            @Override
+            public boolean connect() {
+                return true;
+            }
+
+            @Override
+            public boolean indexExists(String indexName) {
+                return false;
+            }
+
+            @Override
+            public boolean createIndex(String indexName, String schemaName) {
+                return true;
+            }
+
+            @Override
+            public int ingest(List<Document> documents, String indexName, String idField) {
+                return documents.size();
+            }
+
+            @Override
+            public long getDocumentCount(String indexName) {
+                return 2;
+            }
+
+            @Override
+            protected int mergesCurrentOperation(String indexName) {
+                awaitCalled.set(true);
+                return 0;
+            }
+
+            @Override
+            protected long getPollIntervalMs() { return 0L; }
+        };
+
+        LoadCommand.run(config, c -> esEngine);
+        assertFalse(awaitCalled.get(), "awaitIndexReady should not be called when await_index_ready is false");
+    }
+
+    @Test
+    void run_awaitIndexReadyTrue_nonEsEngineUsesNoOpDefault() throws Exception {
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(2, oneBatchOf(2));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        LoadConfig load = new LoadConfig();
+        load.setAwaitIndexReady(true);
+        config.setLoad(load);
+
+        AtomicBoolean awaitCalledOnMock = new AtomicBoolean(false);
+        // Override the default no-op to detect if it is invoked; the no-op itself does nothing
+        BenchmarkEngine mockEngine = new MockBenchmarkEngine() {
+            @Override
+            public boolean indexExists(String indexName) {
+                return false;
+            }
+
+            @Override
+            public void awaitIndexReady(String indexName) {
+                awaitCalledOnMock.set(true);
+                // no-op (mirrors the interface default)
+            }
+        };
+
+        // Should complete without error; awaitIndexReady dispatches through the interface (no-op)
+        LoadCommand.run(config, c -> mockEngine);
+        assertTrue(awaitCalledOnMock.get(),
+                "awaitIndexReady() should be called on every engine via the interface; non-ES engines use the no-op default");
     }
 
     @Test

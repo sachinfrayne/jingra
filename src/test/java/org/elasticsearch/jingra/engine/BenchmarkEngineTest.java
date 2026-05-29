@@ -9,15 +9,14 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 
 class BenchmarkEngineTest {
 
     /**
-     * Minimal stub: default {@link BenchmarkEngine#getLastQueryJson()} and
-     * {@link BenchmarkEngine#getLastIndexName()} are not overridden so JaCoCo records
-     * the interface default method bodies.
+     * Minimal stub: does not override {@link BenchmarkEngine#awaitIndexReady(String)} so the
+     * interface default no-op runs (JaCoCo records default method bytecode on {@link BenchmarkEngine}).
      */
     private static final class StubEngine implements BenchmarkEngine {
         @Override
@@ -89,5 +88,12 @@ class BenchmarkEngineTest {
     @Test
     void stubIsUsableAsBenchmarkEngine() {
         assertInstanceOf(BenchmarkEngine.class, new StubEngine());
+    }
+
+    @Test
+    void defaultAwaitIndexReadyIsNoOp() throws Exception {
+        try (BenchmarkEngine engine = new StubEngine()) {
+            assertDoesNotThrow(() -> engine.awaitIndexReady("index-a"));
+        }
     }
 }

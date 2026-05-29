@@ -17,3 +17,7 @@ alwaysApply: true
 * **No fixed sleeps:** Do not use `Thread.sleep` or fixed delays for coordination, retries, backpressure, or waiting for readiness.
 * **Use proper concurrency tools instead:** Prefer `ExecutorService`, `CompletableFuture`, `awaitTermination`, `CountDownLatch`, `Phaser`, bounded blocking queues, or polling with a timeout.
 * **For async or eventual tests:** Use Awaitility or a similar tool. Do not use sleeps.
+
+# TOOLING
+
+This project is developed using [Cursor](https://cursor.com) and [Claude Code](https://claude.ai/code) as AI-assisted development tools.
