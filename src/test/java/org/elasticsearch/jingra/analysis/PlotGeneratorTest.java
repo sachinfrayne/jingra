@@ -617,6 +617,33 @@ class PlotGeneratorTest {
     }
 
     @Test
+    void generateLatencyBarChart_rotatesXAxisLabelsForReadability() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString());
+
+        // Long param keys that overlap at horizontal rotation
+        Map<String, List<BenchmarkResult>> resultsByEngine = new HashMap<>();
+        List<BenchmarkResult> results = new ArrayList<>();
+        for (String q : List.of("cpu", "memory", "disk", "network", "load")) {
+            BenchmarkResult r = new BenchmarkResult("run", "elasticsearch", "9.4", "metrics", "ds",
+                    "query_name=demo-metrics-" + q + "_size=10", Map.of());
+            r.addMetric("latency_median", 5.0);
+            r.addMetric("latency_avg", 6.0);
+            r.addMetric("throughput", 100.0);
+            results.add(r);
+        }
+        resultsByEngine.put("elasticsearch", results);
+
+        generator.generateLatencyBarChart(resultsByEngine, "latency@10",
+                List.of("latency_median", "latency_avg"));
+
+        org.knowm.xchart.CategoryChart probe = new org.knowm.xchart.CategoryChartBuilder()
+                .width(800).height(500).build();
+        generator.customizeLatencyBarChart(probe);
+        assertNotEquals(0, probe.getStyler().getXAxisLabelRotation(),
+                "latency bar chart x-axis labels must be rotated to avoid overlap on long param keys");
+    }
+
+    @Test
     void generateLatencyBarChart_createsFileForMultipleEngines() throws IOException {
         PlotGenerator generator = new PlotGenerator(tempDir.toString());
 

@@ -341,7 +341,7 @@ public class PlotGenerator {
                     .xAxisTitle("Configuration")
                     .yAxisTitle(formatAxisLabel(latencyMetric))
                     .build();
-            customizeCategoryChart(chart);
+            customizeLatencyBarChart(chart);
 
             for (Map.Entry<String, List<BenchmarkResult>> entry : resultsByEngine.entrySet()) {
                 String engine = entry.getKey();
@@ -404,6 +404,13 @@ public class PlotGenerator {
         styler.setLegendPosition(Styler.LegendPosition.InsideNE);
         styler.setChartBackgroundColor(Color.WHITE);
         styler.setPlotBackgroundColor(Color.WHITE);
+    }
+
+    // Latency bar charts use ParamKey labels (e.g. "query_name=demo-metrics-cpu_size=10") that overlap
+    // horizontally; rotate so each label stays readable.
+    void customizeLatencyBarChart(CategoryChart chart) {
+        customizeCategoryChart(chart);
+        chart.getStyler().setXAxisLabelRotation(45);
     }
 
     /**

@@ -497,15 +497,19 @@ class CsvExporterTest {
     @Test
     void exportAllResults_recallRoundedColumnIsNaWhenRecallMissing() throws IOException {
         CsvExporter exporter = new CsvExporter(tempDir.toString());
-        org.elasticsearch.jingra.model.BenchmarkResult r = new org.elasticsearch.jingra.model.BenchmarkResult(
+        // Mixed set: one row with recall keeps the column present; row without recall must render N/A.
+        org.elasticsearch.jingra.model.BenchmarkResult withRecall = bench("elasticsearch", "k=a", 0.9, 4.0, 250.0);
+        org.elasticsearch.jingra.model.BenchmarkResult missingRecall = new org.elasticsearch.jingra.model.BenchmarkResult(
                 "run", "elasticsearch", "1.0", "vector_search", "ds", "k=1", Map.of());
-        r.addMetric("server_latency_median", 5.0);
-        r.addMetric("throughput", 100.0);
+        missingRecall.addMetric("server_latency_median", 5.0);
+        missingRecall.addMetric("throughput", 100.0);
 
         exporter.exportAllResults(
-                List.of(r), "recall@100", List.of("server_latency_median"), "elasticsearch", "out.csv");
+                List.of(withRecall, missingRecall), "recall@100", List.of("server_latency_median"), "elasticsearch", "out.csv");
 
-        assertTrue(Files.readString(tempDir.resolve("out.csv")).contains("N/A"));
+        List<String> lines = Files.readAllLines(tempDir.resolve("out.csv"));
+        String missingRow = lines.stream().filter(l -> l.contains("k=1")).findFirst().orElseThrow();
+        assertTrue(missingRow.contains("N/A"), "row without recall must render N/A: " + missingRow);
     }
 
     @Test
@@ -1058,6 +1062,46 @@ class CsvExporterTest {
         assertTrue(content.contains("qdrant"));
         assertTrue(content.contains("0.9747"));
         assertTrue(content.contains("0.9299"));
+    }
+
+    @Test
+    void exportAllResults_omitsRecallColumns_whenNoResultHasRecall() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult a = benchWithoutRecall("elasticsearch", "query_name=cpu_size=10", 10.5, 80.0);
+        org.elasticsearch.jingra.model.BenchmarkResult b = benchWithoutRecall("elasticsearch", "query_name=disk_size=10", 3.1, 200.0);
+
+        exporter.exportAllResults(List.of(a, b), "latency@10",
+                List.of("server_latency_median"), "elasticsearch", "metrics.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("metrics.csv"));
+        List<String> columns = List.of(lines.get(0).split(","));
+        assertFalse(columns.contains("Recall"), "must drop Recall column when no row has recall: " + columns);
+        assertFalse(columns.contains("Recall Rounded"), "must drop Recall Rounded column when no row has recall: " + columns);
+        assertFalse(columns.contains("Speedup"), "must drop Speedup column when no row has recall: " + columns);
+        // Sanity: latency + throughput columns still present
+        assertTrue(columns.contains("Server_Latency_Median"));
+        assertTrue(columns.contains("Throughput"));
+        // RecallAtN + Engine + ParamKey + 1 latency + Throughput = 5
+        assertEquals(5, columns.size(), "column count must drop the 3 recall-related columns: " + columns);
+
+        // Data rows must mirror the header column count exactly
+        for (int i = 1; i < lines.size(); i++) {
+            assertEquals(5, lines.get(i).split(",").length, "data row column count must match header: " + lines.get(i));
+        }
+    }
+
+    @Test
+    void exportAllResults_keepsRecallColumns_whenAtLeastOneResultHasRecall() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString());
+        org.elasticsearch.jingra.model.BenchmarkResult withRecall = bench("elasticsearch", "k=a", 0.92, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult noRecall = benchWithoutRecall("elasticsearch", "k=b", 11.0, 60.0);
+
+        exporter.exportAllResults(List.of(withRecall, noRecall), "recall@100",
+                List.of("server_latency_median"), "elasticsearch", "mixed.csv");
+
+        String header = Files.readAllLines(tempDir.resolve("mixed.csv")).get(0);
+        assertTrue(header.contains("Recall"), "Recall column must remain when any row has recall: " + header);
+        assertTrue(header.contains("Speedup"));
     }
 
     private static org.elasticsearch.jingra.model.BenchmarkResult bench(

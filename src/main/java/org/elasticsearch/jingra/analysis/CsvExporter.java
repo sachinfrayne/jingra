@@ -64,7 +64,7 @@ public class CsvExporter {
         Map<String, Map<String, BenchmarkResult>> index = buildSpeedupIndex(sorted);
         java.util.IdentityHashMap<BenchmarkResult, String> speedupValues =
                 buildSpeedupValues(buildMatchedPairs(index));
-        writeFullResultsFile(sorted, recallAtN, latencyMetrics, index, speedupValues, filename);
+        writeFullResultsFile(sorted, recallAtN, latencyMetrics, index, speedupValues, filename, hasAnyRecall(sorted));
     }
 
     /**
@@ -94,7 +94,7 @@ public class CsvExporter {
         Map<String, Map<String, BenchmarkResult>> index = buildSpeedupIndex(sorted);
         List<List<BenchmarkResult>> pairs = buildMatchedPairs(index);
         java.util.IdentityHashMap<BenchmarkResult, String> speedupValues = buildSpeedupValues(pairs);
-        writeSummaryFile(sorted, recallAtN, latencyMetrics, pairs, speedupValues, filename);
+        writeSummaryFile(sorted, recallAtN, latencyMetrics, pairs, speedupValues, filename, hasAnyRecall(sorted));
     }
 
     /**
@@ -113,8 +113,13 @@ public class CsvExporter {
         Map<String, Map<String, BenchmarkResult>> index = buildSpeedupIndex(sorted);
         List<List<BenchmarkResult>> pairs = buildMatchedPairs(index);
         java.util.IdentityHashMap<BenchmarkResult, String> speedupValues = buildSpeedupValues(pairs);
-        writeFullResultsFile(sorted, recallAtN, latencyMetrics, index, speedupValues, fullResultsFilename);
-        writeSummaryFile(sorted, recallAtN, latencyMetrics, pairs, speedupValues, summaryFilename);
+        boolean includeRecall = hasAnyRecall(sorted);
+        writeFullResultsFile(sorted, recallAtN, latencyMetrics, index, speedupValues, fullResultsFilename, includeRecall);
+        writeSummaryFile(sorted, recallAtN, latencyMetrics, pairs, speedupValues, summaryFilename, includeRecall);
+    }
+
+    private boolean hasAnyRecall(List<BenchmarkResult> results) {
+        return results.stream().anyMatch(r -> r.getMetricAsDouble("recall") != null);
     }
 
     /**
@@ -226,18 +231,22 @@ public class CsvExporter {
         return s;
     }
 
-    private List<String> buildHeaders(List<String> latencyMetrics) {
+    private List<String> buildHeaders(List<String> latencyMetrics, boolean includeRecall) {
         List<String> headers = new java.util.ArrayList<>();
         headers.add("RecallAtN");
         headers.add("Engine");
         headers.add("ParamKey");
-        headers.add("Recall");
-        headers.add("Recall Rounded");
+        if (includeRecall) {
+            headers.add("Recall");
+            headers.add("Recall Rounded");
+        }
         for (String metric : latencyMetrics) {
             headers.add(formatColumnName(metric));
         }
         headers.add("Throughput");
-        headers.add("Speedup");
+        if (includeRecall) {
+            headers.add("Speedup");
+        }
         return headers;
     }
 
@@ -247,12 +256,13 @@ public class CsvExporter {
             List<String> latencyMetrics,
             Map<String, Map<String, BenchmarkResult>> index,
             java.util.IdentityHashMap<BenchmarkResult, String> speedupValues,
-            String filename
+            String filename,
+            boolean includeRecall
     ) throws IOException {
         Path outputPath = Paths.get(outputDirectory, filename);
         try (FileWriter writer = new FileWriter(outputPath.toFile());
              CSVPrinter printer = new CSVPrinter(writer, CSVFormat.DEFAULT.builder()
-                     .setHeader(buildHeaders(latencyMetrics).toArray(new String[0]))
+                     .setHeader(buildHeaders(latencyMetrics, includeRecall).toArray(new String[0]))
                      .build())) {
 
             for (BenchmarkResult result : sorted) {
@@ -263,21 +273,25 @@ public class CsvExporter {
                 record.add(recallAtN);
                 record.add(result.getEngine());
                 record.add(result.getParamKey());
-                record.add(formatNullableDouble(recall));
-                record.add(recallRounded);
+                if (includeRecall) {
+                    record.add(formatNullableDouble(recall));
+                    record.add(recallRounded);
+                }
 
                 for (String metric : latencyMetrics) {
                     record.add(formatNullableDouble(extractLatencyWithFallback(result, metric)));
                 }
                 record.add(formatNullableDouble(extractThroughput(result, latencyMetrics.get(0))));
 
-                BenchmarkResult indexed = index
-                        .getOrDefault(recallRounded, java.util.Map.of())
-                        .get(result.getEngine());
-                String speedup = (indexed != null && result.getParamKey().equals(indexed.getParamKey()))
-                        ? speedupValues.getOrDefault(indexed, "")
-                        : "";
-                record.add(speedup);
+                if (includeRecall) {
+                    BenchmarkResult indexed = index
+                            .getOrDefault(recallRounded, java.util.Map.of())
+                            .get(result.getEngine());
+                    String speedup = (indexed != null && result.getParamKey().equals(indexed.getParamKey()))
+                            ? speedupValues.getOrDefault(indexed, "")
+                            : "";
+                    record.add(speedup);
+                }
 
                 printer.printRecord(record);
             }
@@ -290,7 +304,8 @@ public class CsvExporter {
             List<String> latencyMetrics,
             List<List<BenchmarkResult>> pairs,
             java.util.IdentityHashMap<BenchmarkResult, String> speedupValues,
-            String filename
+            String filename,
+            boolean includeRecall
     ) throws IOException {
         java.util.IdentityHashMap<BenchmarkResult, Boolean> inPair = new java.util.IdentityHashMap<>();
         for (List<BenchmarkResult> pair : pairs) {
@@ -300,7 +315,7 @@ public class CsvExporter {
         Path outputPath = Paths.get(outputDirectory, filename);
         try (FileWriter writer = new FileWriter(outputPath.toFile());
              CSVPrinter printer = new CSVPrinter(writer, CSVFormat.DEFAULT.builder()
-                     .setHeader(buildHeaders(latencyMetrics).toArray(new String[0]))
+                     .setHeader(buildHeaders(latencyMetrics, includeRecall).toArray(new String[0]))
                      .build())) {
 
             for (BenchmarkResult result : sorted) {
@@ -313,14 +328,18 @@ public class CsvExporter {
                 record.add(recallAtN);
                 record.add(result.getEngine());
                 record.add(result.getParamKey());
-                record.add(formatNullableDouble(recall));
-                record.add(recallRounded);
+                if (includeRecall) {
+                    record.add(formatNullableDouble(recall));
+                    record.add(recallRounded);
+                }
 
                 for (String metric : latencyMetrics) {
                     record.add(formatNullableDouble(extractLatencyWithFallback(result, metric)));
                 }
                 record.add(formatNullableDouble(extractThroughput(result, latencyMetrics.get(0))));
-                record.add(speedupValues.getOrDefault(result, ""));
+                if (includeRecall) {
+                    record.add(speedupValues.getOrDefault(result, ""));
+                }
 
                 printer.printRecord(record);
             }
