@@ -328,18 +328,14 @@ public class CsvExporter {
                 record.add(recallAtN);
                 record.add(result.getEngine());
                 record.add(result.getParamKey());
-                if (includeRecall) {
-                    record.add(formatNullableDouble(recall));
-                    record.add(recallRounded);
-                }
+                record.add(formatNullableDouble(recall));
+                record.add(recallRounded);
 
                 for (String metric : latencyMetrics) {
                     record.add(formatNullableDouble(extractLatencyWithFallback(result, metric)));
                 }
                 record.add(formatNullableDouble(extractThroughput(result, latencyMetrics.get(0))));
-                if (includeRecall) {
-                    record.add(speedupValues.getOrDefault(result, ""));
-                }
+                record.add(speedupValues.getOrDefault(result, ""));
 
                 printer.printRecord(record);
             }
