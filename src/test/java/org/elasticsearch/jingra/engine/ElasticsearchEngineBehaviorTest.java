@@ -913,6 +913,247 @@ class ElasticsearchEngineBehaviorTest {
     }
 
     @Test
+    void query_executesEsqlTemplateViaRestClient() throws Exception {
+        Path esqlDir = Path.of("jingra-config/queries");
+        Files.createDirectories(esqlDir);
+        Path esqlFile = esqlDir.resolve("behavior-es-esql.esql");
+        Files.writeString(esqlFile, "FROM metrics | LIMIT {{k}}");
+        String esqlResponse = """
+                {
+                  "took": 7,
+                  "columns": [{"name": "avg_load_1m", "type": "double"}],
+                  "values": [[1.5]]
+                }
+                """;
+        java.util.concurrent.atomic.AtomicReference<String> requestBody = new java.util.concurrent.atomic.AtomicReference<>();
+        com.sun.net.httpserver.HttpServer fakeEs =
+                com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+        fakeEs.createContext("/", exchange -> {
+            try {
+                if ("POST".equals(exchange.getRequestMethod())
+                        && exchange.getRequestURI().getPath().endsWith("/_query")) {
+                    requestBody.set(new String(exchange.getRequestBody().readAllBytes(),
+                            java.nio.charset.StandardCharsets.UTF_8));
+                    byte[] out = esqlResponse.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().set("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(200, out.length);
+                    exchange.getResponseBody().write(out);
+                } else {
+                    exchange.sendResponseHeaders(404, -1);
+                }
+            } finally {
+                exchange.close();
+            }
+        });
+        fakeEs.start();
+        int port = fakeEs.getAddress().getPort();
+        Rest5Client rc = Rest5Client.builder(new HttpHost("http", "127.0.0.1", port)).build();
+        try {
+            ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {};
+            injectRestClient(e, rc);
+            QueryResponse r = e.query("idx", "behavior-es-esql", new QueryParams(Map.of("k", 10)));
+            assertTrue(r.getDocumentIds().isEmpty());
+            assertNotNull(r.getClientLatencyMs());
+            assertEquals(7L, r.getServerLatencyMs().longValue());
+            assertNotNull(r.getAggregateValues());
+            assertEquals(1.5, ((Number) r.getAggregateValues().get("avg_load_1m")).doubleValue(), 1e-9);
+            assertNotNull(requestBody.get());
+            assertTrue(requestBody.get().contains("LIMIT 10"), requestBody.get());
+        } finally {
+            rc.close();
+            fakeEs.stop(0);
+            Files.deleteIfExists(esqlFile);
+        }
+    }
+
+    @Test
+    void query_esqlReturnsEmptyAggregatesWhenNoValues() throws Exception {
+        Path esqlDir = Path.of("jingra-config/queries");
+        Files.createDirectories(esqlDir);
+        Path esqlFile = esqlDir.resolve("behavior-es-esql-empty.esql");
+        Files.writeString(esqlFile, "FROM metrics | LIMIT 0");
+        String esqlResponse = """
+                {"took": 1, "columns": [{"name": "c", "type": "long"}], "values": []}
+                """;
+        com.sun.net.httpserver.HttpServer fakeEs =
+                com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+        fakeEs.createContext("/", exchange -> {
+            try {
+                if ("POST".equals(exchange.getRequestMethod())
+                        && exchange.getRequestURI().getPath().endsWith("/_query")) {
+                    byte[] out = esqlResponse.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().set("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(200, out.length);
+                    exchange.getResponseBody().write(out);
+                } else {
+                    exchange.sendResponseHeaders(404, -1);
+                }
+            } finally {
+                exchange.close();
+            }
+        });
+        fakeEs.start();
+        int port = fakeEs.getAddress().getPort();
+        Rest5Client rc = Rest5Client.builder(new HttpHost("http", "127.0.0.1", port)).build();
+        try {
+            ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {};
+            injectRestClient(e, rc);
+            QueryResponse r = e.query("idx", "behavior-es-esql-empty", new QueryParams());
+            assertTrue(r.getDocumentIds().isEmpty());
+            assertNotNull(r.getClientLatencyMs());
+            assertNotNull(r.getAggregateValues());
+            assertTrue(r.getAggregateValues().isEmpty());
+        } finally {
+            rc.close();
+            fakeEs.stop(0);
+            Files.deleteIfExists(esqlFile);
+        }
+    }
+
+    @Test
+    void query_esqlOmitsServerLatencyWhenTookMissing() throws Exception {
+        Path esqlFile = Path.of("jingra-config/queries/behavior-es-esql-no-took.esql");
+        Files.createDirectories(esqlFile.getParent());
+        Files.writeString(esqlFile, "FROM metrics | LIMIT 0");
+        String esqlResponse = """
+                {"columns": [{"name": "c", "type": "long"}], "values": [[1]]}
+                """;
+        com.sun.net.httpserver.HttpServer fakeEs =
+                com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+        fakeEs.createContext("/", exchange -> {
+            try {
+                if ("POST".equals(exchange.getRequestMethod())
+                        && exchange.getRequestURI().getPath().endsWith("/_query")) {
+                    byte[] out = esqlResponse.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().set("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(200, out.length);
+                    exchange.getResponseBody().write(out);
+                } else {
+                    exchange.sendResponseHeaders(404, -1);
+                }
+            } finally {
+                exchange.close();
+            }
+        });
+        fakeEs.start();
+        Rest5Client rc = Rest5Client.builder(
+                new HttpHost("http", "127.0.0.1", fakeEs.getAddress().getPort())).build();
+        try {
+            ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {};
+            injectRestClient(e, rc);
+            QueryResponse r = e.query("idx", "behavior-es-esql-no-took", new QueryParams());
+            assertNull(r.getServerLatencyMs());
+            assertEquals(1, ((Number) r.getAggregateValues().get("c")).intValue());
+        } finally {
+            rc.close();
+            fakeEs.stop(0);
+            Files.deleteIfExists(esqlFile);
+        }
+    }
+
+    @Test
+    void query_esqlUsesShorterRowWhenFewerValuesThanColumns() throws Exception {
+        Path esqlFile = Path.of("jingra-config/queries/behavior-es-esql-partial-row.esql");
+        Files.createDirectories(esqlFile.getParent());
+        Files.writeString(esqlFile, "FROM metrics | LIMIT 0");
+        String esqlResponse = """
+                {
+                  "took": 2,
+                  "columns": [{"name": "a", "type": "long"}, {"name": "b", "type": "long"}],
+                  "values": [[1]]
+                }
+                """;
+        com.sun.net.httpserver.HttpServer fakeEs =
+                com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+        fakeEs.createContext("/", exchange -> {
+            try {
+                if ("POST".equals(exchange.getRequestMethod())
+                        && exchange.getRequestURI().getPath().endsWith("/_query")) {
+                    byte[] out = esqlResponse.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().set("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(200, out.length);
+                    exchange.getResponseBody().write(out);
+                } else {
+                    exchange.sendResponseHeaders(404, -1);
+                }
+            } finally {
+                exchange.close();
+            }
+        });
+        fakeEs.start();
+        Rest5Client rc = Rest5Client.builder(
+                new HttpHost("http", "127.0.0.1", fakeEs.getAddress().getPort())).build();
+        try {
+            ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {};
+            injectRestClient(e, rc);
+            QueryResponse r = e.query("idx", "behavior-es-esql-partial-row", new QueryParams());
+            assertEquals(2L, r.getServerLatencyMs().longValue());
+            assertEquals(1, r.getAggregateValues().size());
+            assertEquals(1, ((Number) r.getAggregateValues().get("a")).intValue());
+            assertFalse(r.getAggregateValues().containsKey("b"));
+        } finally {
+            rc.close();
+            fakeEs.stop(0);
+            Files.deleteIfExists(esqlFile);
+        }
+    }
+
+    @Test
+    void searchDelegatesToSearchOperation() throws Exception {
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected SearchResponse<Map> searchOperation(String indexName, String queryJson) {
+                return searchHitsWithIds("delegated-id");
+            }
+        };
+        SearchResponse<Map> r = e.search("idx", "{\"query\":{\"match_all\":{}}}");
+        assertEquals(1, r.hits().hits().size());
+        assertEquals("delegated-id", r.hits().hits().get(0).id());
+    }
+
+    @Test
+    void query_esqlSkipsAggregateFlatteningWhenColumnsOrValuesMissing() throws Exception {
+        for (String[] spec : new String[][]{
+                {"behavior-es-esql-no-cols", "{\"took\": 1, \"values\": [[1]]}"},
+                {"behavior-es-esql-no-values", "{\"took\": 1, \"columns\": [{\"name\": \"c\", \"type\": \"long\"}]}"}
+        }) {
+            Path esqlFile = Path.of("jingra-config/queries/" + spec[0] + ".esql");
+            Files.createDirectories(esqlFile.getParent());
+            Files.writeString(esqlFile, "FROM metrics | LIMIT 0");
+            com.sun.net.httpserver.HttpServer fakeEs =
+                    com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+            fakeEs.createContext("/", exchange -> {
+                try {
+                    if ("POST".equals(exchange.getRequestMethod())
+                            && exchange.getRequestURI().getPath().endsWith("/_query")) {
+                        byte[] out = spec[1].getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                        exchange.getResponseHeaders().set("Content-Type", "application/json");
+                        exchange.sendResponseHeaders(200, out.length);
+                        exchange.getResponseBody().write(out);
+                    } else {
+                        exchange.sendResponseHeaders(404, -1);
+                    }
+                } finally {
+                    exchange.close();
+                }
+            });
+            fakeEs.start();
+            Rest5Client rc = Rest5Client.builder(
+                    new HttpHost("http", "127.0.0.1", fakeEs.getAddress().getPort())).build();
+            try {
+                ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {};
+                injectRestClient(e, rc);
+                QueryResponse r = e.query("idx", spec[0], new QueryParams());
+                assertTrue(r.getAggregateValues().isEmpty());
+            } finally {
+                rc.close();
+                fakeEs.stop(0);
+                Files.deleteIfExists(esqlFile);
+            }
+        }
+    }
+
+    @Test
     void connectUsesUrlFromEnvWhenConfigUrlMissing() {
         Map<String, Object> cfg = new HashMap<>();
         cfg.put("url_env", "JINGRA_TEST_ES_URL");

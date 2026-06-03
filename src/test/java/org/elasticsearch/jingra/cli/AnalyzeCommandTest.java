@@ -104,6 +104,58 @@ class AnalyzeCommandTest {
     }
 
     @Test
+    void run_generatesLatencyBarChartsForMetricsBenchmarks() throws Exception {
+        JingraConfig config = createValidConfig();
+        config.getAnalysis().setGeneratePlots(true);
+        config.getAnalysis().setLatencyMetrics(List.of("latency_median", "latency_avg"));
+
+        MockResultsEngine mockEngine = new MockResultsEngine();
+        mockEngine.addResult(createMetricsResult("elasticsearch", "size=10", 1.5, "latency@10"));
+        mockEngine.addResult(createMetricsResult("elasticsearch", "size=20", 2.0, "latency@10"));
+        mockEngine.addResult(createMetricsResult("qdrant", "size=10", 1.8, "latency@10"));
+        mockEngine.addResult(createMetricsResult("qdrant", "size=20", 2.3, "latency@10"));
+
+        AnalyzeCommand.run(config, cfg -> mockEngine);
+
+        assertTrue(Files.exists(tempDir.resolve("latency@10_full_results.csv")));
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().startsWith("latency_")
+                && p.getFileName().toString().endsWith(".png")));
+    }
+
+    @Test
+    void run_continuesWhenLatencyBarChartThrows() throws Exception {
+        AtomicInteger barChartCalls = new AtomicInteger();
+        AnalyzeCommand.plotGeneratorFactory = (out, versions) -> new PlotGenerator(out, versions) {
+            @Override
+            public void generateLatencyBarChart(
+                    Map<String, List<BenchmarkResult>> resultsByEngine,
+                    String label,
+                    List<String> latencyMetrics) throws IOException {
+                if (barChartCalls.incrementAndGet() == 1) {
+                    throw new IOException("simulated bar chart failure");
+                }
+                super.generateLatencyBarChart(resultsByEngine, label, latencyMetrics);
+            }
+        };
+
+        JingraConfig config = createValidConfig();
+        config.getAnalysis().setGeneratePlots(true);
+        config.getAnalysis().setLatencyMetrics(List.of("latency_median"));
+
+        MockResultsEngine mockEngine = new MockResultsEngine();
+        mockEngine.addResult(createMetricsResult("elasticsearch", "size=10", 1.5, "latency@10"));
+        mockEngine.addResult(createMetricsResult("qdrant", "size=10", 1.8, "latency@10"));
+        mockEngine.addResult(createMetricsResult("elasticsearch", "size=10", 2.0, "latency@20"));
+        mockEngine.addResult(createMetricsResult("qdrant", "size=10", 2.2, "latency@20"));
+
+        AnalyzeCommand.run(config, cfg -> mockEngine);
+
+        assertTrue(Files.exists(tempDir.resolve("latency@10_full_results.csv")));
+        assertTrue(Files.exists(tempDir.resolve("latency@20_full_results.csv")));
+        assertEquals(2, barChartCalls.get());
+    }
+
+    @Test
     void run_continuesWhenOnePlotGenerationThrows() throws Exception {
         AtomicInteger plotCalls = new AtomicInteger();
         AnalyzeCommand.plotGeneratorFactory = (out, versions) -> new PlotGenerator(out, versions) {
@@ -552,6 +604,23 @@ class AnalyzeCommandTest {
         result.addMetric("throughput", 100.0 / latency);  // Derive throughput from latency
         result.addMetadata("recall_label", recallLabel);
 
+        return result;
+    }
+
+    private BenchmarkResult createMetricsResult(String engine, String paramKey, double latency, String groupLabel) {
+        BenchmarkResult result = new BenchmarkResult(
+                "test-run-123",
+                engine,
+                "1.0",
+                "metrics",
+                "test-dataset",
+                paramKey,
+                Map.of()
+        );
+        result.addMetric("latency_median", latency);
+        result.addMetric("latency_avg", latency * 1.1);
+        result.addMetric("throughput", 100.0 / latency);
+        result.addMetadata("recall_label", groupLabel);
         return result;
     }
 

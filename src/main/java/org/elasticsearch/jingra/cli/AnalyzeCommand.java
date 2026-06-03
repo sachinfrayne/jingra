@@ -58,6 +58,15 @@ public final class AnalyzeCommand {
         ConfigLoader.validateForAnalysis(config);
         AnalysisConfig ac = config.getAnalysis();
 
+        // Determine comparison mode: profiles (same engine, multiple configs) or engines (multiple engine types)
+        boolean useProfiles = !ac.getProfiles().isEmpty();
+        List<String> dimensionValues = useProfiles ? ac.getProfiles() : ac.getEngines();
+        String filterField = useProfiles ? "profile.keyword" : "engine.keyword";
+        Function<BenchmarkResult, String> dimensionKey = useProfiles
+                ? BenchmarkResult::getProfile
+                : BenchmarkResult::getEngine;
+        String dimensionLabel = useProfiles ? "profiles" : "engines";
+
         // Create results engine
         ElasticsearchEngine resultsEngine = resultsEngineFactory.apply(ac.getResultsCluster());
 
@@ -71,8 +80,8 @@ public final class AnalyzeCommand {
             String indexName = (String) ac.getResultsCluster().getOrDefault("index", "jingra-results");
             ResultsQuerier querier = new ResultsQuerier(resultsEngine, indexName);
 
-            logger.info("Querying results for run_id: {}, engines: {}", ac.getRunId(), ac.getEngines());
-            List<BenchmarkResult> allResults = querier.queryByRunId(ac.getRunId(), ac.getEngines());
+            logger.info("Querying results for run_id: {}, {}: {}", ac.getRunId(), dimensionLabel, dimensionValues);
+            List<BenchmarkResult> allResults = querier.queryByRunId(ac.getRunId(), filterField, dimensionValues);
             logger.info("Found {} results", allResults.size());
 
             if (allResults.isEmpty()) {
@@ -80,14 +89,14 @@ public final class AnalyzeCommand {
                 return;
             }
 
-            // Group by engine and recall@N
-            Map<String, List<BenchmarkResult>> byEngine = querier.groupByEngine(allResults);
+            // Group by dimension (engine or profile) and recall@N
+            Map<String, List<BenchmarkResult>> byDimension = querier.groupBy(allResults, dimensionKey);
             Map<String, List<BenchmarkResult>> byRecallAt = querier.groupByRecallLabel(allResults);
 
-            // Verify we have the requested engines
-            for (String engine : ac.getEngines()) {
-                if (!byEngine.containsKey(engine)) {
-                    logger.warn("No results found for engine: {}", engine);
+            // Verify we have results for all requested dimension values
+            for (String dim : dimensionValues) {
+                if (!byDimension.containsKey(dim)) {
+                    logger.warn("No results found for {}: {}", dimensionLabel.replaceAll("s$", ""), dim);
                 }
             }
 
@@ -101,9 +110,9 @@ public final class AnalyzeCommand {
             // Export results
             CsvExporter csvExporter = new CsvExporter(ac.getOutputDirectory());
 
-            String baselineEngine = ac.getEngines().get(0);
-            boolean multiEngine = ac.getEngines().size() >= 2;
-            String targetEngine = multiEngine ? ac.getEngines().get(1) : null;
+            String baselineEngine = dimensionValues.get(0);
+            boolean multiEngine = dimensionValues.size() >= 2;
+            String targetEngine = multiEngine ? dimensionValues.get(1) : null;
 
             if (multiEngine) {
                 logger.info("Comparing {} vs {}", baselineEngine, targetEngine);
@@ -138,8 +147,8 @@ public final class AnalyzeCommand {
                 Map<String, ComparisonResult> maxRecallComparisons = new HashMap<>();
 
                 for (String recallAt : byRecallAt.keySet()) {
-                    List<BenchmarkResult> baseline = filterByEngine(byRecallAt.get(recallAt), baselineEngine);
-                    List<BenchmarkResult> target = filterByEngine(byRecallAt.get(recallAt), targetEngine);
+                    List<BenchmarkResult> baseline = filterByDimension(byRecallAt.get(recallAt), dimensionKey, baselineEngine);
+                    List<BenchmarkResult> target = filterByDimension(byRecallAt.get(recallAt), dimensionKey, targetEngine);
 
                     if (baseline.isEmpty() || target.isEmpty()) {
                         continue;
@@ -187,7 +196,8 @@ public final class AnalyzeCommand {
                         String recallAt = entry.getKey();
                         Map<String, List<BenchmarkResult>> engineResults = new HashMap<>();
                         for (BenchmarkResult result : entry.getValue()) {
-                            engineResults.computeIfAbsent(result.getEngine(), k -> new ArrayList<>()).add(result);
+                            String key = dimensionKey.apply(result);
+                            if (key != null) engineResults.computeIfAbsent(key, k -> new ArrayList<>()).add(result);
                         }
                         try {
                             plotter.generateLatencyBarChart(engineResults, recallAt, latencyMetrics);
@@ -201,7 +211,8 @@ public final class AnalyzeCommand {
                         String recallAt = entry.getKey();
                         Map<String, List<BenchmarkResult>> engineResults = new HashMap<>();
                         for (BenchmarkResult result : entry.getValue()) {
-                            engineResults.computeIfAbsent(result.getEngine(), k -> new ArrayList<>()).add(result);
+                            String key = dimensionKey.apply(result);
+                            if (key != null) engineResults.computeIfAbsent(key, k -> new ArrayList<>()).add(result);
                         }
                         for (String latencyMetric : latencyMetrics) {
                             try {
@@ -240,9 +251,13 @@ public final class AnalyzeCommand {
         }
     }
 
-    private static List<BenchmarkResult> filterByEngine(List<BenchmarkResult> results, String engine) {
+    private static List<BenchmarkResult> filterByDimension(
+            List<BenchmarkResult> results,
+            Function<BenchmarkResult, String> keyExtractor,
+            String value
+    ) {
         return results.stream()
-                .filter(r -> engine.equals(r.getEngine()))
+                .filter(r -> value.equals(keyExtractor.apply(r)))
                 .collect(Collectors.toList());
     }
 

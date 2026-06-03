@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -33,7 +34,20 @@ public class ResultsQuerier {
      * @throws IOException if query fails
      */
     public List<BenchmarkResult> queryByRunId(String runId, List<String> engines) throws IOException {
-        String queryJson = buildRunIdQuery(runId, engines);
+        return queryByRunId(runId, "engine.keyword", engines);
+    }
+
+    /**
+     * Query all benchmark results for a given run_id, filtered by an arbitrary keyword field.
+     *
+     * @param runId       the run ID to filter by
+     * @param filterField the keyword field to filter on (e.g. "engine.keyword" or "profile.keyword")
+     * @param values      values to include; if empty, all results for the run_id are returned
+     * @return list of benchmark results
+     * @throws IOException if query fails
+     */
+    public List<BenchmarkResult> queryByRunId(String runId, String filterField, List<String> values) throws IOException {
+        String queryJson = buildRunIdQuery(runId, filterField, values);
 
         try {
             SearchResponse<Map> response = engine.search(indexName, queryJson);
@@ -60,8 +74,24 @@ public class ResultsQuerier {
      * @return map of engine name to list of results
      */
     public Map<String, List<BenchmarkResult>> groupByEngine(List<BenchmarkResult> results) {
+        return groupBy(results, BenchmarkResult::getEngine);
+    }
+
+    /**
+     * Group benchmark results by an arbitrary string key extracted from each result.
+     * Results whose key function returns null are excluded.
+     *
+     * @param results      list of benchmark results
+     * @param keyExtractor function to extract the grouping key from a result
+     * @return map of key to list of results
+     */
+    public Map<String, List<BenchmarkResult>> groupBy(
+            List<BenchmarkResult> results,
+            Function<BenchmarkResult, String> keyExtractor
+    ) {
         return results.stream()
-                .collect(Collectors.groupingBy(BenchmarkResult::getEngine));
+                .filter(r -> keyExtractor.apply(r) != null)
+                .collect(Collectors.groupingBy(keyExtractor));
     }
 
     /**
@@ -84,10 +114,10 @@ public class ResultsQuerier {
     }
 
     /**
-     * Build Elasticsearch query JSON to filter by run_id.keyword and optionally by engine.keyword.
+     * Build Elasticsearch query JSON to filter by run_id.keyword and optionally by a keyword field.
      */
-    private String buildRunIdQuery(String runId, List<String> engines) {
-        if (engines == null || engines.isEmpty()) {
+    private String buildRunIdQuery(String runId, String filterField, List<String> values) {
+        if (values == null || values.isEmpty()) {
             return String.format("""
                     {
                       "query": {
@@ -100,8 +130,8 @@ public class ResultsQuerier {
                     """, runId);
         }
 
-        String engineList = engines.stream()
-                .map(e -> "\"" + e + "\"")
+        String valueList = values.stream()
+                .map(v -> "\"" + v + "\"")
                 .collect(Collectors.joining(", "));
 
         return String.format("""
@@ -110,12 +140,12 @@ public class ResultsQuerier {
                     "bool": {
                       "must": [
                         { "term": { "run_id.keyword": "%s" } },
-                        { "terms": { "engine.keyword": [%s] } }
+                        { "terms": { "%s": [%s] } }
                       ]
                     }
                   },
                   "size": 10000
                 }
-                """, runId, engineList);
+                """, runId, filterField, valueList);
     }
 }

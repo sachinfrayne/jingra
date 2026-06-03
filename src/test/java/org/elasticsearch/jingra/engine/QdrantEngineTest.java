@@ -244,9 +244,9 @@ class QdrantEngineTest {
         assertEquals(5, response.getDocumentIds().size());
         assertNotNull(response.getClientLatencyMs());
         assertTrue(response.getClientLatencyMs() > 0);
-        // Qdrant should return server latency from the SearchResponse.time field
+        // Qdrant reports server latency via SearchResponse.time (seconds → ms); very fast searches may round to 0
         assertNotNull(response.getServerLatencyMs(), "Server latency should be captured from Qdrant SearchResponse");
-        assertTrue(response.getServerLatencyMs() > 0, "Server latency should be positive");
+        assertTrue(response.getServerLatencyMs() >= 0, "Server latency should be non-negative");
     }
 
     @Test

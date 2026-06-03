@@ -10,7 +10,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayInputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -117,6 +120,18 @@ class AbstractBenchmarkEngineTest {
 
         public JsonNode publicLoadQueryTemplateCached(String queryName) {
             return loadQueryTemplateCached(queryName);
+        }
+
+        public boolean publicHasEsqlTemplate(String queryName) {
+            return hasEsqlTemplate(queryName);
+        }
+
+        public String publicLoadEsqlTemplate(String queryName) {
+            return loadEsqlTemplate(queryName);
+        }
+
+        public String publicRenderEsqlTemplate(String template, Map<String, Object> params) {
+            return renderEsqlTemplate(template, params);
         }
     }
 
@@ -476,6 +491,15 @@ class AbstractBenchmarkEngineTest {
     }
 
     @Test
+    void testLoadQueryTemplateCached_nonNullLoadsFromClasspath() {
+        JsonNode first = engine.publicLoadQueryTemplateCached("recover-query");
+        JsonNode second = engine.publicLoadQueryTemplateCached("recover-query");
+        assertNotNull(first);
+        assertTrue(first.get("recoveredQuery").asBoolean());
+        assertSame(first, second);
+    }
+
+    @Test
     void testRenderTemplate_wrapsSerializationFailure() throws Exception {
         String templateJson = "{\"template\": {\"field\": \"{{v}}\"}}";
         JsonNode template = mapper.readTree(templateJson);
@@ -593,4 +617,168 @@ class AbstractBenchmarkEngineTest {
         // Assert
         assertEquals("test", name);
     }
+
+    @Test
+    void hasEsqlTemplate_nullQueryName_returnsFalse() {
+        assertFalse(engine.publicHasEsqlTemplate(null));
+    }
+
+    @Test
+    void hasEsqlTemplate_trueWhenEsqlFileExistsOnDisk() throws Exception {
+        writeJingraFile("queries/behavior-abs-has-esql.esql", "FROM idx | LIMIT 1");
+        assertTrue(engine.publicHasEsqlTemplate("behavior-abs-has-esql"));
+    }
+
+    @Test
+    void hasEsqlTemplate_falseWhenTemplateMissing() {
+        assertFalse(engine.publicHasEsqlTemplate("__missing_esql_template__"));
+    }
+
+    @Test
+    void hasEsqlTemplate_trueWhenEsqlOnClasspathOnly() {
+        assertTrue(engine.publicHasEsqlTemplate("behavior-abs-esql-classpath"));
+    }
+
+    @Test
+    void loadEsqlTemplate_readsFromDisk() throws Exception {
+        writeJingraFile("queries/behavior-abs-load-esql.esql", "  FROM disk | LIMIT {{n}}  \n");
+        assertEquals("FROM disk | LIMIT {{n}}",
+                engine.publicLoadEsqlTemplate("behavior-abs-load-esql").trim());
+    }
+
+    @Test
+    void loadEsqlTemplate_readsFromClasspathWhenFileMissing() {
+        assertEquals("FROM classpath | LIMIT {{n}}",
+                engine.publicLoadEsqlTemplate("behavior-abs-esql-classpath").trim());
+    }
+
+    @Test
+    void loadEsqlTemplate_throwsWhenNotFound() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> engine.publicLoadEsqlTemplate("__no_such_esql__"));
+        assertTrue(ex.getMessage().contains("ESQL template"));
+    }
+
+    @Test
+    void loadEsqlTemplate_exercisesClasspathTryCompletionPaths() throws Exception {
+        assertEquals("FROM classpath | LIMIT {{n}}",
+                engine.publicLoadEsqlTemplate("behavior-abs-esql-classpath").trim());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> engine.publicLoadEsqlTemplate("__no_such_esql__"));
+
+        String diskFailName = "__esql_try_disk_fail_no_cp__";
+        Path dir = Paths.get(AbstractBenchmarkEngine.JINGRA_CONFIG_DIR)
+                .resolve("queries/" + diskFailName + ".esql");
+        Files.createDirectories(dir.getParent());
+        Files.createDirectory(dir);
+        assertThrows(IllegalArgumentException.class, () -> engine.publicLoadEsqlTemplate(diskFailName));
+
+        TestBenchmarkEngine failing = new TestBenchmarkEngine(new HashMap<>()) {
+            @Override
+            protected InputStream openEsqlClasspathStream(String resourcePath) {
+                return new FilterInputStream(new ByteArrayInputStream("x".getBytes(StandardCharsets.UTF_8))) {
+                    @Override
+                    public void close() throws IOException {
+                        throw new IOException("classpath close fail");
+                    }
+                };
+            }
+        };
+        assertThrows(IllegalArgumentException.class,
+                () -> failing.publicLoadEsqlTemplate("__esql_try_io__"));
+    }
+
+    @Test
+    void loadEsqlTemplate_fallsBackToClasspathWhenDiskPathNotReadable() throws Exception {
+        Path dir = Paths.get(AbstractBenchmarkEngine.JINGRA_CONFIG_DIR)
+                .resolve("queries/behavior-abs-esql-io-fail.esql");
+        Files.createDirectories(dir.getParent());
+        Files.createDirectory(dir);
+
+        assertEquals("FROM io-fail-fallback | LIMIT {{n}}",
+                engine.publicLoadEsqlTemplate("behavior-abs-esql-io-fail").trim());
+    }
+
+    @Test
+    void renderEsqlTemplate_substitutesPlaceholdersAndTrims() {
+        String rendered = engine.publicRenderEsqlTemplate(
+                "  FROM idx | WHERE host == \"{{host}}\" | LIMIT {{limit}}  \n",
+                Map.of("host", "node-a", "limit", 5));
+        assertEquals("FROM idx | WHERE host == \"node-a\" | LIMIT 5", rendered);
+    }
+
+    @Test
+    void loadEsqlTemplate_logsWhenClasspathReadFails() {
+        TestBenchmarkEngine failing = new TestBenchmarkEngine(new HashMap<>()) {
+            @Override
+            protected InputStream openEsqlClasspathStream(String resourcePath) {
+                return new InputStream() {
+                    @Override
+                    public int read() throws IOException {
+                        throw new IOException("classpath read fail");
+                    }
+                };
+            }
+        };
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> failing.publicLoadEsqlTemplate("__esql_read_fail__"));
+        assertTrue(ex.getMessage().contains("ESQL template"));
+    }
+
+    @Test
+    void loadEsqlTemplate_logsReadFailureWhenCloseAlsoFails() {
+        TestBenchmarkEngine failing = new TestBenchmarkEngine(new HashMap<>()) {
+            @Override
+            protected InputStream openEsqlClasspathStream(String resourcePath) {
+                return new InputStream() {
+                    @Override
+                    public int read() throws IOException {
+                        throw new IOException("classpath read fail");
+                    }
+
+                    @Override
+                    public void close() throws IOException {
+                        throw new IOException("classpath close fail");
+                    }
+                };
+            }
+        };
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> failing.publicLoadEsqlTemplate("__esql_read_and_close_fail__"));
+        assertTrue(ex.getMessage().contains("ESQL template"));
+    }
+
+    @Test
+    void loadEsqlTemplate_throwsWhenDiskUnreadableAndClasspathMissing() throws Exception {
+        String name = "__esql_disk_fail_no_cp__";
+        Path dir = Paths.get(AbstractBenchmarkEngine.JINGRA_CONFIG_DIR)
+                .resolve("queries/" + name + ".esql");
+        Files.createDirectories(dir.getParent());
+        Files.createDirectory(dir);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> engine.publicLoadEsqlTemplate(name));
+        assertTrue(ex.getMessage().contains("ESQL template"));
+    }
+
+    @Test
+    void loadEsqlTemplate_logsWhenClasspathStreamCloseFails() {
+        TestBenchmarkEngine failing = new TestBenchmarkEngine(new HashMap<>()) {
+            @Override
+            protected InputStream openEsqlClasspathStream(String resourcePath) {
+                return new FilterInputStream(
+                        new ByteArrayInputStream("FROM close-fail | LIMIT {{n}}\n".getBytes(StandardCharsets.UTF_8))) {
+                    @Override
+                    public void close() throws IOException {
+                        throw new IOException("classpath close fail");
+                    }
+                };
+            }
+        };
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> failing.publicLoadEsqlTemplate("__esql_close_fail__"));
+        assertTrue(ex.getMessage().contains("ESQL template"));
+    }
+
 }

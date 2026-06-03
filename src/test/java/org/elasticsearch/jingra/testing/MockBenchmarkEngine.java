@@ -54,7 +54,7 @@ public class MockBenchmarkEngine implements BenchmarkEngine {
     }
 
     @Override
-    public QueryResponse query(String indexName, String queryName, QueryParams params) {
+    public synchronized QueryResponse query(String indexName, String queryName, QueryParams params) {
         queryCount++;
         receivedParams.add(params);
         receivedQueryNames.add(queryName);

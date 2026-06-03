@@ -1,7 +1,7 @@
-engine: elasticsearch
+engine: opensearch
 
-elasticsearch:
-  url_env: ELASTICSEARCH_URL
+opensearch:
+  url_env: OPENSEARCH_URL
   query_dump_directory: ./output
 
 dataset: demo-vector
@@ -43,11 +43,11 @@ load:
   queue_capacity: 10
 
 evaluation:
-  run_id: demo-vector
+  run_id: vector-search-race
   warmup_workers: 1
   measurement_workers: 1
-  warmup_rounds: 3
-  measurement_rounds: 1
+  warmup_rounds: 5
+  measurement_rounds: 100
 
 output:
   sinks:
@@ -55,16 +55,3 @@ output:
       config:
         url_env: SINK_URL
         index: jingra-results
-
-analysis:
-  run_id: demo-vector
-  engines:
-    - elasticsearch
-  results_cluster:
-    url_env: SINK_URL
-    index: jingra-results
-  output_directory: ./output
-  generate_plots: true
-  latency_metrics:
-    - latency_avg
-    - latency_p95

@@ -220,15 +220,45 @@ public abstract class AbstractBenchmarkEngine implements BenchmarkEngine {
                 logger.warn("Failed to load ESQL template from file: {}", file.getAbsolutePath(), e);
             }
         }
-        String resourcePath = "/" + queriesPath + "/" + filename;
-        try (java.io.InputStream is = getClass().getResourceAsStream(resourcePath)) {
-            if (is != null) {
-                return new String(is.readAllBytes(), StandardCharsets.UTF_8);
-            }
-        } catch (IOException e) {
-            logger.warn("Failed to load ESQL template from classpath: {}", resourcePath, e);
+        String fromClasspath = readEsqlClasspathTemplate("/" + queriesPath + "/" + filename);
+        if (fromClasspath != null) {
+            return fromClasspath;
         }
         throw new IllegalArgumentException("ESQL template '" + queryName + "' not found");
+    }
+
+    private String readEsqlClasspathTemplate(String resourcePath) {
+        java.io.InputStream is = openEsqlClasspathStream(resourcePath);
+        if (is == null) {
+            return null;
+        }
+        String content = null;
+        IOException error = null;
+        try {
+            content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            error = e;
+        } finally {
+            try {
+                is.close();
+            } catch (IOException e) {
+                if (error == null) {
+                    error = e;
+                }
+            }
+        }
+        if (error != null) {
+            logger.warn("Failed to load ESQL template from classpath: {}", resourcePath, error);
+            return null;
+        }
+        return content;
+    }
+
+    /**
+     * Opens a classpath ESQL template stream. Subclasses in tests may override to simulate I/O failures.
+     */
+    protected java.io.InputStream openEsqlClasspathStream(String resourcePath) {
+        return getClass().getResourceAsStream(resourcePath);
     }
 
     /**

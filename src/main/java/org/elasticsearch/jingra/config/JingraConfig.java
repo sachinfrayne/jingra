@@ -10,6 +10,7 @@ import java.util.Map;
 public class JingraConfig {
 
     private String engine;
+    private String profile;
     private String dataset;
 
     @JsonProperty("elasticsearch")
@@ -55,6 +56,14 @@ public class JingraConfig {
 
     public void setEngine(String engine) {
         this.engine = engine;
+    }
+
+    public String getProfile() {
+        return profile;
+    }
+
+    public void setProfile(String profile) {
+        this.profile = profile;
     }
 
     public String getDataset() {

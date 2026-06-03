@@ -664,6 +664,29 @@ class PlotGeneratorTest {
         assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().startsWith("latency_") && p.toString().endsWith(".png")));
     }
 
+    @Test
+    void generateLatencyBarChart_warnsAndReturnsWhenNoParamKeys() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString());
+
+        generator.generateLatencyBarChart(Map.of(), "latency@10", List.of("latency_median"));
+
+        assertFalse(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().startsWith("latency_")));
+    }
+
+    @Test
+    void generateLatencyBarChart_skipsLatencyMetricsWithNoValues() throws IOException {
+        PlotGenerator generator = new PlotGenerator(tempDir.toString());
+
+        BenchmarkResult r = new BenchmarkResult("run", "elasticsearch", "9.4", "metrics", "ds", "size=10", Map.of());
+        r.addMetric("throughput", 300.0);
+        Map<String, List<BenchmarkResult>> resultsByEngine = Map.of("elasticsearch", List.of(r));
+
+        generator.generateLatencyBarChart(resultsByEngine, "latency@10",
+                List.of("latency_median", "latency_p99"));
+
+        assertFalse(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().startsWith("latency_")));
+    }
+
     private BenchmarkResult createResult(String engine, double recall, double latency) {
         BenchmarkResult result = new BenchmarkResult(
                 "test-run", engine, "1.0", "vector_search", "test-dataset", "k=1", Map.of());

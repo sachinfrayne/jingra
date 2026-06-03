@@ -29,15 +29,6 @@ datasets:
 
     param_groups:
       recall@10:
-        - { size: 10, k: 1, num_candidates: 1, oversample: 1 }
-        - { size: 10, k: 2, num_candidates: 2, oversample: 1 }
-        - { size: 10, k: 3, num_candidates: 3, oversample: 1 }
-        - { size: 10, k: 4, num_candidates: 4, oversample: 1 }
-        - { size: 10, k: 5, num_candidates: 5, oversample: 1 }
-        - { size: 10, k: 6, num_candidates: 6, oversample: 1 }
-        - { size: 10, k: 7, num_candidates: 7, oversample: 1 }
-        - { size: 10, k: 8, num_candidates: 8, oversample: 1 }
-        - { size: 10, k: 9, num_candidates: 9, oversample: 1 }
         - { size: 10, k: 10, num_candidates: 10, oversample: 1 }
         - { size: 10, k: 20, num_candidates: 20, oversample: 1 }
         - { size: 10, k: 50, num_candidates: 50, oversample: 1 }
@@ -75,5 +66,5 @@ analysis:
   output_directory: ./output
   generate_plots: true
   latency_metrics:
-    - latency_median
     - latency_avg
+    - latency_p95

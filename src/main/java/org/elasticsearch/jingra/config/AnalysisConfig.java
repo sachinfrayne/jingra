@@ -19,6 +19,9 @@ public class AnalysisConfig {
     @JsonProperty("engines")
     private List<String> engines;
 
+    @JsonProperty("profiles")
+    private List<String> profiles;
+
     @JsonProperty("results_cluster")
     private Map<String, Object> resultsCluster;
 
@@ -48,6 +51,14 @@ public class AnalysisConfig {
 
     public void setEngines(List<String> engines) {
         this.engines = engines;
+    }
+
+    public List<String> getProfiles() {
+        return profiles != null ? profiles : List.of();
+    }
+
+    public void setProfiles(List<String> profiles) {
+        this.profiles = profiles;
     }
 
     public Map<String, Object> getResultsCluster() {

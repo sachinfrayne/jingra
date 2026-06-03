@@ -1,0 +1,17 @@
+{
+  "size": "{{size}}",
+  "query": {
+    "knn": {
+      "embedding": {
+        "vector": "{{query_vector}}",
+        "k": "{{k}}",
+        "method_parameters": {
+          "ef_search": "{{num_candidates}}"
+        },
+        "rescore": {
+          "oversample_factor": "{{oversample}}"
+        }
+      }
+    }
+  }
+}

@@ -276,6 +276,19 @@ class BenchmarkComparatorTest {
     }
 
     @Test
+    void findMaxRecallByEngine_keepsFirstWhenLaterRecallIsNotHigher() {
+        BenchmarkResult best = createResult("elasticsearch", "k=200", 0.95, 12.0, 90.0, 6.0, 180.0);
+        BenchmarkResult worse = createResult("elasticsearch", "k=100", 0.90, 10.0, 100.0, 5.0, 200.0);
+
+        BenchmarkComparator comparator = new BenchmarkComparator("server_latency_median");
+        Map<String, BenchmarkResult> maxPoints = comparator.findMaxRecallByEngine(
+                Map.of("elasticsearch", List.of(best, worse)));
+
+        assertEquals("k=200", maxPoints.get("elasticsearch").getParamKey());
+        assertEquals(0.95, maxPoints.get("elasticsearch").getMetricAsDouble("recall"), 0.0001);
+    }
+
+    @Test
     void findMaxRecallByEngine_returnsEmptyWhenNoResults() {
         BenchmarkComparator comparator = new BenchmarkComparator("server_latency_median");
         Map<String, BenchmarkResult> maxPoints = comparator.findMaxRecallByEngine(Map.of());

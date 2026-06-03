@@ -156,9 +156,26 @@ public final class ConfigValidator {
         }
         AnalysisConfig ac = config.getAnalysis();
         requireNonBlank(ac.getRunId(), "analysis.run_id is required");
-        if (ac.getEngines() == null || ac.getEngines().size() < 1) {
-            throw new IllegalStateException("analysis.engines must have at least 1 engine");
+
+        boolean hasEngines = ac.getEngines() != null && !ac.getEngines().isEmpty();
+        boolean hasProfiles = !ac.getProfiles().isEmpty();
+
+        if (hasEngines && hasProfiles) {
+            throw new IllegalStateException(
+                    "analysis.engines and analysis.profiles are mutually exclusive — use one or the other");
         }
+        if (!hasEngines && !hasProfiles) {
+            throw new IllegalStateException(
+                    "Either analysis.engines or analysis.profiles must have at least 1 entry");
+        }
+        if (hasProfiles) {
+            String engine = config.getEngine();
+            if (engine == null || engine.isBlank()) {
+                throw new IllegalStateException(
+                        "Top-level engine: is required when analysis.profiles is set");
+            }
+        }
+
         if (ac.getResultsCluster() == null || ac.getResultsCluster().isEmpty()) {
             throw new IllegalStateException("analysis.results_cluster configuration is required");
         }

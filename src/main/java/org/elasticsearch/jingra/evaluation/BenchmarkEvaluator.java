@@ -434,6 +434,10 @@ public class BenchmarkEvaluator {
                 params
         );
 
+        if (config.getProfile() != null) {
+            result.setProfile(config.getProfile());
+        }
+
         // Add quality metrics — not applicable for ESQL/metrics benchmarks
         boolean isEsql = "esql".equals(dataset.getQueryType());
         if (!isEsql) {
@@ -513,6 +517,9 @@ public class BenchmarkEvaluator {
         // Context
         metric.put("run_id", runId);
         metric.put("engine", engine.getEngineName());
+        if (config.getProfile() != null) {
+            metric.put("profile", config.getProfile());
+        }
         metric.put("engine_version", engine.getVersion());
         metric.put("dataset", config.getDataset());
         metric.put("params", params);

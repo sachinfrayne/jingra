@@ -655,6 +655,15 @@ class BenchmarkEvaluatorTest {
     }
 
     @Test
+    void calculateMetrics_includesAggregateAccuracyWhenPresent() throws Exception {
+        jingraConfig.getActiveDataset().setQueryType("esql");
+        MetricsCalculator.QueryResult res = new MetricsCalculator.QueryResult(
+                List.of(), List.of(), 10.0, null, 0.5);
+        BenchmarkResult br = invokeCalculateMetrics(List.of(res), 1000L);
+        assertEquals(0.5, (Double) br.getMetrics().get("aggregate_accuracy"), 1e-9);
+    }
+
+    @Test
     void calculateMetrics_setsSchemaWhenSchemaNameConfiguredAndTemplateFound() throws Exception {
         org.elasticsearch.jingra.config.DatasetConfig datasetConfig = jingraConfig.getActiveDataset();
         datasetConfig.setSchemaName("schema-a");
@@ -722,6 +731,13 @@ class BenchmarkEvaluatorTest {
     }
 
     @SuppressWarnings("unchecked")
+    private static Map<String, Object> qdExpectedAggregates(Object qd) throws Exception {
+        Field f = qd.getClass().getDeclaredField("expectedAggregates");
+        f.setAccessible(true);
+        return (Map<String, Object>) f.get(qd);
+    }
+
+    @SuppressWarnings("unchecked")
     private static Map<String, Object> invokeBuildQueryMetric(
             BenchmarkEvaluator ev,
             MetricsCalculator.QueryResult res,
@@ -737,6 +753,90 @@ class BenchmarkEvaluatorTest {
 
     private BenchmarkResult invokeCalculateMetrics(List<MetricsCalculator.QueryResult> results, long totalWallMs) throws Exception {
         return invokeCalculateMetrics(evaluator, results, totalWallMs);
+    }
+
+    @Test
+    void parseQueryDocuments_skipsWhenNoTextOrVectorConfiguredAndNotEsql() throws Exception {
+        DatasetConfig dataset = jingraConfig.getActiveDataset();
+        dataset.setQueryType(null);
+        dataset.getQueriesMapping().setQueryTextField(null);
+        dataset.getQueriesMapping().setQueryVectorField(null);
+
+        List<Object> out = invokeParse(List.of(new Document(Map.of(
+                dataset.getQueriesMapping().getGroundTruthField(), List.of("a"),
+                dataset.getQueriesMapping().getConditionsField(), Map.of()
+        ))));
+        assertTrue(out.isEmpty());
+    }
+
+    @Test
+    void parseQueryDocuments_esqlExtractsExpectedAggregatesWithoutTextOrVector() throws Exception {
+        DatasetConfig dataset = jingraConfig.getActiveDataset();
+        dataset.setQueryType("esql");
+        dataset.getQueriesMapping().setQueryTextField(null);
+        dataset.getQueriesMapping().setQueryVectorField(null);
+
+        Document row = new Document(Map.of(
+                dataset.getQueriesMapping().getGroundTruthField(), List.of(),
+                dataset.getQueriesMapping().getConditionsField(), Map.of(),
+                "expected_avg_load_1m", 1.25,
+                "expected_count", 10
+        ));
+        List<Object> out = invokeParse(List.of(row));
+        assertEquals(1, out.size());
+        Map<String, Object> expected = qdExpectedAggregates(out.get(0));
+        assertNotNull(expected);
+        assertEquals(2, expected.size());
+        assertEquals(1.25, ((Number) expected.get("expected_avg_load_1m")).doubleValue(), 1e-9);
+        assertEquals(10, ((Number) expected.get("expected_count")).intValue());
+    }
+
+    @Test
+    void parseQueryDocuments_esqlNullExpectedValuesYieldNullExpectedAggregates() throws Exception {
+        DatasetConfig dataset = jingraConfig.getActiveDataset();
+        dataset.setQueryType("esql");
+        dataset.getQueriesMapping().setQueryTextField(null);
+        dataset.getQueriesMapping().setQueryVectorField(null);
+
+        Map<String, Object> fields = new HashMap<>();
+        fields.put(dataset.getQueriesMapping().getGroundTruthField(), List.of());
+        fields.put(dataset.getQueriesMapping().getConditionsField(), Map.of());
+        fields.put("expected_only_null", null);
+        Document row = new Document(fields);
+        List<Object> out = invokeParse(List.of(row));
+        assertEquals(1, out.size());
+        assertNull(qdExpectedAggregates(out.get(0)));
+    }
+
+    @Test
+    void computeAggregateAccuracy_handlesEdgeCasesAndTolerance() throws Exception {
+        Method m = BenchmarkEvaluator.class.getDeclaredMethod(
+                "computeAggregateAccuracy", Map.class, Map.class);
+        m.setAccessible(true);
+
+        assertNull(m.invoke(null, null, Map.of("x", 1)));
+        assertNull(m.invoke(null, Map.of(), Map.of("x", 1)));
+        assertNull(m.invoke(null, Map.of("expected_x", 1), null));
+        assertNull(m.invoke(null, Map.of("expected_x", 1), Map.of()));
+
+        // No comparable numeric pairs -> checked == 0 -> null
+        assertNull(m.invoke(null, Map.of("expected_x", "nope"), Map.of("x", 1)));
+        assertNull(m.invoke(null, Map.of("expected_x", 1), Map.of("x", "nope")));
+
+        // exp==0 uses abs(act) tolerance (<= 0.001)
+        assertEquals(1.0, (Double) m.invoke(null,
+                Map.of("expected_zero", 0.0),
+                Map.of("zero", 0.0005)), 1e-9);
+
+        // when expected key has no expected_ prefix, compare against same key
+        assertEquals(1.0, (Double) m.invoke(null,
+                Map.of("x", 5.0),
+                Map.of("x", 5.0001)), 1e-9);
+
+        // outside tolerance
+        assertEquals(0.0, (Double) m.invoke(null,
+                Map.of("expected_x", 100.0),
+                Map.of("x", 101.0)), 1e-9);
     }
 
     @Test

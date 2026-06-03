@@ -347,6 +347,25 @@ class MetricsCalculatorTest {
     }
 
     @Test
+    void aggregateAccuracy_emptyOrNullOrNaNAreIgnored() {
+        // empty -> OptionalDouble.empty
+        assertTrue(new MetricsCalculator(List.of()).calculateAggregateAccuracy().isEmpty());
+
+        List<MetricsCalculator.QueryResult> onlyNullAndNaN = List.of(
+                new MetricsCalculator.QueryResult(List.of(), List.of(), 1.0, null, null),
+                new MetricsCalculator.QueryResult(List.of(), List.of(), 1.0, null, Double.NaN)
+        );
+        assertTrue(new MetricsCalculator(onlyNullAndNaN).calculateAggregateAccuracy().isEmpty());
+
+        List<MetricsCalculator.QueryResult> mix = List.of(
+                new MetricsCalculator.QueryResult(List.of(), List.of(), 1.0, null, 0.25),
+                new MetricsCalculator.QueryResult(List.of(), List.of(), 1.0, null, null),
+                new MetricsCalculator.QueryResult(List.of(), List.of(), 1.0, null, 0.75)
+        );
+        assertEquals(0.5, new MetricsCalculator(mix).calculateAggregateAccuracy().orElseThrow(), 1e-9);
+    }
+
+    @Test
     void mrr_whenNoRelevantDocInNonEmptyLists() {
         List<MetricsCalculator.QueryResult> results = List.of(
                 new MetricsCalculator.QueryResult(

@@ -29,6 +29,9 @@ public class BenchmarkResult {
     // Additional metadata
     private final Map<String, String> metadata;
 
+    // Optional profile label — set when a benchmark uses multiple profiles of the same engine
+    private String profile;
+
     // Schema information (mappings and settings from the index schema template)
     private Map<String, Object> schema;
 
@@ -70,6 +73,12 @@ public class BenchmarkResult {
         return this;
     }
 
+    // Fluent API for setting profile
+    public BenchmarkResult setProfile(String profile) {
+        this.profile = profile;
+        return this;
+    }
+
     // Fluent API for adding schema
     public BenchmarkResult setSchema(Map<String, Object> schema) {
         this.schema = schema != null ? new HashMap<>(schema) : null;
@@ -87,6 +96,7 @@ public class BenchmarkResult {
     public Map<String, Object> getParams() { return new HashMap<>(params); }
     public Map<String, Object> getMetrics() { return new HashMap<>(metrics); }
     public Map<String, String> getMetadata() { return new HashMap<>(metadata); }
+    public String getProfile() { return profile; }
     public Map<String, Object> getSchema() { return schema != null ? new HashMap<>(schema) : null; }
 
     // Convenience getters for metrics
@@ -118,6 +128,9 @@ public class BenchmarkResult {
         map.put("@timestamp", timestamp);
         map.put("run_id", runId);
         map.put("engine", engine);
+        if (profile != null) {
+            map.put("profile", profile);
+        }
         map.put("engine_version", engineVersion);
         map.put("benchmark_type", benchmarkType);
         map.put("dataset", dataset);
@@ -162,6 +175,12 @@ public class BenchmarkResult {
         // Create result (timestamp will be set to current time by constructor)
         BenchmarkResult result = new BenchmarkResult(runId, engine, engineVersion, benchmarkType, dataset, paramKey, params);
 
+        // Extract optional profile if present
+        String profile = (String) map.get("profile");
+        if (profile != null) {
+            result.setProfile(profile);
+        }
+
         // Extract metadata if present
         Object metadataObj = map.get("metadata");
         if (metadataObj instanceof Map) {
@@ -180,7 +199,7 @@ public class BenchmarkResult {
         // All other fields are metrics (flattened at top level)
         // Standard fields to skip when extracting metrics
         java.util.Set<String> standardFields = java.util.Set.of(
-                "@timestamp", "run_id", "engine", "engine_version", "benchmark_type",
+                "@timestamp", "run_id", "engine", "profile", "engine_version", "benchmark_type",
                 "dataset", "param_key", "params", "metadata", "schema"
         );
 
