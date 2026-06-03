@@ -177,6 +177,26 @@ class ConfigValidatorTest {
         ConfigValidator.validateForEvaluation(c);
     }
 
+    @Test
+    void validateForEvaluation_ok_forEsqlQueryType() {
+        JingraConfig c = evalCompleteConfig();
+        DatasetConfig ds = c.getActiveDataset();
+        ds.setQueryType("esql");
+        ds.getQueriesMapping().setQueryVectorField(null);
+        ds.getQueriesMapping().setQueryTextField(null);
+        ds.getQueriesMapping().setGroundTruthField(null);
+        ConfigValidator.validateForEvaluation(c);
+    }
+
+    @Test
+    void validateForEvaluation_ok_whenVectorSetAndTextFieldWhitespaceOnly() {
+        JingraConfig c = evalCompleteConfig();
+        DatasetConfig.QueriesMappingConfig qm = c.getActiveDataset().getQueriesMapping();
+        qm.setQueryVectorField("vec_col");
+        qm.setQueryTextField("  \t  ");
+        ConfigValidator.validateForEvaluation(c);
+    }
+
     /** {@code query_vector_field} blank (non-null) exercises {@code isBlank()} on the left side of the OR. */
     @Test
     void validateForEvaluation_ok_whenVectorFieldWhitespaceOnly_andTextFieldSet() {
@@ -381,6 +401,14 @@ class ConfigValidatorTest {
     }
 
     @Test
+    void validateForLoad_ok_forMetricsDatasetWithoutIdField() {
+        JingraConfig c = loadCompleteConfig();
+        c.getActiveDataset().setType("metrics");
+        c.getActiveDataset().setDataMapping(null);
+        ConfigValidator.validateForLoad(c);
+    }
+
+    @Test
     void validateForLoad_pathNull() {
         JingraConfig c = loadCompleteConfig();
         c.getActiveDataset().setPath(null);
@@ -523,7 +551,7 @@ class ConfigValidatorTest {
         c.getAnalysis().setEngines(null);
         IllegalStateException ex =
                 assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
-        assertEquals("analysis.engines must have at least 1 engine", ex.getMessage());
+        assertEquals("Either analysis.engines or analysis.profiles must have at least 1 entry", ex.getMessage());
     }
 
     @Test
@@ -532,7 +560,7 @@ class ConfigValidatorTest {
         c.getAnalysis().setEngines(List.of());
         IllegalStateException ex =
                 assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
-        assertEquals("analysis.engines must have at least 1 engine", ex.getMessage());
+        assertEquals("Either analysis.engines or analysis.profiles must have at least 1 entry", ex.getMessage());
     }
 
     @Test
