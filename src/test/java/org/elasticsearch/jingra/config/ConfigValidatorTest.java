@@ -117,6 +117,25 @@ class ConfigValidatorTest {
     }
 
     @Test
+    void validateBase_throwsWhenDatasetNamesEmptyList() {
+        JingraConfig c = validBaseConfig();
+        c.setDatasetNames(List.of());
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> ConfigValidator.validateBase(c));
+        assertEquals("Dataset not specified in configuration", ex.getMessage());
+    }
+
+    @Test
+    void validateBase_throwsWhenListContainsNullDatasetName() {
+        JingraConfig c = validBaseConfig();
+        List<String> names = new java.util.ArrayList<>();
+        names.add("test-dataset");
+        names.add(null);
+        c.setDatasetNames(names);
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> ConfigValidator.validateBase(c));
+        assertEquals("Dataset not specified in configuration", ex.getMessage());
+    }
+
+    @Test
     void validateBase_emptyDataset() {
         JingraConfig c = validBaseConfig();
         c.setDataset("");
@@ -154,6 +173,37 @@ class ConfigValidatorTest {
         c.setDatasetNames(List.of("cpu", "disk"));
         c.setDatasets(Map.of("cpu", new DatasetConfig(), "disk", new DatasetConfig()));
         ConfigValidator.validateBase(c);
+    }
+
+    @Test
+    void validateBase_logsPluralDatasetsWhenMultipleNamesConfigured() {
+        JingraConfig c = validBaseConfig();
+        c.setDatasetNames(List.of("cpu", "disk"));
+        c.setDatasets(Map.of("cpu", new DatasetConfig(), "disk", new DatasetConfig()));
+        assertDoesNotThrow(() -> ConfigValidator.validateBase(c));
+    }
+
+    /**
+     * Logging re-reads {@link JingraConfig#getDatasetNames()}; cover the plural log branch when that
+     * second read is not a single-element list (including {@code null}).
+     */
+    @Test
+    void validateBase_logsPluralDatasetsWhenDatasetNamesClearedAfterValidation() {
+        JingraConfig base = validBaseConfig();
+        JingraConfig c =
+                new JingraConfig() {
+                    private int datasetNamesReads;
+
+                    @Override
+                    public List<String> getDatasetNames() {
+                        datasetNamesReads++;
+                        return datasetNamesReads == 1 ? base.getDatasetNames() : null;
+                    }
+                };
+        c.setEngine(base.getEngine());
+        c.setElasticsearch(base.getElasticsearch());
+        c.setDatasets(base.getDatasets());
+        assertDoesNotThrow(() -> ConfigValidator.validateBase(c));
     }
 
     @Test

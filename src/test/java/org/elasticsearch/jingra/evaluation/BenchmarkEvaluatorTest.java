@@ -127,6 +127,28 @@ class BenchmarkEvaluatorTest {
     }
 
     @Test
+    void testRunEvaluation_throwsWhenDatasetNamesNull() {
+        jingraConfig.setDatasetNames(null);
+        evaluator = new BenchmarkEvaluator(jingraConfig, mockEngine, List.of(mockSink));
+        assertThrows(NullPointerException.class, () -> evaluator.runEvaluation());
+    }
+
+    @Test
+    void testRunEvaluation_iteratesMultipleConfiguredDatasets() throws Exception {
+        org.elasticsearch.jingra.config.DatasetConfig second = jingraConfig.getActiveDataset();
+        Map<String, org.elasticsearch.jingra.config.DatasetConfig> datasets = new HashMap<>(jingraConfig.getDatasets());
+        datasets.put("second-dataset", second);
+        jingraConfig.setDatasets(datasets);
+        jingraConfig.setDatasetNames(List.of("test-dataset", "second-dataset"));
+
+        evaluator = new BenchmarkEvaluator(jingraConfig, mockEngine, List.of(mockSink));
+        evaluator.runEvaluation();
+
+        assertTrue(mockSink.resultCount > 0, "Should write results for each dataset");
+        assertTrue(mockEngine.queryCount > 0, "Should execute queries for each dataset");
+    }
+
+    @Test
     void testRunEvaluation_multipleParameterGroups() throws Exception {
         // Configure multiple parameter groups
         Map<String, Object> params1 = new HashMap<>();

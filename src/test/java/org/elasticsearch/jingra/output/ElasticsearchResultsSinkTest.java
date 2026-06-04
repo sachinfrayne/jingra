@@ -188,6 +188,16 @@ class ElasticsearchResultsSinkTest {
     }
 
     @Test
+    void consumesQueryMetrics_returnsFalseWhenWriteQueryMetricsDisabled() throws Exception {
+        Map<String, Object> config = new HashMap<>();
+        config.put("url", "http://localhost:9200");
+        config.put("write_query_metrics", false);
+        try (ElasticsearchResultsSink sink = new ElasticsearchResultsSink(config)) {
+            assertFalse(sink.consumesQueryMetrics());
+        }
+    }
+
+    @Test
     void testConstructor_insecureTlsDefaultsFalse() throws Exception {
         Map<String, Object> config = new HashMap<>();
         config.put("url", "http://localhost:9200");

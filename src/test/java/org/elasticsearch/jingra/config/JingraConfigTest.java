@@ -210,6 +210,54 @@ class JingraConfigTest {
     }
 
     @Test
+    void getDataset_returnsNull_whenDatasetNamesNeverSet() {
+        assertNull(new JingraConfig().getDataset());
+    }
+
+    @Test
+    void getDataset_returnsNull_whenDatasetNamesEmpty() {
+        JingraConfig c = new JingraConfig();
+        c.setDatasetNames(List.of());
+        assertNull(c.getDataset());
+    }
+
+    @Test
+    void getActiveDataset_throws_whenDatasetNamesEmpty() {
+        JingraConfig c = new JingraConfig();
+        c.setDatasetNames(List.of());
+        c.setDatasets(Map.of("cpu", new DatasetConfig()));
+        IllegalStateException ex = assertThrows(IllegalStateException.class, c::getActiveDataset);
+        assertEquals("No dataset configured", ex.getMessage());
+    }
+
+    @Test
+    void getActiveDatasets_throws_whenDatasetNamesEmpty() {
+        JingraConfig c = new JingraConfig();
+        c.setDatasetNames(List.of());
+        c.setDatasets(Map.of("cpu", new DatasetConfig()));
+        IllegalStateException ex = assertThrows(IllegalStateException.class, c::getActiveDatasets);
+        assertEquals("No dataset configured", ex.getMessage());
+    }
+
+    @Test
+    void getActiveDatasets_throws_whenDatasetsMapNull() {
+        JingraConfig c = new JingraConfig();
+        c.setDatasetNames(List.of("cpu"));
+        c.setDatasets(null);
+        IllegalStateException ex = assertThrows(IllegalStateException.class, c::getActiveDatasets);
+        assertEquals("No dataset configured", ex.getMessage());
+    }
+
+    @Test
+    void getActiveDatasets_throws_whenDatasetNamesNull() {
+        JingraConfig c = new JingraConfig();
+        c.setDatasetNames(null);
+        c.setDatasets(Map.of("cpu", new DatasetConfig()));
+        IllegalStateException ex = assertThrows(IllegalStateException.class, c::getActiveDatasets);
+        assertEquals("No dataset configured", ex.getMessage());
+    }
+
+    @Test
     void getActiveDatasets_returnsDatasetConfigInDeclaredOrder() {
         JingraConfig c = new JingraConfig();
         c.setDatasetNames(List.of("cpu", "disk"));

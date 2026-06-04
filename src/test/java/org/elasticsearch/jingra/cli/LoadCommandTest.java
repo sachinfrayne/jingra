@@ -14,6 +14,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -27,6 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -50,6 +52,22 @@ class LoadCommandTest {
         TrackingMock engine = new TrackingMock();
         LoadCommand.run(config, c -> engine);
         assertTrue(engine.ingestCalls >= 1);
+    }
+
+    @Test
+    void loadDataset_passesNullIdFieldWhenDataMappingAbsent() throws Exception {
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(10, oneBatchOf(10));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        DatasetConfig dataset = config.getActiveDataset();
+        dataset.setDataMapping(null);
+        TrackingMock engine = new TrackingMock();
+        Method loadDataset =
+                LoadCommand.class.getDeclaredMethod(
+                        "loadDataset", BenchmarkEngine.class, DatasetConfig.class, JingraConfig.class);
+        loadDataset.setAccessible(true);
+        loadDataset.invoke(null, engine, dataset, config);
+        assertTrue(engine.ingestCalls >= 1);
+        assertNull(engine.lastIngestIdField);
     }
 
     /** Covers {@code dataUrlEnv != null} → {@link org.elasticsearch.jingra.utils.FileDownloader#ensureFileExists}. */
@@ -739,10 +757,12 @@ class LoadCommandTest {
 
     private static class TrackingMock extends MockBenchmarkEngine {
         int ingestCalls;
+        String lastIngestIdField;
 
         @Override
         public int ingest(List<Document> documents, String indexName, String idField) {
             ingestCalls++;
+            lastIngestIdField = idField;
             return super.ingest(documents, indexName, idField);
         }
     }
