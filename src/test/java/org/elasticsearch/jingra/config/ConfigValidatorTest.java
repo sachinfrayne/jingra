@@ -2,6 +2,7 @@ package org.elasticsearch.jingra.config;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -145,6 +146,32 @@ class ConfigValidatorTest {
         c.setDataset("missing");
         IllegalStateException ex = assertThrows(IllegalStateException.class, () -> ConfigValidator.validateBase(c));
         assertEquals("Dataset 'missing' not found in datasets configuration", ex.getMessage());
+    }
+
+    @Test
+    void validateBase_acceptsListOfDatasetNames() {
+        JingraConfig c = validBaseConfig();
+        c.setDatasetNames(List.of("cpu", "disk"));
+        c.setDatasets(Map.of("cpu", new DatasetConfig(), "disk", new DatasetConfig()));
+        ConfigValidator.validateBase(c);
+    }
+
+    @Test
+    void validateBase_throws_whenAnyListedDatasetMissingFromMap() {
+        JingraConfig c = validBaseConfig();
+        c.setDatasetNames(List.of("cpu", "missing"));
+        c.setDatasets(Map.of("cpu", new DatasetConfig()));
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> ConfigValidator.validateBase(c));
+        assertEquals("Dataset 'missing' not found in datasets configuration", ex.getMessage());
+    }
+
+    @Test
+    void validateBase_throws_whenListContainsBlankName() {
+        JingraConfig c = validBaseConfig();
+        c.setDatasetNames(List.of("cpu", ""));
+        c.setDatasets(Map.of("cpu", new DatasetConfig()));
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> ConfigValidator.validateBase(c));
+        assertEquals("Dataset not specified in configuration", ex.getMessage());
     }
 
     @Test
@@ -391,6 +418,48 @@ class ConfigValidatorTest {
     }
 
     @Test
+    void validateForEvaluation_ok_whenMultipleDatasetsAllSatisfyRequirements() {
+        JingraConfig c = evalCompleteConfig();
+        DatasetConfig second = new DatasetConfig();
+        DatasetConfig.PathConfig p2 = new DatasetConfig.PathConfig();
+        p2.setQueriesPath("queries-2.parquet");
+        second.setPath(p2);
+        DatasetConfig.QueriesMappingConfig qm2 = new DatasetConfig.QueriesMappingConfig();
+        qm2.setQueryVectorField("v");
+        qm2.setGroundTruthField("g");
+        second.setQueriesMapping(qm2);
+        second.setParamGroups(Map.of("r", List.of(Map.of("k", 10))));
+
+        Map<String, DatasetConfig> merged = new java.util.HashMap<>(c.getDatasets());
+        merged.put("second", second);
+        c.setDatasets(merged);
+        c.setDatasetNames(List.of("test-dataset", "second"));
+
+        ConfigValidator.validateForEvaluation(c);
+    }
+
+    @Test
+    void validateForEvaluation_throws_whenSecondDatasetMissingQueriesPath() {
+        JingraConfig c = evalCompleteConfig();
+        DatasetConfig second = new DatasetConfig();
+        second.setPath(new DatasetConfig.PathConfig()); // no queries_path
+        DatasetConfig.QueriesMappingConfig qm2 = new DatasetConfig.QueriesMappingConfig();
+        qm2.setQueryVectorField("v");
+        qm2.setGroundTruthField("g");
+        second.setQueriesMapping(qm2);
+        second.setParamGroups(Map.of("r", List.of(Map.of("k", 10))));
+
+        Map<String, DatasetConfig> merged = new java.util.HashMap<>(c.getDatasets());
+        merged.put("second", second);
+        c.setDatasets(merged);
+        c.setDatasetNames(List.of("test-dataset", "second"));
+
+        IllegalStateException ex =
+                assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForEvaluation(c));
+        assertEquals("dataset.path.queries_path is required for evaluation", ex.getMessage());
+    }
+
+    @Test
     void validateForLoad_nullConfig() {
         assertThrows(NullPointerException.class, () -> ConfigValidator.validateForLoad(null));
     }
@@ -454,6 +523,39 @@ class ConfigValidatorTest {
         c.getActiveDataset().getDataMapping().setIdField("");
         IllegalStateException ex = assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForLoad(c));
         assertEquals("dataset.data_mapping.id_field is required for load", ex.getMessage());
+    }
+
+    @Test
+    void validateForLoad_ok_whenMultipleDatasetsAllSatisfyRequirements() {
+        JingraConfig c = loadCompleteConfig();
+        DatasetConfig second = new DatasetConfig();
+        DatasetConfig.PathConfig p = new DatasetConfig.PathConfig();
+        p.setDataPath("data2.parquet");
+        second.setPath(p);
+        DatasetConfig.DataMappingConfig dm = new DatasetConfig.DataMappingConfig();
+        dm.setIdField("id");
+        second.setDataMapping(dm);
+        Map<String, DatasetConfig> merged = new HashMap<>(c.getDatasets());
+        merged.put("second", second);
+        c.setDatasets(merged);
+        c.setDatasetNames(List.of("test-dataset", "second"));
+        ConfigValidator.validateForLoad(c);
+    }
+
+    @Test
+    void validateForLoad_throws_whenSecondDatasetMissingDataPath() {
+        JingraConfig c = loadCompleteConfig();
+        DatasetConfig second = new DatasetConfig();
+        second.setPath(new DatasetConfig.PathConfig());  // no data_path set
+        DatasetConfig.DataMappingConfig dm = new DatasetConfig.DataMappingConfig();
+        dm.setIdField("id");
+        second.setDataMapping(dm);
+        Map<String, DatasetConfig> merged = new HashMap<>(c.getDatasets());
+        merged.put("second", second);
+        c.setDatasets(merged);
+        c.setDatasetNames(List.of("test-dataset", "second"));
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForLoad(c));
+        assertEquals("dataset.path.data_path is required for load", ex.getMessage());
     }
 
     /** Passes {@link ConfigValidator#validateBase} with engine {@code elasticsearch}. */
@@ -568,6 +670,47 @@ class ConfigValidatorTest {
         JingraConfig c = analysisCompleteConfig();
         c.getAnalysis().setEngines(List.of("elasticsearch"));
         assertDoesNotThrow(() -> ConfigValidator.validateForAnalysis(c));
+    }
+
+    @Test
+    void validateForAnalysis_ok_withProfiles() {
+        JingraConfig c = analysisCompleteConfig();
+        c.getAnalysis().setEngines(null);
+        c.getAnalysis().setProfiles(List.of("baseline", "tuned"));
+        assertDoesNotThrow(() -> ConfigValidator.validateForAnalysis(c));
+    }
+
+    @Test
+    void validateForAnalysis_rejectsEnginesAndProfilesTogether() {
+        JingraConfig c = analysisCompleteConfig();
+        c.getAnalysis().setProfiles(List.of("baseline"));
+        IllegalStateException ex =
+                assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
+        assertEquals(
+                "analysis.engines and analysis.profiles are mutually exclusive — use one or the other",
+                ex.getMessage());
+    }
+
+    @Test
+    void validateForAnalysis_profilesRequireTopLevelEngine() {
+        JingraConfig c = analysisCompleteConfig();
+        c.getAnalysis().setEngines(null);
+        c.getAnalysis().setProfiles(List.of("baseline"));
+        c.setEngine(null);
+        IllegalStateException ex =
+                assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
+        assertEquals("Top-level engine: is required when analysis.profiles is set", ex.getMessage());
+    }
+
+    @Test
+    void validateForAnalysis_profilesRejectBlankTopLevelEngine() {
+        JingraConfig c = analysisCompleteConfig();
+        c.getAnalysis().setEngines(null);
+        c.getAnalysis().setProfiles(List.of("baseline"));
+        c.setEngine("   ");
+        IllegalStateException ex =
+                assertThrows(IllegalStateException.class, () -> ConfigValidator.validateForAnalysis(c));
+        assertEquals("Top-level engine: is required when analysis.profiles is set", ex.getMessage());
     }
 
     @Test

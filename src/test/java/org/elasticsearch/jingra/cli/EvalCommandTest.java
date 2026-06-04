@@ -136,4 +136,38 @@ class EvalCommandTest {
         ctor.setAccessible(true);
         ctor.newInstance();
     }
+
+    @Test
+    void runIteratesOverEachConfiguredDataset() throws Exception {
+        DatasetConfig second = new DatasetConfig();
+        second.setIndexName("test-index");
+        second.setQueryName("second-query");
+        DatasetConfig.PathConfig pathConfig = new DatasetConfig.PathConfig();
+        pathConfig.setQueriesPath("src/test/resources/parquet/test_vector_queries.parquet");
+        second.setPath(pathConfig);
+        DatasetConfig.QueriesMappingConfig qm = new DatasetConfig.QueriesMappingConfig();
+        qm.setQueryVectorField("embedding");
+        qm.setGroundTruthField("ground_truth");
+        qm.setConditionsField("meta_conditions");
+        second.setQueriesMapping(qm);
+        Map<String, Object> p = new HashMap<>();
+        p.put("k", 5);
+        p.put("size", 5);
+        second.setParamGroups(Map.of("default", List.of(p)));
+
+        Map<String, DatasetConfig> merged = new HashMap<>(jingraConfig.getDatasets());
+        merged.put("second-dataset", second);
+        jingraConfig.setDatasets(merged);
+        jingraConfig.setDatasetNames(List.of("test-dataset", "second-dataset"));
+
+        MockBenchmarkEngine engine = new MockBenchmarkEngine();
+        MockResultsSink sink = new MockResultsSink();
+        EvalCommand.run(jingraConfig, c -> engine, c -> List.of(sink));
+
+        long uniqueDatasets = sink.results.stream()
+                .map(r -> r.getDataset())
+                .distinct()
+                .count();
+        assertEquals(2, uniqueDatasets, "expected separate BenchmarkResult per dataset");
+    }
 }

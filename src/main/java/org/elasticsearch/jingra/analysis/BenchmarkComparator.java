@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 /**
  * Compares benchmark results between baseline and target engines.
@@ -32,9 +33,17 @@ public class BenchmarkComparator {
             List<BenchmarkResult> targetResults,
             String recallAtN
     ) {
+        return compare(baselineResults, targetResults, recallAtN, BenchmarkResult::getEngine);
+    }
+
+    public List<ComparisonResult> compare(
+            List<BenchmarkResult> baselineResults,
+            List<BenchmarkResult> targetResults,
+            String recallAtN,
+            Function<BenchmarkResult, String> labelExtractor
+    ) {
         List<ComparisonResult> comparisons = new ArrayList<>();
 
-        // Match results by param_key
         Map<String, Pair> matched = matchByParamKey(baselineResults, targetResults);
 
         for (Map.Entry<String, Pair> entry : matched.entrySet()) {
@@ -45,11 +54,11 @@ public class BenchmarkComparator {
             ComparisonResult comparison = ComparisonResult.builder()
                     .recallAtN(recallAtN)
                     .paramKey(paramKey)
-                    .baselineEngine(baseline.getEngine())
+                    .baselineEngine(labelExtractor.apply(baseline))
                     .baselineRecall(getRecall(baseline))
                     .baselineLatency(getLatency(baseline))
                     .baselineThroughput(getThroughput(baseline))
-                    .targetEngine(target.getEngine())
+                    .targetEngine(labelExtractor.apply(target))
                     .targetRecall(getRecall(target))
                     .targetLatency(getLatency(target))
                     .targetThroughput(getThroughput(target))

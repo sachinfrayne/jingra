@@ -664,6 +664,28 @@ class BenchmarkEvaluatorTest {
     }
 
     @Test
+    void calculateMetrics_setsProfileWhenConfigured() throws Exception {
+        jingraConfig.setProfile("baseline");
+        MetricsCalculator.QueryResult res = new MetricsCalculator.QueryResult(
+                List.of("a"), List.of("a"), 10.0, null);
+        BenchmarkResult br = invokeCalculateMetrics(List.of(res), 1000L);
+        assertEquals("baseline", br.getProfile());
+    }
+
+    @Test
+    void buildQueryMetric_includesProfileWhenConfigured() throws Exception {
+        jingraConfig.setProfile("tuned");
+        Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
+        Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, String.class, List.class, Map.class);
+        ctor.setAccessible(true);
+        Object qd = ctor.newInstance(List.of(1f), null, List.of("a"), null);
+        MetricsCalculator.QueryResult res = new MetricsCalculator.QueryResult(
+                List.of("a"), List.of("a"), 1.0, 2L);
+        Map<String, Object> metric = invokeBuildQueryMetric(evaluator, res, qd, Map.of());
+        assertEquals("tuned", metric.get("profile"));
+    }
+
+    @Test
     void calculateMetrics_setsSchemaWhenSchemaNameConfiguredAndTemplateFound() throws Exception {
         org.elasticsearch.jingra.config.DatasetConfig datasetConfig = jingraConfig.getActiveDataset();
         datasetConfig.setSchemaName("schema-a");
@@ -1100,6 +1122,23 @@ class BenchmarkEvaluatorTest {
         }
     }
 
+    /** A sink that declares it consumes query metrics so the evaluator will build them. */
+    static final class MetricsConsumingSink extends MockResultsSink {
+        int queryMetricsBatchCalls;
+        int lastBatchSize;
+
+        @Override
+        public boolean consumesQueryMetrics() {
+            return true;
+        }
+
+        @Override
+        public void writeQueryMetricsBatch(List<Map<String, Object>> queryMetrics) {
+            queryMetricsBatchCalls++;
+            lastBatchSize = queryMetrics == null ? 0 : queryMetrics.size();
+        }
+    }
+
     static final class BenchmarkEvaluatorWithInjectableExecutor extends BenchmarkEvaluator {
         private final IntFunction<ExecutorService> poolFactory;
 
@@ -1285,6 +1324,44 @@ class BenchmarkEvaluatorTest {
         Field f = oc.getDeclaredField("failures");
         f.setAccessible(true);
         return (Integer) f.get(outcome);
+    }
+
+    @Test
+    void executeQueries_measurementWithNoConsumingSink_noQueryMetricsBatch() throws Exception {
+        // CountingResultsSink does not override consumesQueryMetrics() so it returns false.
+        // Even in measurement mode, buildQueryMetric should never be called and the batch never sent.
+        List<Object> queries = buildQueryDocuments(5);
+        CountingResultsSink sink = new CountingResultsSink();
+        BenchmarkEvaluator ev = new BenchmarkEvaluator(jingraConfig, mockEngine, List.of(sink));
+        Object outcome = invokeExecuteQueries(ev, queries, true, 1);
+        assertEquals(5, outcomeResults(outcome).size());
+        assertEquals(0, sink.queryMetricsBatchCalls,
+                "buildQueryMetric should be skipped when no sink consumesQueryMetrics()");
+    }
+
+    @Test
+    void executeQueries_measurementWithConsumingSink_batchDeliveredToSink() throws Exception {
+        List<Object> queries = buildQueryDocuments(3);
+        MetricsConsumingSink sink = new MetricsConsumingSink();
+        BenchmarkEvaluator ev = new BenchmarkEvaluator(jingraConfig, mockEngine, List.of(sink));
+        Object outcome = invokeExecuteQueries(ev, queries, true, 1);
+        assertEquals(3, outcomeResults(outcome).size());
+        assertEquals(1, sink.queryMetricsBatchCalls,
+                "sink should receive exactly one batch call per measurement invocation");
+        assertEquals(3, sink.lastBatchSize, "batch should contain one metric per query");
+    }
+
+    @Test
+    void executeQueries_warmupWithConsumingSink_buildQueryMetricCalledButBatchNotSent() throws Exception {
+        // collectResults=false (warmup): buildQueryMetric is still called (to warm the JIT)
+        // but the results are discarded so writeQueryMetricsBatch is never invoked.
+        List<Object> queries = buildQueryDocuments(3);
+        MetricsConsumingSink sink = new MetricsConsumingSink();
+        BenchmarkEvaluator ev = new BenchmarkEvaluator(jingraConfig, mockEngine, List.of(sink));
+        Object outcome = invokeExecuteQueries(ev, queries, false, 1);
+        assertEquals(0, outcomeResults(outcome).size(), "warmup should not retain results");
+        assertEquals(0, sink.queryMetricsBatchCalls,
+                "writeQueryMetricsBatch should not be called during warmup");
     }
 
 }

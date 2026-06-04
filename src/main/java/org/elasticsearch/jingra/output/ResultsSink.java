@@ -27,6 +27,15 @@ public interface ResultsSink extends AutoCloseable {
     }
 
     /**
+     * Whether this sink will actually consume per-query metrics.
+     * Used by BenchmarkEvaluator to decide whether to build query metric objects at all.
+     * Default is false — sinks that do write query metrics must override this to return true.
+     */
+    default boolean consumesQueryMetrics() {
+        return false;
+    }
+
+    /**
      * Flush any buffered results.
      */
     default void flush() {

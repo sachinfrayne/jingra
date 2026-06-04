@@ -50,21 +50,26 @@ public final class EvalCommand {
                 throw new RuntimeException("Failed to connect to engine");
             }
 
-            String indexName = config.getActiveDataset().getIndexName();
-            if (!engine.indexExists(indexName)) {
-                throw new RuntimeException("Index '" + indexName + "' does not exist. Run 'load' command first.");
-            }
+            List<String> datasetNames = config.getDatasetNames();
+            List<DatasetConfig> datasets = config.getActiveDatasets();
+            for (int i = 0; i < datasets.size(); i++) {
+                String datasetName = datasetNames.get(i);
+                DatasetConfig dataset = datasets.get(i);
 
-            long docCount = engine.getDocumentCount(indexName);
-            logger.info("Index '{}' contains {} documents", indexName, docCount);
+                String indexName = dataset.getIndexName();
+                if (!engine.indexExists(indexName)) {
+                    throw new RuntimeException("Index '" + indexName + "' does not exist. Run 'load' command first.");
+                }
+                long docCount = engine.getDocumentCount(indexName);
+                logger.info("Dataset '{}' index '{}' contains {} documents", datasetName, indexName, docCount);
 
-            DatasetConfig dataset = config.getActiveDataset();
-            String queriesPath = dataset.getPath().getQueriesPath();
-            String queriesUrlEnv = dataset.getPath().getQueriesUrlEnv();
-            if (queriesUrlEnv != null) {
-                FileDownloader.ensureFileExists(queriesPath, queriesUrlEnv);
-            } else if (!new java.io.File(queriesPath).exists()) {
-                throw new RuntimeException("Queries file not found: " + queriesPath);
+                String queriesPath = dataset.getPath().getQueriesPath();
+                String queriesUrlEnv = dataset.getPath().getQueriesUrlEnv();
+                if (queriesUrlEnv != null) {
+                    FileDownloader.ensureFileExists(queriesPath, queriesUrlEnv);
+                } else if (!new java.io.File(queriesPath).exists()) {
+                    throw new RuntimeException("Queries file not found: " + queriesPath);
+                }
             }
 
             BenchmarkEvaluator evaluator = new BenchmarkEvaluator(config, engine, sinks);

@@ -63,6 +63,31 @@ class BenchmarkResultTest {
     }
 
     @Test
+    void setProfile_roundTripsAndAppearsInToMap() {
+        BenchmarkResult result = createTestResult().setProfile("baseline");
+        assertEquals("baseline", result.getProfile());
+        assertTrue(result.toMap().containsKey("profile"));
+        assertEquals("baseline", result.toMap().get("profile"));
+    }
+
+    @Test
+    void fromMap_extractsProfile() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("@timestamp", "2026-01-01T00:00:00Z");
+        map.put("run_id", "test-run");
+        map.put("engine", "elasticsearch");
+        map.put("engine_version", "9.4.0");
+        map.put("benchmark_type", "vector_search");
+        map.put("dataset", "ds");
+        map.put("param_key", "pk");
+        map.put("params", Map.of());
+        map.put("profile", "tuned");
+
+        BenchmarkResult result = BenchmarkResult.fromMap(map);
+        assertEquals("tuned", result.getProfile());
+    }
+
+    @Test
     void testAddMetadata() {
         BenchmarkResult result = createTestResult();
 

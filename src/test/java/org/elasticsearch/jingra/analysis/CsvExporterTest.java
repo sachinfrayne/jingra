@@ -1659,6 +1659,52 @@ class CsvExporterTest {
     }
 
     @Test
+    void exportAllResults_skipsRowsWhenLabelExtractorReturnsNull() throws IOException {
+        CsvExporter exporter = new CsvExporter(tempDir.toString(), r ->
+                "elasticsearch".equals(r.getEngine()) ? r.getEngine() : null);
+        org.elasticsearch.jingra.model.BenchmarkResult es = bench("elasticsearch", "k=a", 0.951, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd = bench("qdrant", "ef=b", 0.949, 20.0, 10.0);
+
+        exporter.exportAllResults(List.of(es, qd), "recall@100", List.of("latency_median"), "elasticsearch", "full.csv");
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("full.csv"));
+        assertEquals(2, lines.size(), "header + elasticsearch row only");
+        assertTrue(lines.get(1).contains("elasticsearch"));
+        assertFalse(lines.stream().anyMatch(l -> l.contains("qdrant")));
+    }
+
+    @Test
+    void writeSummaryFile_skipsPairedRowWhenLabelExtractorReturnsNull() throws Exception {
+        org.elasticsearch.jingra.model.BenchmarkResult es = bench("elasticsearch", "k=a", 0.951, 10.0, 50.0);
+        org.elasticsearch.jingra.model.BenchmarkResult qd = bench("qdrant", "ef=b", 0.949, 20.0, 10.0);
+        List<org.elasticsearch.jingra.model.BenchmarkResult> sorted = List.of(es, qd);
+        List<List<org.elasticsearch.jingra.model.BenchmarkResult>> pairs = List.of(List.of(es, qd));
+        java.util.IdentityHashMap<org.elasticsearch.jingra.model.BenchmarkResult, String> speedupValues =
+                new java.util.IdentityHashMap<>();
+        speedupValues.put(es, "5");
+
+        CsvExporter exporter = new CsvExporter(tempDir.toString(), r ->
+                "elasticsearch".equals(r.getEngine()) ? r.getEngine() : null);
+
+        Method m = CsvExporter.class.getDeclaredMethod(
+                "writeSummaryFile",
+                List.class,
+                String.class,
+                List.class,
+                List.class,
+                java.util.IdentityHashMap.class,
+                String.class,
+                boolean.class);
+        m.setAccessible(true);
+        m.invoke(exporter, sorted, "recall@100", List.of("latency_median"), pairs, speedupValues, "summary.csv", true);
+
+        List<String> lines = Files.readAllLines(tempDir.resolve("summary.csv"));
+        assertEquals(2, lines.size(), "header + elasticsearch row only");
+        assertTrue(lines.get(1).contains("elasticsearch"));
+        assertFalse(lines.stream().anyMatch(l -> l.contains("qdrant")));
+    }
+
+    @Test
     void exportResultsCsvs_speedupAgreesInBothFiles() throws IOException {
         CsvExporter exporter = new CsvExporter(tempDir.toString());
         org.elasticsearch.jingra.model.BenchmarkResult es = bench("elasticsearch", "k=a", 0.951, 10.0, 50.0);

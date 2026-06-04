@@ -3,6 +3,7 @@ package org.elasticsearch.jingra.testing;
 import org.elasticsearch.jingra.model.BenchmarkResult;
 import org.elasticsearch.jingra.output.ResultsSink;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -12,11 +13,13 @@ import java.util.Map;
 public class MockResultsSink implements ResultsSink {
     public int resultCount = 0;
     public BenchmarkResult lastResult = null;
+    public final List<BenchmarkResult> results = new ArrayList<>();
 
     @Override
     public void writeResult(BenchmarkResult result) {
         resultCount++;
         lastResult = result;
+        results.add(result);
     }
 
     @Override

@@ -548,6 +548,54 @@ class AnalyzeCommandTest {
     }
 
     @Test
+    void run_comparesProfilesOnSameEngine() throws Exception {
+        JingraConfig config = createProfilesConfig();
+        MockResultsEngine mockEngine = new MockResultsEngine();
+
+        mockEngine.addResult(createResultWithProfile("baseline", "k=100", 0.90, 5.0, "recall@100"));
+        mockEngine.addResult(createResultWithProfile("tuned", "k=100", 0.95, 4.0, "recall@100"));
+
+        AnalyzeCommand.run(config, cfg -> mockEngine);
+
+        assertTrue(Files.exists(tempDir.resolve("recall@100_full_results.csv")));
+        assertTrue(Files.exists(tempDir.resolve("summary_comparison.csv")));
+        assertTrue(mockEngine.lastQueryJson.contains("profile.keyword"));
+    }
+
+    @Test
+    void run_profilesMode_metricsPlotsSkipResultsWithNullProfile() throws Exception {
+        JingraConfig config = createProfilesConfig();
+        config.getAnalysis().setGeneratePlots(true);
+        config.getAnalysis().setLatencyMetrics(List.of("latency_median"));
+
+        MockResultsEngine mockEngine = new MockResultsEngine();
+        mockEngine.addResult(createMetricsResultWithProfile("baseline", "size=10", 1.5, "latency@10"));
+        mockEngine.addResult(createMetricsResultWithProfile("tuned", "size=10", 1.8, "latency@10"));
+        BenchmarkResult noProfile = createMetricsResult("elasticsearch", "size=20", 2.0, "latency@10");
+        mockEngine.addResult(noProfile);
+
+        AnalyzeCommand.run(config, cfg -> mockEngine);
+
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().startsWith("latency_")));
+    }
+
+    @Test
+    void run_profilesMode_generatesPlotsAndSkipsResultsWithNullProfile() throws Exception {
+        JingraConfig config = createProfilesConfig();
+        config.getAnalysis().setGeneratePlots(true);
+        config.getAnalysis().setLatencyMetrics(List.of("latency_median"));
+
+        MockResultsEngine mockEngine = new MockResultsEngine();
+        mockEngine.addResult(createResultWithProfile("baseline", "k=100", 0.90, 5.0, "recall@100"));
+        mockEngine.addResult(createResultWithProfile("tuned", "k=100", 0.95, 4.0, "recall@100"));
+        mockEngine.addResult(createResult("elasticsearch", "k=50", 0.80, 3.0, "recall@100"));
+
+        AnalyzeCommand.run(config, cfg -> mockEngine);
+
+        assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().endsWith(".png")));
+    }
+
+    @Test
     void run_passesEngineVersionsToPlotGenerator() throws Exception {
         AtomicReference<Map<String, String>> capturedVersions = new AtomicReference<>();
         AnalyzeCommand.plotGeneratorFactory = (out, versions) -> {
@@ -570,6 +618,23 @@ class AnalyzeCommandTest {
 
     // Helper methods
 
+    private JingraConfig createProfilesConfig() {
+        JingraConfig config = new JingraConfig();
+        config.setEngine("elasticsearch");
+        config.setDataset("test-dataset");
+
+        AnalysisConfig ac = new AnalysisConfig();
+        ac.setRunId("test-run-123");
+        ac.setProfiles(List.of("baseline", "tuned"));
+        ac.setResultsCluster(Map.of("url", "http://localhost:9200"));
+        ac.setOutputDirectory(tempDir.toString());
+        ac.setLatencyMetrics(List.of("latency_median"));
+        ac.setGeneratePlots(false);
+
+        config.setAnalysis(ac);
+        return config;
+    }
+
     private JingraConfig createValidConfig() {
         JingraConfig config = new JingraConfig();
         config.setEngine("elasticsearch");
@@ -585,6 +650,13 @@ class AnalyzeCommandTest {
 
         config.setAnalysis(ac);
         return config;
+    }
+
+    private BenchmarkResult createResultWithProfile(String profile, String paramKey, double recall, double latency,
+                                                    String recallLabel) {
+        BenchmarkResult result = createResult("elasticsearch", paramKey, recall, latency, recallLabel);
+        result.setProfile(profile);
+        return result;
     }
 
     private BenchmarkResult createResult(String engine, String paramKey, double recall, double latency, String recallLabel) {
@@ -604,6 +676,13 @@ class AnalyzeCommandTest {
         result.addMetric("throughput", 100.0 / latency);  // Derive throughput from latency
         result.addMetadata("recall_label", recallLabel);
 
+        return result;
+    }
+
+    private BenchmarkResult createMetricsResultWithProfile(String profile, String paramKey, double latency,
+                                                           String groupLabel) {
+        BenchmarkResult result = createMetricsResult("elasticsearch", paramKey, latency, groupLabel);
+        result.setProfile(profile);
         return result;
     }
 
@@ -646,6 +725,7 @@ class AnalyzeCommandTest {
         boolean closeCalled = false;
         boolean failConnect = false;
         String queriedRunId = null;
+        String lastQueryJson = null;
         private final List<BenchmarkResult> results = new java.util.ArrayList<>();
 
         public MockResultsEngine() {
@@ -667,6 +747,7 @@ class AnalyzeCommandTest {
 
         @Override
         public co.elastic.clients.elasticsearch.core.SearchResponse<Map> search(String indexName, String queryJson) {
+            this.lastQueryJson = queryJson;
             // Extract run_id from query JSON
             if (queryJson.contains("run_id")) {
                 queriedRunId = "test-run-123";  // Simplified - just record that we queried

@@ -195,6 +195,33 @@ class AnalysisConfigTest {
     }
 
     @Test
+    void getProfiles_returnsEmptyListWhenUnset() {
+        AnalysisConfig config = new AnalysisConfig();
+        assertTrue(config.getProfiles().isEmpty());
+    }
+
+    @Test
+    void setProfiles_roundTripsThroughGetter() {
+        AnalysisConfig config = new AnalysisConfig();
+        config.setProfiles(List.of("baseline", "tuned"));
+        assertEquals(List.of("baseline", "tuned"), config.getProfiles());
+    }
+
+    @Test
+    void deserializesProfilesFromYaml() throws Exception {
+        String yaml = """
+                run_id: "test-run-123"
+                profiles:
+                  - baseline
+                  - tuned
+                results_cluster:
+                  url: "http://localhost:9200"
+                """;
+        AnalysisConfig config = yamlMapper.readValue(yaml, AnalysisConfig.class);
+        assertEquals(List.of("baseline", "tuned"), config.getProfiles());
+    }
+
+    @Test
     void deserializesEngineVersionsFromYaml() throws Exception {
         String yaml = """
                 run_id: "test-run-123"

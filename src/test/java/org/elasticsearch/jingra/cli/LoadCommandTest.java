@@ -583,11 +583,70 @@ class LoadCommandTest {
     }
 
     @Test
+    void run_loadsEachUniqueIndex_whenMultipleDatasetsDeclareDifferentIndexes() throws Exception {
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        addSecondDataset(config, "ds2", "idx2", "src/test/resources/parquet/test_text_data.parquet");
+
+        IndexTrackingMock engine = new IndexTrackingMock();
+        LoadCommand.run(config, c -> engine);
+
+        assertEquals(2, engine.createCalls.size(), "expected one createIndex per unique index");
+        assertTrue(engine.createCalls.contains("idx"));
+        assertTrue(engine.createCalls.contains("idx2"));
+    }
+
+    @Test
+    void run_dedupes_whenMultipleDatasetsShareIndexAndDataPath() throws Exception {
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        addSecondDataset(config, "ds2", "idx", "src/test/resources/parquet/test_text_data.parquet");
+
+        IndexTrackingMock engine = new IndexTrackingMock();
+        LoadCommand.run(config, c -> engine);
+
+        assertEquals(1, engine.createCalls.size(), "second dataset sharing index + data_path should be skipped");
+        assertEquals("idx", engine.createCalls.get(0));
+    }
+
+    @Test
+    void run_throws_whenSameIndexHasConflictingDataPath() {
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        addSecondDataset(config, "ds2", "idx", "/different/path.ndjson");
+
+        IndexTrackingMock engine = new IndexTrackingMock();
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> LoadCommand.run(config, c -> engine));
+        assertTrue(ex.getMessage().contains("idx"),
+                "error should name the conflicting index, was: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("data_path"),
+                "error should explain the conflict is about data_path, was: " + ex.getMessage());
+    }
+
+    @Test
     void privateCtor() throws Exception {
         var cl = Class.forName("org.elasticsearch.jingra.cli.LoadCommand");
         var ctor = cl.getDeclaredConstructor();
         ctor.setAccessible(true);
         ctor.newInstance();
+    }
+
+    private static void addSecondDataset(JingraConfig config, String name, String indexName, String dataPath) {
+        DatasetConfig ds = new DatasetConfig();
+        ds.setIndexName(indexName);
+        ds.setSchemaName("test-schema");
+        DatasetConfig.PathConfig path = new DatasetConfig.PathConfig();
+        path.setDataPath(dataPath);
+        ds.setPath(path);
+        DatasetConfig.DataMappingConfig dm = new DatasetConfig.DataMappingConfig();
+        dm.setIdField("catalog_id");
+        ds.setDataMapping(dm);
+
+        Map<String, DatasetConfig> merged = new HashMap<>(config.getDatasets());
+        merged.put(name, ds);
+        config.setDatasets(merged);
+        config.setDatasetNames(List.of("ds", name));
     }
 
     private static JingraConfig buildLoadConfig(String dataPath) {
@@ -685,6 +744,20 @@ class LoadCommandTest {
         public int ingest(List<Document> documents, String indexName, String idField) {
             ingestCalls++;
             return super.ingest(documents, indexName, idField);
+        }
+    }
+
+    private static class IndexTrackingMock extends MockBenchmarkEngine {
+        final List<String> createCalls = Collections.synchronizedList(new ArrayList<>());
+
+        IndexTrackingMock() {
+            indexPresent = false;
+        }
+
+        @Override
+        public boolean createIndex(String indexName, String schemaName) {
+            createCalls.add(indexName);
+            return super.createIndex(indexName, schemaName);
         }
     }
 

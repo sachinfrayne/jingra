@@ -144,6 +144,11 @@ public class ElasticsearchResultsSink implements ResultsSink {
     }
 
     @Override
+    public boolean consumesQueryMetrics() {
+        return writeQueryMetrics;
+    }
+
+    @Override
     public void writeQueryMetricsBatch(List<Map<String, Object>> queryMetrics) {
         if (!writeQueryMetrics) {
             logger.debug("writeQueryMetrics is disabled, skipping {} query metrics",

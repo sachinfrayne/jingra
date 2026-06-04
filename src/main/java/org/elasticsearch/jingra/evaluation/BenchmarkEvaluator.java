@@ -34,6 +34,14 @@ public class BenchmarkEvaluator {
     private final BenchmarkEngine engine;
     private final List<ResultsSink> sinks;
     private final String runId;
+    private final boolean anySinkConsumesQueryMetrics;
+
+    /**
+     * Name of the dataset currently being evaluated; updated per iteration of
+     * {@link #runEvaluation()} so that {@link #calculateMetrics} and {@link #buildQueryMetric}
+     * tag their output with the right dataset when multiple are configured.
+     */
+    private volatile String currentDatasetName;
 
     public BenchmarkEvaluator(JingraConfig config, BenchmarkEngine engine, List<ResultsSink> sinks) {
         this.config = config;
@@ -44,35 +52,52 @@ public class BenchmarkEvaluator {
         this.runId = (evalConfig != null && evalConfig.getRunId() != null)
                 ? evalConfig.getRunId()
                 : generateRunId();
+        this.currentDatasetName = config.getDataset();
+        this.anySinkConsumesQueryMetrics = sinks.stream().anyMatch(ResultsSink::consumesQueryMetrics);
     }
 
     /**
-     * Run the full benchmark evaluation.
+     * Run the full benchmark evaluation, iterating once per configured dataset.
      */
     public void runEvaluation() throws IOException {
-        DatasetConfig dataset = config.getActiveDataset();
+        List<String> names = config.getDatasetNames();
         EvaluationConfig evalConfig = config.getEvaluation();
+        Map<String, DatasetConfig> datasets = config.getDatasets();
 
         logger.info("Starting benchmark evaluation");
         logger.info("  Run ID: {}", runId);
         logger.info("  Engine: {}", engine.getEngineName());
-        logger.info("  Dataset: {}", config.getDataset());
+        if (names != null && names.size() == 1) {
+            logger.info("  Dataset: {}", names.get(0));
+        } else {
+            logger.info("  Datasets: {}", names);
+        }
 
-        // Load queries from Parquet
+        for (String name : names) {
+            this.currentDatasetName = name;
+            DatasetConfig dataset = datasets.get(name);
+            runEvaluationForDataset(name, dataset, evalConfig);
+        }
+
+        logger.info("Benchmark evaluation complete");
+    }
+
+    private void runEvaluationForDataset(String datasetName, DatasetConfig dataset, EvaluationConfig evalConfig)
+            throws IOException {
+        logger.info("Evaluating dataset: {}", datasetName);
+
         String queriesPath = dataset.getPath().getQueriesPath();
         logger.info("Loading queries from: {}", queriesPath);
 
         List<QueryDocument> queries = loadQueries(queriesPath, dataset);
         logger.info("Loaded {} queries", queries.size());
 
-        // Get parameter groups to evaluate
         Map<String, List<Map<String, Object>>> paramGroups = dataset.getParamGroups();
         if (paramGroups == null || paramGroups.isEmpty()) {
-            logger.error("No parameter groups configured");
+            logger.error("No parameter groups configured for dataset {}", datasetName);
             return;
         }
 
-        // Evaluate each parameter group
         for (Map.Entry<String, List<Map<String, Object>>> entry : paramGroups.entrySet()) {
             String recallLabel = entry.getKey();
             List<Map<String, Object>> paramsList = entry.getValue();
@@ -83,8 +108,6 @@ public class BenchmarkEvaluator {
                 evaluateParameterSet(queries, dataset, evalConfig, recallLabel, params);
             }
         }
-
-        logger.info("Benchmark evaluation complete");
     }
 
     /**
@@ -180,8 +203,13 @@ public class BenchmarkEvaluator {
                         MetricsCalculator.QueryResult result = chunkFutures.get(k).get();
                         if (collectResults) {
                             results.add(result);
+                        }
+                        if (anySinkConsumesQueryMetrics) {
                             QueryDocument q = queries.get(queryIndex);
-                            queryMetrics.add(buildQueryMetric(result, q, params));
+                            Map<String, Object> metric = buildQueryMetric(result, q, params);
+                            if (collectResults) {
+                                queryMetrics.add(metric);
+                            }
                         }
                         completed++;
                         if (completed % 1000 == 0) {
@@ -429,7 +457,7 @@ public class BenchmarkEvaluator {
                 engine.getEngineName(),
                 engine.getVersion(),
                 dataset.getType(),
-                config.getDataset(),
+                currentDatasetName,
                 paramKey,
                 params
         );
@@ -521,7 +549,7 @@ public class BenchmarkEvaluator {
             metric.put("profile", config.getProfile());
         }
         metric.put("engine_version", engine.getVersion());
-        metric.put("dataset", config.getDataset());
+        metric.put("dataset", currentDatasetName);
         metric.put("params", params);
 
         // Query metadata

@@ -139,6 +139,36 @@ class ResultsQuerierTest {
     }
 
     @Test
+    void groupBy_excludesResultsWhenKeyExtractorReturnsNull() {
+        BenchmarkResult withKey = createBenchmarkResult("run-1", "elasticsearch", "recall@100");
+        withKey.addMetadata("group_key", "alpha");
+        BenchmarkResult withoutKey = createBenchmarkResult("run-1", "qdrant", "recall@100");
+
+        ResultsQuerier querier = new ResultsQuerier(null, "test-index");
+        Map<String, List<BenchmarkResult>> grouped = querier.groupBy(
+                List.of(withKey, withoutKey),
+                r -> r.getMetadata().get("group_key"));
+
+        assertEquals(1, grouped.size());
+        assertEquals(1, grouped.get("alpha").size());
+        assertEquals("elasticsearch", grouped.get("alpha").get(0).getEngine());
+    }
+
+    @Test
+    void queryByRunId_withCustomFilterField_buildsTermsQuery() throws Exception {
+        TestElasticsearchEngine engine = new TestElasticsearchEngine(List.of());
+        ResultsQuerier querier = new ResultsQuerier(engine, "jingra-results");
+
+        querier.queryByRunId("run-abc", "profile.keyword", List.of("baseline", "tuned"));
+
+        String queryJson = engine.getLastQueryJson();
+        assertNotNull(queryJson);
+        assertTrue(queryJson.contains("profile.keyword"));
+        assertTrue(queryJson.contains("baseline"));
+        assertTrue(queryJson.contains("tuned"));
+    }
+
+    @Test
     void groupByRecallLabel_groupsByRecallAtN() {
         BenchmarkResult r100_1 = createBenchmarkResult("run-1", "elasticsearch", "recall@100");
         BenchmarkResult r100_2 = createBenchmarkResult("run-1", "qdrant", "recall@100");

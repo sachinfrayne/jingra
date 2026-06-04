@@ -3,6 +3,7 @@ package org.elasticsearch.jingra.config;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -51,8 +52,8 @@ public final class ConfigValidator {
         boolean isAnalysisOnly = config.getAnalysis() != null;
 
         if (!isAnalysisOnly) {
-            String datasetKey = config.getDataset();
-            if (datasetKey == null || datasetKey.isEmpty()) {
+            List<String> names = config.getDatasetNames();
+            if (names == null || names.isEmpty()) {
                 throw new IllegalStateException("Dataset not specified in configuration");
             }
 
@@ -61,8 +62,13 @@ public final class ConfigValidator {
                 throw new IllegalStateException("No datasets configured");
             }
 
-            if (!datasets.containsKey(datasetKey)) {
-                throw new IllegalStateException("Dataset '" + datasetKey + "' not found in datasets configuration");
+            for (String name : names) {
+                if (name == null || name.isEmpty()) {
+                    throw new IllegalStateException("Dataset not specified in configuration");
+                }
+                if (!datasets.containsKey(name)) {
+                    throw new IllegalStateException("Dataset '" + name + "' not found in datasets configuration");
+                }
             }
         }
 
@@ -71,7 +77,12 @@ public final class ConfigValidator {
             logger.info("  Engine: {}", config.getEngine());
         }
         if (!isAnalysisOnly) {
-            logger.info("  Dataset: {}", config.getDataset());
+            List<String> names = config.getDatasetNames();
+            if (names != null && names.size() == 1) {
+                logger.info("  Dataset: {}", names.get(0));
+            } else {
+                logger.info("  Datasets: {}", names);
+            }
         }
     }
 
@@ -102,28 +113,29 @@ public final class ConfigValidator {
         requireMin(ev.getWarmupRounds(), 0, "evaluation.warmup_rounds must be >= 0");
         requireMin(ev.getMeasurementRounds(), 1, "evaluation.measurement_rounds must be >= 1");
 
-        DatasetConfig ds = config.getActiveDataset();
-        requireNonNullState(ds.getPath(), "dataset.path is required for evaluation");
-        requireNonBlank(ds.getPath().getQueriesPath(), "dataset.path.queries_path is required for evaluation");
-        requireNonNullState(ds.getQueriesMapping(), "dataset.queries_mapping is required for evaluation");
+        for (DatasetConfig ds : config.getActiveDatasets()) {
+            requireNonNullState(ds.getPath(), "dataset.path is required for evaluation");
+            requireNonBlank(ds.getPath().getQueriesPath(), "dataset.path.queries_path is required for evaluation");
+            requireNonNullState(ds.getQueriesMapping(), "dataset.queries_mapping is required for evaluation");
 
-        // ESQL queries need neither a query vector/text field nor a ground truth field
-        boolean isEsql = "esql".equals(ds.getQueryType());
-        if (!isEsql) {
-            String vectorField = ds.getQueriesMapping().getQueryVectorField();
-            String textField = ds.getQueriesMapping().getQueryTextField();
-            boolean vectorFieldMissing = vectorField == null || vectorField.isBlank();
-            boolean textFieldMissing = textField == null || textField.isBlank();
-            if (vectorFieldMissing && textFieldMissing) {
-                throw new IllegalStateException(
-                    "dataset.queries_mapping.query_vector_field or query_text_field is required");
+            // ESQL queries need neither a query vector/text field nor a ground truth field
+            boolean isEsql = "esql".equals(ds.getQueryType());
+            if (!isEsql) {
+                String vectorField = ds.getQueriesMapping().getQueryVectorField();
+                String textField = ds.getQueriesMapping().getQueryTextField();
+                boolean vectorFieldMissing = vectorField == null || vectorField.isBlank();
+                boolean textFieldMissing = textField == null || textField.isBlank();
+                if (vectorFieldMissing && textFieldMissing) {
+                    throw new IllegalStateException(
+                        "dataset.queries_mapping.query_vector_field or query_text_field is required");
+                }
+                requireNonBlank(
+                        ds.getQueriesMapping().getGroundTruthField(),
+                        "dataset.queries_mapping.ground_truth_field is required");
             }
-            requireNonBlank(
-                    ds.getQueriesMapping().getGroundTruthField(),
-                    "dataset.queries_mapping.ground_truth_field is required");
-        }
-        if (ds.getParamGroups() == null || ds.getParamGroups().isEmpty()) {
-            throw new IllegalStateException("dataset.param_groups is required for evaluation");
+            if (ds.getParamGroups() == null || ds.getParamGroups().isEmpty()) {
+                throw new IllegalStateException("dataset.param_groups is required for evaluation");
+            }
         }
     }
 
@@ -132,16 +144,17 @@ public final class ConfigValidator {
      */
     public static void validateForLoad(JingraConfig config) {
         Objects.requireNonNull(config, "config");
-        DatasetConfig ds = config.getActiveDataset();
-        requireNonNullState(ds.getPath(), "dataset.path is required for load");
-        requireNonBlank(ds.getPath().getDataPath(), "dataset.path.data_path is required for load");
-        // id_field is optional for metrics datasets (e.g. TSDS) where _id is engine-generated
-        if (!"metrics".equals(ds.getType())) {
-            DatasetConfig.DataMappingConfig dm = ds.getDataMapping();
-            if (dm == null) {
-                throw new IllegalStateException("dataset.data_mapping.id_field is required for load");
+        for (DatasetConfig ds : config.getActiveDatasets()) {
+            requireNonNullState(ds.getPath(), "dataset.path is required for load");
+            requireNonBlank(ds.getPath().getDataPath(), "dataset.path.data_path is required for load");
+            // id_field is optional for metrics datasets (e.g. TSDS) where _id is engine-generated
+            if (!"metrics".equals(ds.getType())) {
+                DatasetConfig.DataMappingConfig dm = ds.getDataMapping();
+                if (dm == null) {
+                    throw new IllegalStateException("dataset.data_mapping.id_field is required for load");
+                }
+                requireNonBlank(dm.getIdField(), "dataset.data_mapping.id_field is required for load");
             }
-            requireNonBlank(dm.getIdField(), "dataset.data_mapping.id_field is required for load");
         }
     }
 

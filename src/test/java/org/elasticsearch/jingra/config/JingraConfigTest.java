@@ -10,12 +10,21 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class JingraConfigTest {
 
     private static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory());
+
+    @Test
+    void getProfile_setProfile_roundTrip() {
+        JingraConfig c = new JingraConfig();
+        assertNull(c.getProfile());
+        c.setProfile("baseline");
+        assertEquals("baseline", c.getProfile());
+    }
 
     @Test
     void getEngineConfig_returnsElasticsearchMap_whenEngineIsLowercase() {
@@ -182,6 +191,84 @@ class JingraConfigTest {
         assertEquals("DEBUG", c.getLogging().getLoggers().get("org.example"));
         assertEquals("test-run-123", c.getAnalysis().getRunId());
         assertEquals("./test-output", c.getAnalysis().getOutputDirectory());
+    }
+
+    @Test
+    void getDatasetNames_returnsSingletonList_whenLegacySingleNameSet() {
+        JingraConfig c = new JingraConfig();
+        c.setDataset("main");
+        assertEquals(List.of("main"), c.getDatasetNames());
+        assertEquals("main", c.getDataset());
+    }
+
+    @Test
+    void getDataset_returnsFirstName_whenMultipleDatasetNamesConfigured() {
+        JingraConfig c = new JingraConfig();
+        c.setDatasetNames(List.of("cpu", "disk", "memory"));
+        assertEquals("cpu", c.getDataset());
+        assertEquals(List.of("cpu", "disk", "memory"), c.getDatasetNames());
+    }
+
+    @Test
+    void getActiveDatasets_returnsDatasetConfigInDeclaredOrder() {
+        JingraConfig c = new JingraConfig();
+        c.setDatasetNames(List.of("cpu", "disk"));
+        DatasetConfig cpu = new DatasetConfig();
+        cpu.setType("metrics");
+        DatasetConfig disk = new DatasetConfig();
+        disk.setType("metrics");
+        c.setDatasets(Map.of("cpu", cpu, "disk", disk));
+        List<DatasetConfig> active = c.getActiveDatasets();
+        assertEquals(2, active.size());
+        assertSame(cpu, active.get(0));
+        assertSame(disk, active.get(1));
+    }
+
+    @Test
+    void getActiveDatasets_throws_whenNameMissingFromMap() {
+        JingraConfig c = new JingraConfig();
+        c.setDatasetNames(List.of("cpu", "disk"));
+        c.setDatasets(Map.of("cpu", new DatasetConfig()));
+        IllegalStateException ex = assertThrows(IllegalStateException.class, c::getActiveDatasets);
+        assertEquals("Dataset not found: disk", ex.getMessage());
+    }
+
+    @Test
+    void deserializesYaml_acceptsListForDatasetField() throws Exception {
+        String yaml =
+                """
+                engine: elasticsearch
+                dataset:
+                  - cpu
+                  - disk
+                elasticsearch:
+                  url: http://localhost:9200
+                datasets:
+                  cpu:
+                    type: metrics
+                  disk:
+                    type: metrics
+                """;
+        JingraConfig c = YAML_MAPPER.readValue(yaml, JingraConfig.class);
+        assertEquals(List.of("cpu", "disk"), c.getDatasetNames());
+        assertEquals("cpu", c.getDataset());
+    }
+
+    @Test
+    void deserializesYaml_acceptsSingleStringForDatasetField() throws Exception {
+        String yaml =
+                """
+                engine: elasticsearch
+                dataset: main
+                elasticsearch:
+                  url: http://localhost:9200
+                datasets:
+                  main:
+                    type: dense_vector
+                """;
+        JingraConfig c = YAML_MAPPER.readValue(yaml, JingraConfig.class);
+        assertEquals(List.of("main"), c.getDatasetNames());
+        assertEquals("main", c.getDataset());
     }
 
     @Test

@@ -108,7 +108,7 @@ public final class AnalyzeCommand {
             Set<String> existingFiles = snapshotFiles(outDir);
 
             // Export results
-            CsvExporter csvExporter = new CsvExporter(ac.getOutputDirectory());
+            CsvExporter csvExporter = new CsvExporter(ac.getOutputDirectory(), dimensionKey);
 
             String baselineEngine = dimensionValues.get(0);
             boolean multiEngine = dimensionValues.size() >= 2;
@@ -168,7 +168,8 @@ public final class AnalyzeCommand {
                     List<ComparisonResult> singleComparison = comparator.compare(
                             List.of(baselineMax),
                             List.of(targetMax),
-                            recallAt
+                            recallAt,
+                            dimensionKey
                     );
 
                     if (!singleComparison.isEmpty()) {

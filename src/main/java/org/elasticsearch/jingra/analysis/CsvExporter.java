@@ -17,9 +17,15 @@ import java.util.Map;
  */
 public class CsvExporter {
     private final String outputDirectory;
+    private final java.util.function.Function<BenchmarkResult, String> labelExtractor;
 
     public CsvExporter(String outputDirectory) {
+        this(outputDirectory, BenchmarkResult::getEngine);
+    }
+
+    public CsvExporter(String outputDirectory, java.util.function.Function<BenchmarkResult, String> labelExtractor) {
         this.outputDirectory = outputDirectory;
+        this.labelExtractor = labelExtractor;
     }
 
     /**
@@ -266,12 +272,15 @@ public class CsvExporter {
                      .build())) {
 
             for (BenchmarkResult result : sorted) {
+                String label = labelExtractor.apply(result);
+                if (label == null) continue;
+
                 Double recall = result.getMetricAsDouble("recall");
                 String recallRounded = formatRecallRounded(recall);
 
                 List<Object> record = new java.util.ArrayList<>();
                 record.add(recallAtN);
-                record.add(result.getEngine());
+                record.add(label);
                 record.add(result.getParamKey());
                 if (includeRecall) {
                     record.add(formatNullableDouble(recall));
@@ -285,8 +294,8 @@ public class CsvExporter {
 
                 if (includeRecall) {
                     BenchmarkResult indexed = index
-                            .getOrDefault(recallRounded, java.util.Map.of())
-                            .get(result.getEngine());
+                            .getOrDefault(recallRounded, java.util.Collections.emptyMap())
+                            .get(label);
                     String speedup = (indexed != null && result.getParamKey().equals(indexed.getParamKey()))
                             ? speedupValues.getOrDefault(indexed, "")
                             : "";
@@ -321,12 +330,15 @@ public class CsvExporter {
             for (BenchmarkResult result : sorted) {
                 if (!inPair.containsKey(result)) continue;
 
+                String label = labelExtractor.apply(result);
+                if (label == null) continue;
+
                 Double recall = result.getMetricAsDouble("recall");
                 String recallRounded = formatRecallRounded(recall);
 
                 List<Object> record = new java.util.ArrayList<>();
                 record.add(recallAtN);
-                record.add(result.getEngine());
+                record.add(label);
                 record.add(result.getParamKey());
                 record.add(formatNullableDouble(recall));
                 record.add(recallRounded);
@@ -361,17 +373,19 @@ public class CsvExporter {
             Double throughput = result.getMetricAsDouble("throughput");
             if (throughput == null) continue;
 
-            Map<String, BenchmarkResult> engineMap = index.computeIfAbsent(recallRounded, k -> new java.util.HashMap<>());
-            String engine = result.getEngine();
+            String label = labelExtractor.apply(result);
+            if (label == null) continue;
 
-            // Keep result with highest throughput for this engine at this recall level
-            BenchmarkResult existing = engineMap.get(engine);
+            Map<String, BenchmarkResult> engineMap = index.computeIfAbsent(recallRounded, k -> new java.util.HashMap<>());
+
+            // Keep result with highest throughput for this label at this recall level
+            BenchmarkResult existing = engineMap.get(label);
             if (existing == null) {
-                engineMap.put(engine, result);
+                engineMap.put(label, result);
             } else {
                 Double existingThroughput = existing.getMetricAsDouble("throughput");
                 if (existingThroughput == null || throughput > existingThroughput) {
-                    engineMap.put(engine, result);
+                    engineMap.put(label, result);
                 }
             }
         }

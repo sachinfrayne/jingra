@@ -4,20 +4,11 @@ elasticsearch:
   url_env: ELASTICSEARCH_URL
   query_dump_directory: ./output
 
-dataset: demo-metrics
+dataset:
+  - demo-metrics-cpu
+  - demo-metrics-disk
 
-datasets:  
-  demo-metrics:
-    type: metrics
-    query_type: esql
-    index_name: demo-metrics
-    schema_name: demo-metrics-schema
-
-    path:
-      data_path: data/docs.ndjson
-
-    data_mapping: {}
-
+datasets:
   demo-metrics-cpu:
     type: metrics
     query_type: esql
@@ -25,7 +16,8 @@ datasets:
     schema_name: demo-metrics-schema
 
     path:
-      queries_path: data/metrics-cpu.ndjson
+      data_path: data/docs.ndjson
+      queries_path: data/metrics-cpu-queries.ndjson
 
     data_mapping: {}
 
@@ -36,6 +28,26 @@ datasets:
     param_groups:
       latency@10:
         - { size: 10, query_name: demo-metrics-cpu }
+
+  demo-metrics-disk:
+    type: metrics
+    query_type: esql
+    index_name: demo-metrics
+    schema_name: demo-metrics-schema
+
+    path:
+      data_path: data/docs.ndjson
+      queries_path: data/metrics-disk-queries.ndjson
+
+    data_mapping: {}
+
+    queries_mapping:
+      size_field: size
+      expected_rows_field: expected_rows
+
+    param_groups:
+      latency@10:
+        - { size: 10, query_name: demo-metrics-disk }
 
 load:
   threads: 4
@@ -52,6 +64,7 @@ evaluation:
 output:
   sinks:
     - type: elasticsearch
+      write_query_metrics: false
       config:
         url_env: SINK_URL
         index: jingra-results
