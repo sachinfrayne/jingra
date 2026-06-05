@@ -41,7 +41,7 @@ class OpenSearchEngineTest {
             .waitingFor(new HttpWaitStrategy()
                     .forPort(9200)
                     .forStatusCodeMatching(status -> status >= 200 && status < 300)
-                    .withStartupTimeout(Duration.ofMinutes(3)));
+                    .withStartupTimeout(Duration.ofMinutes(4)));
 
     private static OpenSearchEngine engine;
 
