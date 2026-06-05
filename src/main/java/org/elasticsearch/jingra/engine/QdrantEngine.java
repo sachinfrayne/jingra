@@ -1103,7 +1103,8 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
                 if (code == Status.Code.UNAVAILABLE) {
                     return true;
                 }
-                if (code == Status.Code.INTERNAL && desc != null && desc.contains("end-of-stream")) {
+                if (code == Status.Code.INTERNAL && desc != null
+                        && (desc.contains("end-of-stream") || desc.contains("http2 exception"))) {
                     return true;
                 }
             }

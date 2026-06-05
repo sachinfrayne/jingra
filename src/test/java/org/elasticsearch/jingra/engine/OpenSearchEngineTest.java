@@ -37,8 +37,6 @@ class OpenSearchEngineTest {
             .withEnv("DISABLE_INSTALL_DEMO_CONFIG", "true")
             .withEnv("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "Admin123!@#")
             .withEnv("DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI", "true")
-            // Exclude ml role so ML Commons skips ml-node initialization; k-NN is still active.
-            .withEnv("OPENSEARCH_node.roles", "data,ingest,cluster_manager")
             .withExposedPorts(9200)
             // exec required: OpenSearch's BouncyCastle FIPS JNI extracts libbc-probe.so into /tmp
             // and loads it; noexec (the tmpfs default) fails mmap(PROT_EXEC) and crashes the node.
