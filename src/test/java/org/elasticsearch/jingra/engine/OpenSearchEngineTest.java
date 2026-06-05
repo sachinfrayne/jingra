@@ -36,8 +36,9 @@ class OpenSearchEngineTest {
             .withEnv("DISABLE_SECURITY_PLUGIN", "true")
             .withEnv("DISABLE_INSTALL_DEMO_CONFIG", "true")
             .withEnv("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "Admin123!@#")
-            .withEnv("OPENSEARCH_JAVA_OPTS", "-Xms512m -Xmx512m")
             .withEnv("DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI", "true")
+            // Exclude ml role so ML Commons skips ml-node initialization; k-NN is still active.
+            .withEnv("OPENSEARCH_node.roles", "data,ingest,cluster_manager")
             .withExposedPorts(9200)
             // Launcher uses /tmp for bootstrap; host Docker disk can be full while RAM is available.
             .withTmpFs(Map.of("/tmp", "rw,size=512m"))
