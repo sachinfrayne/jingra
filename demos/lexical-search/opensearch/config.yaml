@@ -4,14 +4,14 @@ opensearch:
   url_env: OPENSEARCH_URL
   query_dump_directory: ./output
 
-dataset: demo-lexical
+dataset: lexical
 
 datasets:
-  demo-lexical:
+  lexical:
     type: lexical
-    index_name: demo-lexical
-    schema_name: demo-lexical-schema
-    query_name: demo-lexical-query
+    index_name: lexical
+    schema_name: lexical-schema
+    query_name: lexical-query
 
     path:
       data_path: data/docs.ndjson
@@ -34,7 +34,7 @@ load:
   queue_capacity: 10
 
 evaluation:
-  run_id: demo-lexical
+  run_id: lexical
   warmup_workers: 1
   measurement_workers: 1
   warmup_rounds: 3
@@ -48,7 +48,7 @@ output:
         index: jingra-results
 
 analysis:
-  run_id: demo-lexical
+  run_id: lexical
   engines:
     - opensearch
   results_cluster:

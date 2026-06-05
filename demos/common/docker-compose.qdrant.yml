@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile.qdrant
       args:
         QD_VERSION: ${QD_VERSION}
-    image: jingra-demo-qdrant:v${QD_VERSION}
+    image: jingra-qdrant:v${QD_VERSION}
     ports:
       - "6333:6333"
       - "6334:6334"
@@ -15,7 +15,7 @@ services:
       timeout: 5s
       retries: 30
     networks:
-      - jingra-demo-net
+      - jingra-net
 
   jingra:
     environment:

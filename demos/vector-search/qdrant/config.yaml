@@ -4,14 +4,14 @@ qdrant:
   url_env: QDRANT_URL
   vector_field: embedding
 
-dataset: demo-vector
+dataset: vector
 
 datasets:
-  demo-vector:
+  vector:
     type: vector
-    index_name: demo-vector
-    schema_name: demo-vector-schema
-    query_name: demo-vector-query
+    index_name: vector
+    schema_name: vector-schema
+    query_name: vector-query
 
     path:
       data_path: data/docs.ndjson
@@ -39,7 +39,7 @@ load:
   queue_capacity: 100
 
 evaluation:
-  run_id: demo-vector-qdrant
+  run_id: vector-qdrant
   warmup_workers: 1
   measurement_workers: 1
   warmup_rounds: 3
@@ -53,7 +53,7 @@ output:
         index: jingra-results
 
 analysis:
-  run_id: demo-vector-qdrant
+  run_id: vector-qdrant
   engines:
     - qdrant
   results_cluster:

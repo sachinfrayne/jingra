@@ -4,14 +4,14 @@ elasticsearch:
   url_env: ELASTICSEARCH_URL
   query_dump_directory: ./output
 
-dataset: demo-vector
+dataset: vector
 
 datasets:
-  demo-vector:
+  vector:
     type: vector
-    index_name: demo-vector
-    schema_name: demo-vector-schema
-    query_name: demo-vector-query
+    index_name: vector
+    schema_name: vector-schema
+    query_name: vector-query
     vector_size: 384
     distance: cosine
 

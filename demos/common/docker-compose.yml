@@ -9,8 +9,8 @@ services:
       - ./config:/app/jingra-config
       - ./output:/app/output
     networks:
-      - jingra-demo-net
+      - jingra-net
 
 networks:
-  jingra-demo-net:
+  jingra-net:
     driver: bridge

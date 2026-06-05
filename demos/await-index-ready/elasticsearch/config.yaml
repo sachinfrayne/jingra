@@ -4,14 +4,14 @@ elasticsearch:
   url_env: ELASTICSEARCH_URL
   query_dump_directory: ./output
 
-dataset: demo-vector
+dataset: vector
 
 datasets:
-  demo-vector:
+  vector:
     type: vector
-    index_name: demo-vector
-    schema_name: demo-vector-schema
-    query_name: demo-vector-query
+    index_name: vector
+    schema_name: vector-schema
+    query_name: vector-query
     vector_size: 384
     distance: cosine
 
@@ -40,7 +40,7 @@ load:
   await_index_ready: true
 
 evaluation:
-  run_id: demo-await-index-ready
+  run_id: await-index-ready
   warmup_workers: 1
   measurement_workers: 1
   warmup_rounds: 3
@@ -54,7 +54,7 @@ output:
         index: jingra-results
 
 analysis:
-  run_id: demo-await-index-ready
+  run_id: await-index-ready
   engines:
     - elasticsearch
   results_cluster:

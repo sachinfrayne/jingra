@@ -4,14 +4,14 @@ elasticsearch:
   url_env: ELASTICSEARCH_URL
   query_dump_directory: ./output
 
-dataset: demo-parquet
+dataset: parquet
 
 datasets:
-  demo-parquet:
+  parquet:
     type: lexical
-    index_name: demo-parquet
-    schema_name: demo-parquet-schema
-    query_name: demo-parquet-query
+    index_name: parquet
+    schema_name: parquet-schema
+    query_name: parquet-query
 
     path:
       data_path: data/docs.parquet
@@ -34,7 +34,7 @@ load:
   queue_capacity: 10
 
 evaluation:
-  run_id: demo-parquet
+  run_id: parquet
   warmup_workers: 1
   measurement_workers: 1
   warmup_rounds: 3
@@ -48,7 +48,7 @@ output:
         index: jingra-results
 
 analysis:
-  run_id: demo-parquet
+  run_id: parquet
   engines:
     - elasticsearch
   results_cluster:

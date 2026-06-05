@@ -13,7 +13,7 @@ services:
       timeout: 5s
       retries: 30
     networks:
-      - jingra-demo-net
+      - jingra-net
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
@@ -32,7 +32,7 @@ services:
           cpus: '2.0'
           memory: 2g
     networks:
-      - jingra-demo-net
+      - jingra-net
 
   opensearch:
     image: opensearchproject/opensearch:${OS_VERSION}
@@ -51,7 +51,7 @@ services:
           cpus: '2.0'
           memory: 2g
     networks:
-      - jingra-demo-net
+      - jingra-net
 
   qdrant:
     build:
@@ -59,7 +59,7 @@ services:
       dockerfile: Dockerfile.qdrant
       args:
         QD_VERSION: ${QD_VERSION}
-    image: jingra-demo-qdrant:v${QD_VERSION}
+    image: jingra-qdrant:v${QD_VERSION}
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
       interval: 10s
@@ -71,7 +71,7 @@ services:
           cpus: '2.0'
           memory: 2g
     networks:
-      - jingra-demo-net
+      - jingra-net
 
   jingra:
     build:
@@ -91,8 +91,8 @@ services:
       elasticsearch-sink:
         condition: service_healthy
     networks:
-      - jingra-demo-net
+      - jingra-net
 
 networks:
-  jingra-demo-net:
+  jingra-net:
     driver: bridge

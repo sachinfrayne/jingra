@@ -40,10 +40,10 @@ From the repo root or `demos/` directory:
 ```bash
 make lexical-search/elasticsearch
 make vector-search/qdrant
-make all                           # run every demo sequentially
+make all                           # run every single engine demo sequentially
 ```
 
-From the demo-type directory — generates data if absent, then runs:
+From the use case / engine directory — generates data if absent, then runs:
 
 ```bash
 cd demos/lexical-search
@@ -74,12 +74,12 @@ make clean     # stop + delete ./output/
 
 Every demo runs two independent clusters:
 
-| Service | External port | Purpose |
-|---|---|---|
-| `elasticsearch-sink` | 9200 | Results store (configured in `docker-compose.sink.yml`) |
-| `elasticsearch` | 9201 | Engine under test (ES demos) |
-| `opensearch` | 9201 | Engine under test (OS demos) |
-| `qdrant` | 6333 / 6334 | Engine under test (Qdrant demos) |
+| Service              | External port | Purpose                                                 |
+| -------------------- | ------------- | ------------------------------------------------------- |
+| `elasticsearch-sink` | 9200          | Results store (configured in `docker-compose.sink.yml`) |
+| `elasticsearch`      | 9201          | Engine under test (ES demos)                            |
+| `opensearch`         | 9201          | Engine under test (OS demos)                            |
+| `qdrant`             | 6333 / 6334   | Engine under test (Qdrant demos)                        |
 
 `SINK_URL` always points to the results sink. Engine URLs (`ELASTICSEARCH_URL`,
 `OPENSEARCH_URL`, `QDRANT_URL`) are set by the engine's own compose override.
@@ -105,8 +105,8 @@ Example: adding OpenSearch to `hybrid-search`.
 demos/hybrid-search/opensearch/
   Makefile
   config.yaml
-  config/schemas/demo-hybrid-schema.json
-  config/queries/demo-hybrid-query.json
+  config/schemas/hybrid-schema.json
+  config/queries/hybrid-query.json
 ```
 
 **2. Makefile** — every engine Makefile follows the same pattern:
@@ -147,7 +147,7 @@ analysis:
     index: jingra-results
 ```
 
-**4. Register the engine in the demo-type Makefile** (`demos/hybrid-search/Makefile`):
+**4. Register the engine in the type Makefile** (`demos/hybrid-search/Makefile`):
 
 ```makefile
 .PHONY: elasticsearch opensearch
@@ -231,6 +231,7 @@ SINK_ENGINE ?= elasticsearch
 ```
 
 This controls:
+
 - **Version** — reads `engine-versions/.<SINK_ENGINE>` automatically
 - **Type** — passes `SINK_TYPE=<SINK_ENGINE>` to the jingra container
 

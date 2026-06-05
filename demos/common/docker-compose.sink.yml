@@ -13,7 +13,7 @@ services:
       timeout: 5s
       retries: 30
     networks:
-      - jingra-demo-net
+      - jingra-net
 
   jingra:
     environment:

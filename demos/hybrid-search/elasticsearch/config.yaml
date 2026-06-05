@@ -4,14 +4,14 @@ elasticsearch:
   url_env: ELASTICSEARCH_URL
   query_dump_directory: ./output
 
-dataset: demo-hybrid
+dataset: hybrid
 
 datasets:
-  demo-hybrid:
+  hybrid:
     type: hybrid
-    index_name: demo-hybrid
-    schema_name: demo-hybrid-schema
-    query_name: demo-hybrid-query
+    index_name: hybrid
+    schema_name: hybrid-schema
+    query_name: hybrid-query
     vector_size: 384
     distance: cosine
 
@@ -54,7 +54,7 @@ load:
   queue_capacity: 10
 
 evaluation:
-  run_id: demo-hybrid
+  run_id: hybrid
   warmup_workers: 1
   measurement_workers: 1
   warmup_rounds: 3
@@ -68,7 +68,7 @@ output:
         index: jingra-results
 
 analysis:
-  run_id: demo-hybrid
+  run_id: hybrid
   engines:
     - elasticsearch
   results_cluster:
