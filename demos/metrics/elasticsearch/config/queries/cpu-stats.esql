@@ -1,4 +1,4 @@
-FROM demo-metrics
+FROM metrics
 | WHERE `system.cpu.utilization` IS NOT NULL AND state == "user"
 | STATS avg_cpu = avg(`system.cpu.utilization`),
         max_cpu = max(`system.cpu.utilization`),

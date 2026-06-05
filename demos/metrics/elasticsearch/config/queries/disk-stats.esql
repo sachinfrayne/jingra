@@ -1,4 +1,4 @@
-FROM demo-metrics
+FROM metrics
 | WHERE `system.disk.io` IS NOT NULL AND device == "disk0"
 | STATS total_bytes = sum(`system.disk.io`),
         avg_bytes = avg(`system.disk.io`),

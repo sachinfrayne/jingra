@@ -254,7 +254,7 @@ def _merge_tsds_docs(docs: list[dict]) -> list[dict]:
 def _compute_expected_aggregates(docs: list[dict]) -> dict:
     """Pre-compute expected aggregate values for the load query.
 
-    Matches the logic in demo-metrics-load.esql:
+    Matches the logic in metrics-load.esql:
       WHERE system.cpu.load_average.1m IS NOT NULL
       STATS avg/max of load averages BY host.name
     """

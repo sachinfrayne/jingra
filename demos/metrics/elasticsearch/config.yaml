@@ -5,19 +5,19 @@ elasticsearch:
   query_dump_directory: ./output
 
 dataset:
-  - demo-metrics-cpu
-  - demo-metrics-disk
+  - cpu-stats
+  - disk-stats
 
 datasets:
-  demo-metrics-cpu:
+  cpu-stats:
     type: metrics
     query_type: esql
-    index_name: demo-metrics
-    schema_name: demo-metrics-schema
+    index_name: metrics
+    schema_name: metrics-schema
 
     path:
       data_path: data/docs.ndjson
-      queries_path: data/metrics-cpu-queries.ndjson
+      queries_path: data/cpu-stats-queries.ndjson
 
     data_mapping: {}
 
@@ -27,17 +27,17 @@ datasets:
 
     param_groups:
       latency@10:
-        - { size: 10, query_name: demo-metrics-cpu }
+        - { size: 10, query_name: cpu-stats }
 
-  demo-metrics-disk:
+  disk-stats:
     type: metrics
     query_type: esql
-    index_name: demo-metrics
-    schema_name: demo-metrics-schema
+    index_name: metrics
+    schema_name: metrics-schema
 
     path:
       data_path: data/docs.ndjson
-      queries_path: data/metrics-disk-queries.ndjson
+      queries_path: data/disk-stats-queries.ndjson
 
     data_mapping: {}
 
@@ -47,7 +47,7 @@ datasets:
 
     param_groups:
       latency@10:
-        - { size: 10, query_name: demo-metrics-disk }
+        - { size: 10, query_name: disk-stats }
 
 load:
   threads: 4
@@ -55,7 +55,7 @@ load:
   queue_capacity: 10
 
 evaluation:
-  run_id: demo-metrics
+  run_id: metrics
   warmup_workers: 1
   measurement_workers: 1
   warmup_rounds: 3
@@ -70,7 +70,7 @@ output:
         index: jingra-results
 
 analysis:
-  run_id: demo-metrics
+  run_id: metrics
   engines:
     - elasticsearch
   results_cluster:

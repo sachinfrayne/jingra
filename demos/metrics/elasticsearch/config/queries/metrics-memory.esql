@@ -1,4 +1,4 @@
-FROM demo-metrics
+FROM metrics
 | WHERE `system.memory.usage` IS NOT NULL AND state == "used"
 | STATS avg_memory_used = avg(`system.memory.usage`),
         max_memory_used = max(`system.memory.usage`),
