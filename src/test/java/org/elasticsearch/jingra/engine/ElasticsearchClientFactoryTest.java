@@ -215,9 +215,14 @@ class ElasticsearchClientFactoryTest {
         ElasticsearchClientFactory.ElasticsearchClientWrapper w =
                 ElasticsearchClientFactory.createClient("http://127.0.0.1:9200", null, null, false);
         Rest5Client rest = w.getRestClient();
-        assertTrue(rest.isRunning());
+        // start() launches the IO reactor on a background thread; spin until ACTIVE.
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (!rest.isRunning() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+        }
+        assertTrue(rest.isRunning(), "REST client should be running before close");
         w.close();
-        assertFalse(rest.isRunning());
+        assertFalse(rest.isRunning(), "REST client should not be running after close");
     }
 
     @Test
