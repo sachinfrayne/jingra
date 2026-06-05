@@ -20,8 +20,8 @@ jobs:
           java-version-file: .java-version
           cache: maven
 
-      - name: Configure kernel for OpenSearch
+      - name: Set vm.max_map_count for Elasticsearch/OpenSearch integration tests
         run: sudo sysctl -w vm.max_map_count=262144
 
-      - name: Run tests
+      - name: Run tests with coverage
         run: make test
