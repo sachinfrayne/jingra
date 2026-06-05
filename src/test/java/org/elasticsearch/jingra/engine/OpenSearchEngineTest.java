@@ -5,10 +5,12 @@ import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
 import org.junit.jupiter.api.*;
 import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.HttpWaitStrategy;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 
@@ -38,10 +40,11 @@ class OpenSearchEngineTest {
             .withExposedPorts(9200)
             // Launcher uses /tmp for bootstrap; host Docker disk can be full while RAM is available.
             .withTmpFs(Map.of("/tmp", "rw,size=512m"))
+            .withLogConsumer(new Slf4jLogConsumer(LoggerFactory.getLogger("opensearch-container")))
             .waitingFor(new HttpWaitStrategy()
                     .forPort(9200)
                     .forStatusCodeMatching(status -> status >= 200 && status < 300)
-                    .withStartupTimeout(Duration.ofMinutes(4)));
+                    .withStartupTimeout(Duration.ofMinutes(2)));
 
     private static OpenSearchEngine engine;
 
