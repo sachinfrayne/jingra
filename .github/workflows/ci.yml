@@ -25,3 +25,12 @@ jobs:
 
       - name: Run tests with coverage
         run: make test
+
+      - name: Dump Docker container logs on failure
+        if: failure()
+        run: |
+          docker ps -a
+          for id in $(docker ps -aq); do
+            echo "=== logs for container $id ==="
+            docker logs "$id" 2>&1 || true
+          done
