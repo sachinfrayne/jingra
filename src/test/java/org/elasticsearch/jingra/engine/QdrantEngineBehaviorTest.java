@@ -372,6 +372,12 @@ class QdrantEngineBehaviorTest {
     }
 
     @Test
+    void isBrokenGrpcTransportDetectsInternalHttp2Exception() throws Exception {
+        assertTrue((Boolean) invokePrivateStatic("isBrokenGrpcTransport", new Class[]{Throwable.class},
+                new StatusRuntimeException(Status.INTERNAL.withDescription("http2 exception"))));
+    }
+
+    @Test
     void isBrokenGrpcTransportDetectsUnavailable() throws Exception {
         assertTrue((Boolean) invokePrivateStatic("isBrokenGrpcTransport", new Class[]{Throwable.class},
                 new StatusRuntimeException(Status.UNAVAILABLE.withDescription("refused"))));
