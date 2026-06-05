@@ -1883,4 +1883,19 @@ class QdrantEngineBehaviorTest {
         assertEquals(10_000L, m.invoke(e));
     }
 
+    @Test
+    void serverLatencyFromSeconds_10ms() {
+        assertEquals(10L, QdrantEngine.serverLatencyFromSeconds(0.01));
+    }
+
+    @Test
+    void serverLatencyFromSeconds_1ms() {
+        assertEquals(1L, QdrantEngine.serverLatencyFromSeconds(0.001));
+    }
+
+    @Test
+    void serverLatencyFromSeconds_zero() {
+        assertEquals(0L, QdrantEngine.serverLatencyFromSeconds(0.0));
+    }
+
 }
