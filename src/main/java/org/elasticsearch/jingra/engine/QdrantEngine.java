@@ -745,8 +745,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
                 double clientLatencyMs = (System.nanoTime() - startTime) / 1_000_000.0;
 
                 // Extract server latency (time is in seconds, convert to milliseconds)
-                // Round to nearest millisecond instead of truncating
-                Long serverLatencyMs = Math.round(fullResponse.getTime() * 1000.0);
+                Long serverLatencyMs = serverLatencyFromSeconds(fullResponse.getTime());
 
                 // Extract document IDs (handle both UUID and numeric IDs)
                 List<String> documentIds = new ArrayList<>();
@@ -1094,6 +1093,10 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
      * Detects transient gRPC transport failures where reopening the channel often succeeds
      * (e.g. {@code INTERNAL: Encountered end-of-stream mid-frame} with the Java client against Qdrant).
      */
+    static long serverLatencyFromSeconds(double seconds) {
+        return Math.round(seconds * 1000.0);
+    }
+
     private static boolean isBrokenGrpcTransport(Throwable e) {
         Throwable cause = e;
         while (cause != null) {
@@ -1103,7 +1106,8 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
                 if (code == Status.Code.UNAVAILABLE) {
                     return true;
                 }
-                if (code == Status.Code.INTERNAL && desc != null && desc.contains("end-of-stream")) {
+                if (code == Status.Code.INTERNAL && desc != null
+                        && (desc.contains("end-of-stream") || desc.contains("http2 exception"))) {
                     return true;
                 }
             }

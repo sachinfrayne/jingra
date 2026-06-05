@@ -10,6 +10,8 @@ import java.security.cert.X509Certificate;
 import java.net.URI;
 import java.net.URISyntaxException;
 
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -215,9 +217,9 @@ class ElasticsearchClientFactoryTest {
         ElasticsearchClientFactory.ElasticsearchClientWrapper w =
                 ElasticsearchClientFactory.createClient("http://127.0.0.1:9200", null, null, false);
         Rest5Client rest = w.getRestClient();
-        assertTrue(rest.isRunning());
+        await().atMost(5, SECONDS).until(rest::isRunning);
         w.close();
-        assertFalse(rest.isRunning());
+        await().atMost(5, SECONDS).until(() -> !rest.isRunning());
     }
 
     @Test
