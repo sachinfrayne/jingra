@@ -20,5 +20,8 @@ jobs:
           java-version-file: .java-version
           cache: maven
 
+      - name: Configure kernel for OpenSearch
+        run: sudo sysctl -w vm.max_map_count=262144
+
       - name: Run tests
         run: make test
