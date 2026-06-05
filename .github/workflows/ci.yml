@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version-file: .java-version
+          cache: maven
+
+      - name: Set vm.max_map_count for Elasticsearch/OpenSearch integration tests
+        run: sudo sysctl -w vm.max_map_count=262144
+
+      - name: Pre-pull Docker images
+        run: |
+          OS_VERSION=$(cat engine-versions/.opensearch)
+          ES_VERSION=$(cat engine-versions/.elasticsearch)
+          QDRANT_VERSION=$(cat engine-versions/.qdrant)
+          docker pull "opensearchproject/opensearch:${OS_VERSION}"
+          docker pull "docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}"
+          docker pull "qdrant/qdrant:v${QDRANT_VERSION}"
+
+      - name: Run tests with coverage
+        run: make test
+
+      - name: Dump Docker container logs on failure
+        if: failure()
+        run: |
+          docker ps -a
+          for id in $(docker ps -aq); do
+            echo "=== logs for container $id ==="
+            docker logs "$id" 2>&1 || true
+          done

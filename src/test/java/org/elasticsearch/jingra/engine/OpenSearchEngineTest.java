@@ -5,10 +5,12 @@ import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
 import org.junit.jupiter.api.*;
 import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.HttpWaitStrategy;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 
@@ -34,14 +36,16 @@ class OpenSearchEngineTest {
             .withEnv("DISABLE_SECURITY_PLUGIN", "true")
             .withEnv("DISABLE_INSTALL_DEMO_CONFIG", "true")
             .withEnv("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "Admin123!@#")
-            .withEnv("OPENSEARCH_JAVA_OPTS", "-Xms512m -Xmx512m")
+            .withEnv("DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI", "true")
             .withExposedPorts(9200)
-            // Launcher uses /tmp for bootstrap; host Docker disk can be full while RAM is available.
-            .withTmpFs(Map.of("/tmp", "rw,size=512m"))
+            // exec required: OpenSearch's BouncyCastle FIPS JNI extracts libbc-probe.so into /tmp
+            // and loads it; noexec (the tmpfs default) fails mmap(PROT_EXEC) and crashes the node.
+            .withTmpFs(Map.of("/tmp", "rw,exec,size=512m"))
+            .withLogConsumer(new Slf4jLogConsumer(LoggerFactory.getLogger("opensearch-container")))
             .waitingFor(new HttpWaitStrategy()
                     .forPort(9200)
                     .forStatusCodeMatching(status -> status >= 200 && status < 300)
-                    .withStartupTimeout(Duration.ofMinutes(2)));
+                    .withStartupTimeout(Duration.ofMinutes(5)));
 
     private static OpenSearchEngine engine;
 

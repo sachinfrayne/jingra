@@ -372,6 +372,12 @@ class QdrantEngineBehaviorTest {
     }
 
     @Test
+    void isBrokenGrpcTransportDetectsInternalHttp2Exception() throws Exception {
+        assertTrue((Boolean) invokePrivateStatic("isBrokenGrpcTransport", new Class[]{Throwable.class},
+                new StatusRuntimeException(Status.INTERNAL.withDescription("http2 exception"))));
+    }
+
+    @Test
     void isBrokenGrpcTransportDetectsUnavailable() throws Exception {
         assertTrue((Boolean) invokePrivateStatic("isBrokenGrpcTransport", new Class[]{Throwable.class},
                 new StatusRuntimeException(Status.UNAVAILABLE.withDescription("refused"))));
@@ -1875,6 +1881,21 @@ class QdrantEngineBehaviorTest {
         Method m = QdrantEngine.class.getDeclaredMethod("getPollIntervalMs");
         m.setAccessible(true);
         assertEquals(10_000L, m.invoke(e));
+    }
+
+    @Test
+    void serverLatencyFromSeconds_10ms() {
+        assertEquals(10L, QdrantEngine.serverLatencyFromSeconds(0.01));
+    }
+
+    @Test
+    void serverLatencyFromSeconds_1ms() {
+        assertEquals(1L, QdrantEngine.serverLatencyFromSeconds(0.001));
+    }
+
+    @Test
+    void serverLatencyFromSeconds_zero() {
+        assertEquals(0L, QdrantEngine.serverLatencyFromSeconds(0.0));
     }
 
 }
