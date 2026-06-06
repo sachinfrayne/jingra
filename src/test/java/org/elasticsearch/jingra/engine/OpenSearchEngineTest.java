@@ -34,10 +34,11 @@ class OpenSearchEngineTest {
             .withEnv("DISABLE_SECURITY_PLUGIN", "true")
             .withEnv("DISABLE_INSTALL_DEMO_CONFIG", "true")
             .withEnv("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "Admin123!@#")
-            .withEnv("OPENSEARCH_JAVA_OPTS", "-Xms512m -Xmx512m")
+            .withEnv("DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI", "true")
             .withExposedPorts(9200)
-            // Launcher uses /tmp for bootstrap; host Docker disk can be full while RAM is available.
-            .withTmpFs(Map.of("/tmp", "rw,size=512m"))
+            // exec required: OpenSearch's BouncyCastle FIPS JNI extracts libbc-probe.so into /tmp
+            // and loads it; noexec (the tmpfs default) fails mmap(PROT_EXEC) and crashes the node.
+            .withTmpFs(Map.of("/tmp", "rw,exec,size=512m"))
             .waitingFor(new HttpWaitStrategy()
                     .forPort(9200)
                     .forStatusCodeMatching(status -> status >= 200 && status < 300)
