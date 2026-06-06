@@ -37,6 +37,9 @@ import java.util.stream.Collectors;
 public class PlotGenerator {
     private static final Logger logger = LoggerFactory.getLogger(PlotGenerator.class);
 
+    private static final java.util.regex.Pattern QUERY_NAME_IN_PARAM_KEY =
+            java.util.regex.Pattern.compile("(?:^|_)query_name=(.+?)(?=_[a-z]\\w*=|$)");
+
     private final String outputDirectory;
     private final Map<String, String> engineVersions;
 
@@ -51,6 +54,11 @@ public class PlotGenerator {
     public PlotGenerator(String outputDirectory, Map<String, String> engineVersions) {
         this.outputDirectory = outputDirectory;
         this.engineVersions = engineVersions;
+    }
+
+    static String paramKeyDisplayLabel(String paramKey) {
+        java.util.regex.Matcher m = QUERY_NAME_IN_PARAM_KEY.matcher(paramKey);
+        return m.find() ? m.group(1) : paramKey;
     }
 
     /**
@@ -326,6 +334,9 @@ public class PlotGenerator {
             return;
         }
         List<String> paramKeys = new ArrayList<>(paramKeySet);
+        List<String> displayLabels = paramKeys.stream()
+                .map(PlotGenerator::paramKeyDisplayLabel)
+                .collect(Collectors.toList());
 
         for (String latencyMetric : latencyMetrics) {
             // Check whether any engine has data for this metric
@@ -354,7 +365,7 @@ public class PlotGenerator {
                 for (String pk : paramKeys) {
                     values.add(Objects.requireNonNullElse(byKey.get(pk), 0.0));
                 }
-                chart.addSeries(engineLabel(engine), paramKeys, values)
+                chart.addSeries(engineLabel(engine), displayLabels, values)
                         .setFillColor(getEngineColor(engine));
             }
 

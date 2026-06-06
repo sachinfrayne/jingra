@@ -888,4 +888,21 @@ class PlotGeneratorTest {
 
         assertTrue(Files.list(tempDir).anyMatch(p -> p.getFileName().toString().equals("throughput_overview.png")));
     }
+
+    @Test
+    void paramKeyDisplayLabel_extractsQueryNameValue() {
+        assertEquals("demo-metrics-cpu", PlotGenerator.paramKeyDisplayLabel("query_name=demo-metrics-cpu_size=10"));
+        assertEquals("demo-metrics-disk", PlotGenerator.paramKeyDisplayLabel("query_name=demo-metrics-disk_size=10"));
+    }
+
+    @Test
+    void paramKeyDisplayLabel_queryNameAloneNoTrailingPairs() {
+        assertEquals("my-query", PlotGenerator.paramKeyDisplayLabel("query_name=my-query"));
+    }
+
+    @Test
+    void paramKeyDisplayLabel_fallsBackToFullKeyWhenNoQueryName() {
+        assertEquals("size=10", PlotGenerator.paramKeyDisplayLabel("size=10"));
+        assertEquals("k=100_ef=200", PlotGenerator.paramKeyDisplayLabel("k=100_ef=200"));
+    }
 }
