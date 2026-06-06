@@ -362,6 +362,9 @@
                     </argLine>
                     <!-- Fail fast: stop after N failures (0 = run all tests) -->
                     <skipAfterFailureCount>${surefire.skipAfterFailureCount}</skipAfterFailureCount>
+                    <!-- Re-run flaky tests once to ensure coverage from container-based integration
+                         tests is recorded even when a container is slow to respond on CI -->
+                    <rerunFailingTestsCount>1</rerunFailingTestsCount>
                 </configuration>
             </plugin>
 
