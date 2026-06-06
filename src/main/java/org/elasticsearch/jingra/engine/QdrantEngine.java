@@ -1089,6 +1089,11 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
         return false;
     }
 
+    /** Converts a gRPC {@code time} field in seconds to whole milliseconds. */
+    static long serverLatencyFromSeconds(double seconds) {
+        return Math.round(seconds * 1000.0);
+    }
+
     /**
      * Detects transient gRPC transport failures where reopening the channel often succeeds
      * (e.g. {@code INTERNAL: Encountered end-of-stream mid-frame} with the Java client against Qdrant).
