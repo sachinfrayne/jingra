@@ -663,6 +663,33 @@ class BenchmarkEvaluatorTest {
     }
 
     @Test
+    void parseQueryDocuments_promqlQueryType_doesNotSkipWithoutTextOrVector() throws Exception {
+        DatasetConfig dataset = jingraConfig.getActiveDataset();
+        dataset.setQueryType("promql");
+        dataset.getQueriesMapping().setQueryTextField(null);
+        dataset.getQueriesMapping().setQueryVectorField(null);
+
+        Document row = new Document(Map.of("avg_cpu", 0.5462));
+        List<Object> out = invokeParse(List.of(row));
+        assertEquals(1, out.size());
+        assertNull(qdVector(out.get(0)));
+    }
+
+    @Test
+    void calculateMetrics_omitsQualityMetricsForPromqlQueryType() throws Exception {
+        jingraConfig.getActiveDataset().setQueryType("promql");
+        MetricsCalculator.QueryResult res = new MetricsCalculator.QueryResult(
+                List.of(), List.of(), 10.0, null);
+        BenchmarkResult br = invokeCalculateMetrics(List.of(res), 1000L);
+        assertNull(br.getMetrics().get("precision"));
+        assertNull(br.getMetrics().get("recall"));
+        assertNull(br.getMetrics().get("f1"));
+        assertNull(br.getMetrics().get("mrr"));
+        assertNotNull(br.getMetrics().get("latency_avg"));
+        assertNotNull(br.getMetrics().get("throughput"));
+    }
+
+    @Test
     void calculateMetrics_omitsQualityMetricsForEsqlQueryType() throws Exception {
         jingraConfig.getActiveDataset().setQueryType("esql");
         MetricsCalculator.QueryResult res = new MetricsCalculator.QueryResult(

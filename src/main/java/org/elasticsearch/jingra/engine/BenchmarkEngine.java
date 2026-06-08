@@ -22,12 +22,16 @@ public interface BenchmarkEngine extends AutoCloseable {
 
     /**
      * Create an index/collection/table with the given schema.
+     * Engines that have no concept of named indices (e.g. time-series backends) can rely on
+     * this default no-op which signals success without doing anything.
      *
      * @param indexName the name of the index
      * @param schemaName the name of the schema template
      * @return true if created successfully
      */
-    boolean createIndex(String indexName, String schemaName);
+    default boolean createIndex(String indexName, String schemaName) {
+        return true;
+    }
 
     /**
      * Check if an index exists.
@@ -120,5 +124,15 @@ public interface BenchmarkEngine extends AutoCloseable {
      */
     default void awaitIndexReady(String indexName) {
         // no-op by default — only implemented by engines that need to wait for background work
+    }
+
+    /**
+     * Whether this engine uses the index lifecycle (create / exists-check / delete) that
+     * {@code LoadCommand} manages.  Schema-full engines (Elasticsearch, OpenSearch, Qdrant)
+     * return {@code true}; schema-free / TSDB engines (Prometheus) return {@code false} and
+     * handle data clearing themselves inside {@link #deleteIndex}.
+     */
+    default boolean supportsIndexLifecycle() {
+        return true;
     }
 }

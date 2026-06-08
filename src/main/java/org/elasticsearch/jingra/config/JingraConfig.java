@@ -26,6 +26,9 @@ public class JingraConfig {
     @JsonProperty("qdrant")
     private Map<String, Object> qdrant;
 
+    @JsonProperty("prometheus")
+    private Map<String, Object> prometheus;
+
     @JsonProperty("datasets")
     private Map<String, DatasetConfig> datasets;
 
@@ -130,6 +133,14 @@ public class JingraConfig {
         this.qdrant = qdrant;
     }
 
+    public Map<String, Object> getPrometheus() {
+        return prometheus;
+    }
+
+    public void setPrometheus(Map<String, Object> prometheus) {
+        this.prometheus = prometheus;
+    }
+
     public Map<String, DatasetConfig> getDatasets() {
         return datasets;
     }
@@ -186,6 +197,7 @@ public class JingraConfig {
             case "elasticsearch" -> elasticsearch;
             case "opensearch" -> opensearch;
             case "qdrant" -> qdrant;
+            case "prometheus" -> prometheus;
             default -> throw new IllegalStateException("Unknown engine: " + engine);
         };
     }

@@ -345,6 +345,7 @@ public class BenchmarkEvaluator {
         String conditionsField = dataset.getQueriesMapping().getConditionsField();
 
         boolean isEsql = "esql".equals(dataset.getQueryType());
+        boolean isPromql = "promql".equals(dataset.getQueryType());
         List<QueryDocument> queries = new ArrayList<>();
         int skippedQueries = 0;
 
@@ -352,7 +353,7 @@ public class BenchmarkEvaluator {
             List<Float> vector = null;
             String queryText = null;
 
-            if (!isEsql && textField == null && vectorField == null) {
+            if (!isEsql && !isPromql && textField == null && vectorField == null) {
                 logger.error("Neither query_text_field nor query_vector_field configured. Skipping query.");
                 skippedQueries++;
                 continue;
@@ -466,9 +467,10 @@ public class BenchmarkEvaluator {
             result.setProfile(config.getProfile());
         }
 
-        // Add quality metrics — not applicable for ESQL/metrics benchmarks
+        // Add quality metrics — not applicable for ESQL/PromQL benchmarks
         boolean isEsql = "esql".equals(dataset.getQueryType());
-        if (!isEsql) {
+        boolean isPromql = "promql".equals(dataset.getQueryType());
+        if (!isEsql && !isPromql) {
             result.addMetric("precision", calculator.calculatePrecision());
             result.addMetric("recall", calculator.calculateRecall());
             result.addMetric("f1", calculator.calculateF1());

@@ -266,6 +266,17 @@ class ConfigValidatorTest {
     }
 
     @Test
+    void validateForEvaluation_ok_forPromqlQueryType() {
+        JingraConfig c = evalCompleteConfig();
+        DatasetConfig ds = c.getActiveDataset();
+        ds.setQueryType("promql");
+        ds.getQueriesMapping().setQueryVectorField(null);
+        ds.getQueriesMapping().setQueryTextField(null);
+        ds.getQueriesMapping().setGroundTruthField(null);
+        ConfigValidator.validateForEvaluation(c);
+    }
+
+    @Test
     void validateForEvaluation_ok_whenVectorSetAndTextFieldWhitespaceOnly() {
         JingraConfig c = evalCompleteConfig();
         DatasetConfig.QueriesMappingConfig qm = c.getActiveDataset().getQueriesMapping();

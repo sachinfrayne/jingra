@@ -118,9 +118,10 @@ public final class ConfigValidator {
             requireNonBlank(ds.getPath().getQueriesPath(), "dataset.path.queries_path is required for evaluation");
             requireNonNullState(ds.getQueriesMapping(), "dataset.queries_mapping is required for evaluation");
 
-            // ESQL queries need neither a query vector/text field nor a ground truth field
-            boolean isEsql = "esql".equals(ds.getQueryType());
-            if (!isEsql) {
+            // ESQL and PromQL queries need neither a query vector/text field nor a ground truth field
+            String queryType = ds.getQueryType();
+            boolean isAggregateScan = "esql".equals(queryType) || "promql".equals(queryType);
+            if (!isAggregateScan) {
                 String vectorField = ds.getQueriesMapping().getQueryVectorField();
                 String textField = ds.getQueriesMapping().getQueryTextField();
                 boolean vectorFieldMissing = vectorField == null || vectorField.isBlank();

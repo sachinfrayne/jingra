@@ -123,6 +123,28 @@ class LoadCommandTest {
     }
 
     @Test
+    void run_schemaFreeEngine_callsDeleteDirectlyAndSkipsIndexLifecycle() throws Exception {
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        SchemaFreeMock engine = new SchemaFreeMock();
+        LoadCommand.run(config, c -> engine);
+        assertTrue(engine.deleteCalled, "deleteIndex should be called to clear old data");
+        assertFalse(engine.createCalled, "createIndex must not be called for schema-free engines");
+        assertTrue(engine.ingestCalls >= 1, "ingest must proceed");
+    }
+
+    @Test
+    void run_schemaFreeEngine_failsWhenDeleteReturnsFalse() {
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        MockBenchmarkEngine engine = new MockBenchmarkEngine() {
+            @Override public boolean supportsIndexLifecycle() { return false; }
+            @Override public boolean deleteIndex(String indexName) { return false; }
+        };
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> LoadCommand.run(config, c -> engine));
+        assertTrue(ex.getMessage().contains("Failed to clear"));
+    }
+
+    @Test
     void run_failsWhenConnectReturnsFalse() {
         JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         MockBenchmarkEngine engine = new MockBenchmarkEngine() {
@@ -788,6 +810,34 @@ class LoadCommandTest {
         public boolean deleteIndex(String indexName) {
             deleteCalled = true;
             return super.deleteIndex(indexName);
+        }
+    }
+
+    private static class SchemaFreeMock extends MockBenchmarkEngine {
+        boolean deleteCalled;
+        boolean createCalled;
+        int ingestCalls;
+
+        SchemaFreeMock() { indexPresent = false; }
+
+        @Override public boolean supportsIndexLifecycle() { return false; }
+
+        @Override
+        public boolean deleteIndex(String indexName) {
+            deleteCalled = true;
+            return true;
+        }
+
+        @Override
+        public boolean createIndex(String indexName, String schemaName) {
+            createCalled = true;
+            return true;
+        }
+
+        @Override
+        public int ingest(List<Document> documents, String indexName, String idField) {
+            ingestCalls++;
+            return documents.size();
         }
     }
 

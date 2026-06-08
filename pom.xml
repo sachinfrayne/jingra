@@ -90,17 +90,17 @@
             <version>${qdrant.version}</version>
         </dependency>
 
-        <!-- Protocol Buffers (required by Qdrant) -->
+        <!-- Protocol Buffers (required by Qdrant + OTLP ingestion) -->
         <dependency>
             <groupId>com.google.protobuf</groupId>
             <artifactId>protobuf-java</artifactId>
-            <version>3.25.5</version>
+            <version>4.35.0</version>
         </dependency>
         <!-- JSON print for protobuf (e.g. debug logging of Qdrant gRPC requests) -->
         <dependency>
             <groupId>com.google.protobuf</groupId>
             <artifactId>protobuf-java-util</artifactId>
-            <version>3.25.5</version>
+            <version>4.35.0</version>
         </dependency>
 
         <!-- Apache Parquet for reading data files -->
@@ -148,6 +148,13 @@
                     <artifactId>dnsjava</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+
+        <!-- OTLP protobuf classes for Prometheus metrics ingestion -->
+        <dependency>
+            <groupId>io.opentelemetry.proto</groupId>
+            <artifactId>opentelemetry-proto</artifactId>
+            <version>1.7.0-alpha</version>
         </dependency>
 
         <!-- Jackson for JSON/YAML parsing -->

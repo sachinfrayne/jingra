@@ -15,6 +15,7 @@ public final class EngineFactory {
             case "elasticsearch" -> new ElasticsearchEngine(config.getEngineConfig());
             case "opensearch" -> new OpenSearchEngine(config.getEngineConfig());
             case "qdrant" -> new QdrantEngine(config.getEngineConfig());
+            case "prometheus" -> new PrometheusEngine(config.getEngineConfig());
             default -> throw new IllegalArgumentException("Unknown engine: " + engineName);
         };
     }

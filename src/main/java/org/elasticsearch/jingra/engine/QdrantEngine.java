@@ -1098,10 +1098,6 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
      * Detects transient gRPC transport failures where reopening the channel often succeeds
      * (e.g. {@code INTERNAL: Encountered end-of-stream mid-frame} with the Java client against Qdrant).
      */
-    static long serverLatencyFromSeconds(double seconds) {
-        return Math.round(seconds * 1000.0);
-    }
-
     private static boolean isBrokenGrpcTransport(Throwable e) {
         Throwable cause = e;
         while (cause != null) {

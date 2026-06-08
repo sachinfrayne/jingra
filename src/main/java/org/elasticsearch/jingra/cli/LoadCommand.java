@@ -174,21 +174,29 @@ public final class LoadCommand {
 
     private static void loadDataset(BenchmarkEngine engine, DatasetConfig dataset, JingraConfig config) throws Exception {
         String indexName = dataset.getIndexName();
-        if (engine.indexExists(indexName)) {
-            logger.info("Index '{}' already exists - deleting...", indexName);
-            if (!engine.deleteIndex(indexName)) {
-                throw new RuntimeException("Failed to delete existing index");
+        if (engine.supportsIndexLifecycle()) {
+            if (engine.indexExists(indexName)) {
+                logger.info("Index '{}' already exists - deleting...", indexName);
+                if (!engine.deleteIndex(indexName)) {
+                    throw new RuntimeException("Failed to delete existing index");
+                }
+                logger.info("Index delete request accepted; waiting until index is gone before create...");
+                waitUntilIndexAbsent(engine, indexName);
+                logger.info("Index deleted successfully (no longer reported by cluster)");
             }
-            logger.info("Index delete request accepted; waiting until index is gone before create...");
-            waitUntilIndexAbsent(engine, indexName);
-            logger.info("Index deleted successfully (no longer reported by cluster)");
-        }
 
-        logger.info("Creating index '{}'...", indexName);
-        if (!engine.createIndex(indexName, dataset.getSchemaName())) {
-            throw new RuntimeException("Failed to create index");
+            logger.info("Creating index '{}'...", indexName);
+            if (!engine.createIndex(indexName, dataset.getSchemaName())) {
+                throw new RuntimeException("Failed to create index");
+            }
+            logger.info("Index created successfully");
+        } else {
+            logger.info("Clearing existing data for '{}'...", indexName);
+            if (!engine.deleteIndex(indexName)) {
+                throw new RuntimeException("Failed to clear existing data for '" + indexName + "'");
+            }
+            logger.info("Data cleared successfully");
         }
-        logger.info("Index created successfully");
 
         String dataPath = dataset.getPath().getDataPath();
         String dataUrlEnv = dataset.getPath().getDataUrlEnv();

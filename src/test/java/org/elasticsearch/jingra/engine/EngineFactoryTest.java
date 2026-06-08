@@ -35,6 +35,14 @@ class EngineFactoryTest {
     }
 
     @Test
+    void createsPrometheus() {
+        JingraConfig c = new JingraConfig();
+        c.setEngine("prometheus");
+        c.setPrometheus(Map.of("url_env", "PROMETHEUS_URL"));
+        assertInstanceOf(PrometheusEngine.class, EngineFactory.create(c));
+    }
+
+    @Test
     void unknownEngineThrows() {
         JingraConfig c = new JingraConfig();
         c.setEngine("unknown-engine");

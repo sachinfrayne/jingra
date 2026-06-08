@@ -63,6 +63,24 @@ class JingraConfigTest {
     }
 
     @Test
+    void getEngineConfig_returnsPrometheusMap() {
+        JingraConfig c = new JingraConfig();
+        c.setEngine("prometheus");
+        Map<String, Object> p = Map.of("url_env", "PROMETHEUS_URL");
+        c.setPrometheus(p);
+        assertSame(p, c.getEngineConfig());
+    }
+
+    @Test
+    void getEngineConfig_returnsPrometheusMap_whenEngineIsMixedCase() {
+        JingraConfig c = new JingraConfig();
+        c.setEngine("Prometheus");
+        Map<String, Object> p = Map.of("url_env", "PROMETHEUS_URL");
+        c.setPrometheus(p);
+        assertSame(p, c.getEngineConfig());
+    }
+
+    @Test
     void getEngineConfig_throwsIllegalStateWithMessage_whenEngineUnknown() {
         JingraConfig c = new JingraConfig();
         c.setEngine("nope");
@@ -123,6 +141,7 @@ class JingraConfigTest {
         Map<String, Object> es = Map.of("url", "http://es:9200");
         Map<String, Object> os = Map.of("url", "http://os:9200");
         Map<String, Object> qd = Map.of("url", "http://q:6333");
+        Map<String, Object> prom = Map.of("url_env", "PROMETHEUS_URL");
 
         DatasetConfig datasetConfig = new DatasetConfig();
         datasetConfig.setType("t");
@@ -162,6 +181,7 @@ class JingraConfigTest {
         c.setElasticsearch(es);
         c.setOpensearch(os);
         c.setQdrant(qd);
+        c.setPrometheus(prom);
         c.setDatasets(datasets);
         c.setEvaluation(evaluation);
         c.setOutput(output);
@@ -174,6 +194,7 @@ class JingraConfigTest {
         assertSame(es, c.getElasticsearch());
         assertSame(os, c.getOpensearch());
         assertSame(qd, c.getQdrant());
+        assertSame(prom, c.getPrometheus());
         assertSame(datasets, c.getDatasets());
         assertSame(evaluation, c.getEvaluation());
         assertSame(output, c.getOutput());
@@ -279,6 +300,24 @@ class JingraConfigTest {
         c.setDatasets(Map.of("cpu", new DatasetConfig()));
         IllegalStateException ex = assertThrows(IllegalStateException.class, c::getActiveDatasets);
         assertEquals("Dataset not found: disk", ex.getMessage());
+    }
+
+    @Test
+    void deserializesYaml_acceptsPrometheusEngine() throws Exception {
+        String yaml =
+                """
+                engine: prometheus
+                dataset: metrics
+                prometheus:
+                  url_env: PROMETHEUS_URL
+                datasets:
+                  metrics:
+                    type: metrics
+                """;
+        JingraConfig c = YAML_MAPPER.readValue(yaml, JingraConfig.class);
+        assertEquals("prometheus", c.getEngine());
+        assertEquals("PROMETHEUS_URL", c.getPrometheus().get("url_env"));
+        assertSame(c.getPrometheus(), c.getEngineConfig());
     }
 
     @Test
