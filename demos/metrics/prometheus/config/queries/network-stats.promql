@@ -1,0 +1,3 @@
+topk({{size}},
+  sum_over_time(system_network_io{device="eth0"}[5m])
+)

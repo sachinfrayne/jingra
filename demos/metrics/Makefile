@@ -1,8 +1,8 @@
 include ../common/generate.mk
 
-.PHONY: elasticsearch
+.PHONY: elasticsearch prometheus
 
-elasticsearch: generate_data
+elasticsearch prometheus: generate_data
 	$(MAKE) -C $@ run
 
 %:
