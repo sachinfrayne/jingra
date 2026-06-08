@@ -187,9 +187,9 @@ class QdrantEngineBehaviorTest {
     }
 
     @Test
-    void createIndexReturnsFalseWhenClientNotInitialized() {
+    void createDataStoreReturnsFalseWhenClientNotInitialized() {
         QdrantEngine e = new QdrantEngine(new HashMap<>());
-        assertFalse(e.createIndex("any-index", "any-schema"));
+        assertFalse(e.createDataStore("any-index", "any-schema"));
     }
 
     @Test
@@ -300,18 +300,18 @@ class QdrantEngineBehaviorTest {
     }
 
     @Test
-    void createIndexReturnsFalseWhenClientNull() {
-        assertFalse(new QdrantEngine(new HashMap<>()).createIndex("c", "any"));
+    void createDataStoreReturnsFalseWhenClientNull() {
+        assertFalse(new QdrantEngine(new HashMap<>()).createDataStore("c", "any"));
     }
 
     @Test
-    void indexExistsReturnsFalseWhenClientNull() {
-        assertFalse(new QdrantEngine(new HashMap<>()).indexExists("c"));
+    void dataStoreExistsReturnsFalseWhenClientNull() {
+        assertFalse(new QdrantEngine(new HashMap<>()).dataStoreExists("c"));
     }
 
     @Test
-    void deleteIndexReturnsFalseWhenClientNull() {
-        assertFalse(new QdrantEngine(new HashMap<>()).deleteIndex("c"));
+    void resetDataStoreReturnsFalseWhenClientNull() {
+        assertFalse(new QdrantEngine(new HashMap<>()).resetDataStore("c"));
     }
 
     @Test
@@ -998,12 +998,12 @@ class QdrantEngineBehaviorTest {
     }
 
     @Test
-    void indexExistsReturnsFalseWhenListCollectionsFails() throws Exception {
+    void dataStoreExistsReturnsFalseWhenListCollectionsFails() throws Exception {
         QdrantEngine e = new QdrantEngine(new HashMap<>());
         QdrantClient mockClient = mock(QdrantClient.class);
         when(mockClient.listCollectionsAsync()).thenReturn(Futures.immediateFailedFuture(new RuntimeException("boom")));
         injectClient(e, mockClient);
-        assertFalse(e.indexExists("any"));
+        assertFalse(e.dataStoreExists("any"));
     }
 
     @Test
@@ -1026,23 +1026,23 @@ class QdrantEngineBehaviorTest {
     }
 
     @Test
-    void deleteIndexTrueWhenNotFound() throws Exception {
+    void resetDataStoreTrueWhenNotFound() throws Exception {
         QdrantEngine e = new QdrantEngine(new HashMap<>());
         QdrantClient mockClient = mock(QdrantClient.class);
         when(mockClient.deleteCollectionAsync(anyString()))
                 .thenReturn(Futures.immediateFailedFuture(new StatusRuntimeException(Status.NOT_FOUND)));
         injectClient(e, mockClient);
-        assertTrue(e.deleteIndex("gone"));
+        assertTrue(e.resetDataStore("gone"));
     }
 
     @Test
-    void deleteIndexFalseOnOtherFailure() throws Exception {
+    void resetDataStoreFalseOnOtherFailure() throws Exception {
         QdrantEngine e = new QdrantEngine(new HashMap<>());
         QdrantClient mockClient = mock(QdrantClient.class);
         when(mockClient.deleteCollectionAsync(anyString()))
                 .thenReturn(Futures.immediateFailedFuture(new RuntimeException("other")));
         injectClient(e, mockClient);
-        assertFalse(e.deleteIndex("x"));
+        assertFalse(e.resetDataStore("x"));
     }
 
     @Test
@@ -1075,7 +1075,7 @@ class QdrantEngineBehaviorTest {
     }
 
     @Test
-    void createIndexReturnsFalseWhenCollectionAlreadyExists() throws Exception {
+    void createDataStoreReturnsFalseWhenCollectionAlreadyExists() throws Exception {
         writeQdrantSchemaFile("test-direct", """
                 {"template":{"vectors":{"size":2,"distance":"Cosine"}}}
                 """);
@@ -1085,11 +1085,11 @@ class QdrantEngineBehaviorTest {
         QdrantClient mockClient = mock(QdrantClient.class);
         when(mockClient.listCollectionsAsync()).thenReturn(Futures.immediateFuture(List.of("col-a")));
         injectClient(e, mockClient);
-        assertFalse(e.createIndex("col-a", "test-direct"));
+        assertFalse(e.createDataStore("col-a", "test-direct"));
     }
 
     @Test
-    void createIndexReturnsFalseWhenSchemaMissingTemplate() throws Exception {
+    void createDataStoreReturnsFalseWhenSchemaMissingTemplate() throws Exception {
         writeQdrantSchemaFile("bad-shape", "{\"vectors\":{}}");
         Map<String, Object> cfg = new HashMap<>();
         cfg.put("grpc_timeout_seconds", 1);
@@ -1099,11 +1099,11 @@ class QdrantEngineBehaviorTest {
         injectClient(e, mockClient);
         // Simulate Qdrant rejecting the malformed schema
         injectFailingHttpClient(e, 400);
-        assertFalse(e.createIndex("col", "bad-shape"));
+        assertFalse(e.createDataStore("col", "bad-shape"));
     }
 
     @Test
-    void createIndexReturnsFalseWhenCreateCollectionFails() throws Exception {
+    void createDataStoreReturnsFalseWhenCreateCollectionFails() throws Exception {
         writeQdrantSchemaFile("test-direct", """
                 {"template":{"vectors":{"size":2,"distance":"Cosine"}}}
                 """);
@@ -1115,11 +1115,11 @@ class QdrantEngineBehaviorTest {
         injectClient(e, mockClient);
         // Simulate Qdrant returning an error for collection creation
         injectFailingHttpClient(e, 500);
-        assertFalse(e.createIndex("col", "test-direct"));
+        assertFalse(e.createDataStore("col", "test-direct"));
     }
 
     @Test
-    void createIndexSucceedsWithDirectVectorsSchema() throws Exception {
+    void createDataStoreSucceedsWithDirectVectorsSchema() throws Exception {
         writeQdrantSchemaFile("test-direct", """
                 {"template":{"vectors":{"size":2,"distance":"Cosine"}}}
                 """);
@@ -1131,11 +1131,11 @@ class QdrantEngineBehaviorTest {
         when(mockClient.createCollectionAsync(any(CreateCollection.class)))
                 .thenReturn(Futures.immediateFuture(CollectionOperationResponse.getDefaultInstance()));
         injectClient(e, mockClient);
-        assertTrue(e.createIndex("col-z", "test-direct"));
+        assertTrue(e.createDataStore("col-z", "test-direct"));
     }
 
     @Test
-    void createIndexLogsPayloadIndexFailureInMappingsBranch() throws Exception {
+    void createDataStoreLogsPayloadIndexFailureInMappingsBranch() throws Exception {
         writeQdrantSchemaFile("test-map", """
                 {"template":{"mappings":{"properties":{
                   "emb":{"type":"dense_vector","size":2,"distance":"Cosine"},
@@ -1153,11 +1153,11 @@ class QdrantEngineBehaviorTest {
         when(mockClient.createPayloadIndexAsync(eq("col-m"), eq("title"), any(), any(), eq(true), any(), any()))
                 .thenReturn(Futures.immediateFailedFuture(new RuntimeException("payload")));
         injectClient(e, mockClient);
-        assertTrue(e.createIndex("col-m", "test-map"));
+        assertTrue(e.createDataStore("col-m", "test-map"));
     }
 
     @Test
-    void createIndexUsesL2DistanceAlias() throws Exception {
+    void createDataStoreUsesL2DistanceAlias() throws Exception {
         writeQdrantSchemaFile("test-l2", """
                 {"template":{"vectors":{"size":2,"distance":"l2"}}}
                 """);
@@ -1169,11 +1169,11 @@ class QdrantEngineBehaviorTest {
         when(mockClient.createCollectionAsync(any(CreateCollection.class)))
                 .thenReturn(Futures.immediateFuture(CollectionOperationResponse.getDefaultInstance()));
         injectClient(e, mockClient);
-        assertTrue(e.createIndex("col-l2", "test-l2"));
+        assertTrue(e.createDataStore("col-l2", "test-l2"));
     }
 
     @Test
-    void createIndexUsesUnknownDistanceStringAsDefaultCosine() throws Exception {
+    void createDataStoreUsesUnknownDistanceStringAsDefaultCosine() throws Exception {
         writeQdrantSchemaFile("test-dist-default", """
                 {"template":{"vectors":{"size":2,"distance":"not-a-known-metric"}}}
                 """);
@@ -1185,11 +1185,11 @@ class QdrantEngineBehaviorTest {
         when(mockClient.createCollectionAsync(any(CreateCollection.class)))
                 .thenReturn(Futures.immediateFuture(CollectionOperationResponse.getDefaultInstance()));
         injectClient(e, mockClient);
-        assertTrue(e.createIndex("col-dd", "test-dist-default"));
+        assertTrue(e.createDataStore("col-dd", "test-dist-default"));
     }
 
     @Test
-    void createIndexUsesManhattanDistance() throws Exception {
+    void createDataStoreUsesManhattanDistance() throws Exception {
         writeQdrantSchemaFile("test-man", """
                 {"template":{"vectors":{"size":2,"distance":"Manhattan"}}}
                 """);
@@ -1201,11 +1201,11 @@ class QdrantEngineBehaviorTest {
         when(mockClient.createCollectionAsync(any(CreateCollection.class)))
                 .thenReturn(Futures.immediateFuture(CollectionOperationResponse.getDefaultInstance()));
         injectClient(e, mockClient);
-        assertTrue(e.createIndex("col-man", "test-man"));
+        assertTrue(e.createDataStore("col-man", "test-man"));
     }
 
     @Test
-    void createIndexUsesDotDistance() throws Exception {
+    void createDataStoreUsesDotDistance() throws Exception {
         writeQdrantSchemaFile("test-dot", """
                 {"template":{"vectors":{"size":2,"distance":"Dot"}}}
                 """);
@@ -1217,11 +1217,11 @@ class QdrantEngineBehaviorTest {
         when(mockClient.createCollectionAsync(any(CreateCollection.class)))
                 .thenReturn(Futures.immediateFuture(CollectionOperationResponse.getDefaultInstance()));
         injectClient(e, mockClient);
-        assertTrue(e.createIndex("col-dot", "test-dot"));
+        assertTrue(e.createDataStore("col-dot", "test-dot"));
     }
 
     @Test
-    void createIndexUsesTopLevelShardNumber() throws Exception {
+    void createDataStoreUsesTopLevelShardNumber() throws Exception {
         writeQdrantSchemaFile("test-shard-top", """
                 {"template":{"vectors":{"size":2,"distance":"Cosine"},"shard_number":3}}
                 """);
@@ -1233,11 +1233,11 @@ class QdrantEngineBehaviorTest {
         when(mockClient.createCollectionAsync(any(CreateCollection.class)))
                 .thenReturn(Futures.immediateFuture(CollectionOperationResponse.getDefaultInstance()));
         injectClient(e, mockClient);
-        assertTrue(e.createIndex("col-st", "test-shard-top"));
+        assertTrue(e.createDataStore("col-st", "test-shard-top"));
     }
 
     @Test
-    void createIndexSkipsReplicationFactorWhenZero() throws Exception {
+    void createDataStoreSkipsReplicationFactorWhenZero() throws Exception {
         writeQdrantSchemaFile("test-repl-zero", """
                 {"template":{"vectors":{"size":2,"distance":"Cosine"},"replication_factor":0}}
                 """);
@@ -1249,11 +1249,11 @@ class QdrantEngineBehaviorTest {
         when(mockClient.createCollectionAsync(any(CreateCollection.class)))
                 .thenReturn(Futures.immediateFuture(CollectionOperationResponse.getDefaultInstance()));
         injectClient(e, mockClient);
-        assertTrue(e.createIndex("col-r0", "test-repl-zero"));
+        assertTrue(e.createDataStore("col-r0", "test-repl-zero"));
     }
 
     @Test
-    void createIndexReadsShardSettingsFromTemplateSettingsBlock() throws Exception {
+    void createDataStoreReadsShardSettingsFromTemplateSettingsBlock() throws Exception {
         writeQdrantSchemaFile("test-shard-settings", """
                 {"template":{"vectors":{"size":2,"distance":"Cosine"},
                 "settings":{"shard_number":2,"replication_factor":1}}}
@@ -1266,11 +1266,11 @@ class QdrantEngineBehaviorTest {
         when(mockClient.createCollectionAsync(any(CreateCollection.class)))
                 .thenReturn(Futures.immediateFuture(CollectionOperationResponse.getDefaultInstance()));
         injectClient(e, mockClient);
-        assertTrue(e.createIndex("col-sh", "test-shard-settings"));
+        assertTrue(e.createDataStore("col-sh", "test-shard-settings"));
     }
 
     @Test
-    void createIndexSkipsShardNumberWhenZero() throws Exception {
+    void createDataStoreSkipsShardNumberWhenZero() throws Exception {
         writeQdrantSchemaFile("test-shard-zero", """
                 {"template":{"vectors":{"size":2,"distance":"Cosine"},"shard_number":0}}
                 """);
@@ -1282,11 +1282,11 @@ class QdrantEngineBehaviorTest {
         when(mockClient.createCollectionAsync(any(CreateCollection.class)))
                 .thenReturn(Futures.immediateFuture(CollectionOperationResponse.getDefaultInstance()));
         injectClient(e, mockClient);
-        assertTrue(e.createIndex("col-z0", "test-shard-zero"));
+        assertTrue(e.createDataStore("col-z0", "test-shard-zero"));
     }
 
     @Test
-    void createIndexAppliesHnswConfigWithMOnly() throws Exception {
+    void createDataStoreAppliesHnswConfigWithMOnly() throws Exception {
         writeQdrantSchemaFile("test-hnsw-m", """
                 {"template":{"vectors":{"size":2,"distance":"Cosine"},
                 "settings":{"hnsw_config":{"m":8}}}}
@@ -1299,11 +1299,11 @@ class QdrantEngineBehaviorTest {
         when(mockClient.createCollectionAsync(any(CreateCollection.class)))
                 .thenReturn(Futures.immediateFuture(CollectionOperationResponse.getDefaultInstance()));
         injectClient(e, mockClient);
-        assertTrue(e.createIndex("col-h", "test-hnsw-m"));
+        assertTrue(e.createDataStore("col-h", "test-hnsw-m"));
     }
 
     @Test
-    void createIndexCreatesPayloadIndexesFromPayloadIndexesArray() throws Exception {
+    void createDataStoreCreatesPayloadIndexesFromPayloadIndexesArray() throws Exception {
         writeQdrantSchemaFile("test-payload-idx", """
                 {"template":{"vectors":{"size":2,"distance":"Cosine"},
                 "payload_indexes":[
@@ -1321,11 +1321,11 @@ class QdrantEngineBehaviorTest {
         when(mockClient.createPayloadIndexAsync(anyString(), anyString(), any(), any(), eq(true), any(), any()))
                 .thenReturn(Futures.immediateFuture(io.qdrant.client.grpc.Points.UpdateResult.getDefaultInstance()));
         injectClient(e, mockClient);
-        assertTrue(e.createIndex("col-pi", "test-payload-idx"));
+        assertTrue(e.createDataStore("col-pi", "test-payload-idx"));
     }
 
     @Test
-    void createIndexWarnsWhenQuantizationVerificationFails() throws Exception {
+    void createDataStoreWarnsWhenQuantizationVerificationFails() throws Exception {
         writeQdrantSchemaFile("test-q-verify", """
                 {"template":{"vectors":{"size":2,"distance":"Cosine"},
                 "settings":{"quantization_config":{"binary":{"always_ram":true}}}}}
@@ -1340,11 +1340,11 @@ class QdrantEngineBehaviorTest {
         when(mockClient.getCollectionInfoAsync(anyString()))
                 .thenReturn(Futures.immediateFailedFuture(new RuntimeException("verify")));
         injectClient(e, mockClient);
-        assertTrue(e.createIndex("col-q", "test-q-verify"));
+        assertTrue(e.createDataStore("col-q", "test-q-verify"));
     }
 
     @Test
-    void createIndexAppliesBinaryQuantizationWhenAlwaysRamKeyOmitted() throws Exception {
+    void createDataStoreAppliesBinaryQuantizationWhenAlwaysRamKeyOmitted() throws Exception {
         writeQdrantSchemaFile("test-q-binary-no-always-ram", """
                 {"template":{"vectors":{"size":2,"distance":"Cosine"},
                 "settings":{"quantization_config":{"binary":{}}}}}
@@ -1359,11 +1359,11 @@ class QdrantEngineBehaviorTest {
         when(mockClient.getCollectionInfoAsync(anyString()))
                 .thenReturn(Futures.immediateFuture(CollectionInfo.getDefaultInstance()));
         injectClient(e, mockClient);
-        assertTrue(e.createIndex("col-bin-omit", "test-q-binary-no-always-ram"));
+        assertTrue(e.createDataStore("col-bin-omit", "test-q-binary-no-always-ram"));
     }
 
     @Test
-    void createIndexAppliesQuantizationConfigWhenBinarySectionAbsent() throws Exception {
+    void createDataStoreAppliesQuantizationConfigWhenBinarySectionAbsent() throws Exception {
         writeQdrantSchemaFile("test-q-quant-empty", """
                 {"template":{"vectors":{"size":2,"distance":"Cosine"},
                 "settings":{"quantization_config":{}}}}
@@ -1378,7 +1378,7 @@ class QdrantEngineBehaviorTest {
         when(mockClient.getCollectionInfoAsync(anyString()))
                 .thenReturn(Futures.immediateFuture(CollectionInfo.getDefaultInstance()));
         injectClient(e, mockClient);
-        assertTrue(e.createIndex("col-quant-empty", "test-q-quant-empty"));
+        assertTrue(e.createDataStore("col-quant-empty", "test-q-quant-empty"));
     }
 
     @Test
@@ -1706,7 +1706,7 @@ class QdrantEngineBehaviorTest {
     }
 
     @Test
-    void createIndexAppliesBinaryQuantizationFromTopLevelDirectSchema() throws Exception {
+    void createDataStoreAppliesBinaryQuantizationFromTopLevelDirectSchema() throws Exception {
         // Direct Qdrant-console schema format: hnsw_config and quantization_config at top level,
         // no "template" or "settings" wrapper. This is what wiki-dpr-e5-768-knn.json uses.
         // Collection creation now uses REST passthrough — the schema JSON is sent verbatim to Qdrant,
@@ -1727,11 +1727,11 @@ class QdrantEngineBehaviorTest {
         when(mockClient.listCollectionsAsync()).thenReturn(Futures.immediateFuture(List.of()));
         injectClient(e, mockClient);
 
-        assertTrue(e.createIndex("col-direct-quant", "test-direct-quant"));
+        assertTrue(e.createDataStore("col-direct-quant", "test-direct-quant"));
     }
 
     @Test
-    void createIndexAppliesHnswConfigFromTopLevelDirectSchema() throws Exception {
+    void createDataStoreAppliesHnswConfigFromTopLevelDirectSchema() throws Exception {
         // Collection creation now uses REST passthrough — the schema JSON is sent verbatim to Qdrant,
         // so field-level assertions are covered by integration tests against a real Qdrant instance.
         writeQdrantSchemaFile("test-direct-hnsw", """
@@ -1747,7 +1747,7 @@ class QdrantEngineBehaviorTest {
         when(mockClient.listCollectionsAsync()).thenReturn(Futures.immediateFuture(List.of()));
         injectClient(e, mockClient);
 
-        assertTrue(e.createIndex("col-direct-hnsw", "test-direct-hnsw"));
+        assertTrue(e.createDataStore("col-direct-hnsw", "test-direct-hnsw"));
     }
 
     // --- awaitIndexReady ---

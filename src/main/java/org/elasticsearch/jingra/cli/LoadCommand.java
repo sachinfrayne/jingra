@@ -34,7 +34,7 @@ public final class LoadCommand {
     /** Poll interval while waiting for the cluster to finish removing an index after delete. */
     private static final long INDEX_ABSENT_POLL_NS = TimeUnit.MILLISECONDS.toNanos(500L);
 
-    /** Max time to wait for {@code indexExists == false} after a successful delete API call. */
+    /** Max time to wait for {@code dataStoreExists == false} after a successful delete API call. */
     private static final long INDEX_ABSENT_DEADLINE_NS = TimeUnit.MINUTES.toNanos(3L);
 
     private LoadCommand() {}
@@ -109,7 +109,7 @@ public final class LoadCommand {
                 : INDEX_ABSENT_POLL_NS;
         long deadline = System.nanoTime() + deadlineNs;
         int polls = 0;
-        while (engine.indexExists(indexName)) {
+        while (engine.dataStoreExists(indexName)) {
             if (System.nanoTime() > deadline) {
                 throw new RuntimeException(
                         "Timed out after 3m waiting for index '" + indexName + "' to disappear after delete; "
@@ -175,9 +175,9 @@ public final class LoadCommand {
     private static void loadDataset(BenchmarkEngine engine, DatasetConfig dataset, JingraConfig config) throws Exception {
         String indexName = dataset.getIndexName();
         if (engine.supportsIndexLifecycle()) {
-            if (engine.indexExists(indexName)) {
+            if (engine.dataStoreExists(indexName)) {
                 logger.info("Index '{}' already exists - deleting...", indexName);
-                if (!engine.deleteIndex(indexName)) {
+                if (!engine.resetDataStore(indexName)) {
                     throw new RuntimeException("Failed to delete existing index");
                 }
                 logger.info("Index delete request accepted; waiting until index is gone before create...");
@@ -186,13 +186,13 @@ public final class LoadCommand {
             }
 
             logger.info("Creating index '{}'...", indexName);
-            if (!engine.createIndex(indexName, dataset.getSchemaName())) {
+            if (!engine.createDataStore(indexName, dataset.getSchemaName())) {
                 throw new RuntimeException("Failed to create index");
             }
             logger.info("Index created successfully");
         } else {
             logger.info("Clearing existing data for '{}'...", indexName);
-            if (!engine.deleteIndex(indexName)) {
+            if (!engine.resetDataStore(indexName)) {
                 throw new RuntimeException("Failed to clear existing data for '" + indexName + "'");
             }
             logger.info("Data cleared successfully");

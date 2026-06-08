@@ -57,9 +57,9 @@ class ElasticsearchOfflineCoverageTest {
         assertEquals("elasticsearch", e.getEngineName());
         assertEquals("es", e.getShortName());
         assertEquals("unknown", e.getVersion());
-        assertFalse(e.createIndex("i", "s"));
-        assertFalse(e.indexExists("i"));
-        assertFalse(e.deleteIndex("i"));
+        assertFalse(e.createDataStore("i", "s"));
+        assertFalse(e.dataStoreExists("i"));
+        assertFalse(e.resetDataStore("i"));
         assertEquals(0, e.ingest(List.of(), "i", null));
         assertTrue(e.query("i", "q", new QueryParams()).getDocumentIds().isEmpty());
         assertEquals(0L, e.getDocumentCount("i"));
@@ -68,7 +68,7 @@ class ElasticsearchOfflineCoverageTest {
     }
 
     @Test
-    void createIndexRejectsWrappedSchemaBody() throws Exception {
+    void createDataStoreRejectsWrappedSchemaBody() throws Exception {
         ElasticsearchEngine e = new ElasticsearchEngine(Map.of("url_env", BOGUS_URL_ENV)) {
             @Override
             protected boolean hasClient() {
@@ -76,13 +76,13 @@ class ElasticsearchOfflineCoverageTest {
             }
 
             @Override
-            protected boolean indexExistsOperation(String indexName) {
+            protected boolean dataStoreExistsOperation(String indexName) {
                 return false;
             }
 
             @Override
-            protected void createIndexOperation(String indexName, String schemaJson) {
-                fail("createIndexOperation should not run for wrapped schema bodies");
+            protected void createDataStoreOperation(String indexName, String schemaJson) {
+                fail("createDataStoreOperation should not run for wrapped schema bodies");
             }
 
             @Override
@@ -95,14 +95,14 @@ class ElasticsearchOfflineCoverageTest {
             }
         };
         try {
-            assertFalse(e.createIndex("i", "wrapped"));
+            assertFalse(e.createDataStore("i", "wrapped"));
         } finally {
             assertDoesNotThrow(e::close);
         }
     }
 
     @Test
-    void createIndexRejectsWrappedSchemaBody_nameOnly() throws Exception {
+    void createDataStoreRejectsWrappedSchemaBody_nameOnly() throws Exception {
         ElasticsearchEngine e = new ElasticsearchEngine(Map.of("url_env", BOGUS_URL_ENV)) {
             @Override
             protected boolean hasClient() {
@@ -110,13 +110,13 @@ class ElasticsearchOfflineCoverageTest {
             }
 
             @Override
-            protected boolean indexExistsOperation(String indexName) {
+            protected boolean dataStoreExistsOperation(String indexName) {
                 return false;
             }
 
             @Override
-            protected void createIndexOperation(String indexName, String schemaJson) {
-                fail("createIndexOperation should not run for wrapped schema bodies");
+            protected void createDataStoreOperation(String indexName, String schemaJson) {
+                fail("createDataStoreOperation should not run for wrapped schema bodies");
             }
 
             @Override
@@ -129,7 +129,7 @@ class ElasticsearchOfflineCoverageTest {
             }
         };
         try {
-            assertFalse(e.createIndex("i", "wrapped"));
+            assertFalse(e.createDataStore("i", "wrapped"));
         } finally {
             assertDoesNotThrow(e::close);
         }

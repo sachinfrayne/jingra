@@ -435,7 +435,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
     }
 
     @Override
-    public boolean createIndex(String indexName, String schemaName) {
+    public boolean createDataStore(String indexName, String schemaName) {
         if (!hasClient()) {
             logger.error("Qdrant client not initialized");
             return false;
@@ -443,7 +443,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
 
         try {
             // Check if collection already exists
-            if (indexExists(indexName)) {
+            if (dataStoreExists(indexName)) {
                 logger.warn("Collection '{}' already exists", indexName);
                 return false;
             }
@@ -524,7 +524,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
     }
 
     @Override
-    public boolean indexExists(String indexName) {
+    public boolean dataStoreExists(String indexName) {
         if (!hasClient()) {
             return false;
         }
@@ -539,7 +539,7 @@ public class QdrantEngine extends AbstractBenchmarkEngine {
     }
 
     @Override
-    public boolean deleteIndex(String indexName) {
+    public boolean resetDataStore(String indexName) {
         if (!hasClient()) {
             logger.error("Qdrant client not initialized");
             return false;

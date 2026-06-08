@@ -57,7 +57,7 @@ public final class EvalCommand {
                 DatasetConfig dataset = datasets.get(i);
 
                 String indexName = dataset.getIndexName();
-                if (!engine.indexExists(indexName)) {
+                if (!engine.dataStoreExists(indexName)) {
                     throw new RuntimeException("Index '" + indexName + "' does not exist. Run 'load' command first.");
                 }
                 long docCount = engine.getDocumentCount(indexName);

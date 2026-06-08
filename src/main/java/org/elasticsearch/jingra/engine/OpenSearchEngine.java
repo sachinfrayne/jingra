@@ -63,11 +63,11 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
         return client != null;
     }
 
-    protected boolean indexExistsOperation(String indexName) throws Exception {
+    protected boolean dataStoreExistsOperation(String indexName) throws Exception {
         return client.indices().exists(ExistsRequest.of(b -> b.index(indexName))).value();
     }
 
-    protected void deleteIndexOperation(String indexName) throws Exception {
+    protected void resetDataStoreOperation(String indexName) throws Exception {
         client.indices().delete(DeleteIndexRequest.of(b -> b.index(indexName)));
     }
 
@@ -241,7 +241,7 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
     }
 
     @Override
-    public boolean createIndex(String indexName, String schemaName) {
+    public boolean createDataStore(String indexName, String schemaName) {
         if (!hasClient()) {
             logger.error("OpenSearch client not initialized");
             return false;
@@ -249,7 +249,7 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
 
         try {
             // Check if index already exists
-            if (indexExists(indexName)) {
+            if (dataStoreExists(indexName)) {
                 logger.warn("Index '{}' already exists", indexName);
                 return false;
             }
@@ -282,12 +282,12 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
     }
 
     @Override
-    public boolean indexExists(String indexName) {
+    public boolean dataStoreExists(String indexName) {
         if (!hasClient()) {
             return false;
         }
         try {
-            return indexExistsOperation(indexName);
+            return dataStoreExistsOperation(indexName);
         } catch (Exception e) {
             logger.error("Failed to check if index exists", e);
             return false;
@@ -295,14 +295,14 @@ public class OpenSearchEngine extends AbstractBenchmarkEngine {
     }
 
     @Override
-    public boolean deleteIndex(String indexName) {
+    public boolean resetDataStore(String indexName) {
         if (!hasClient()) {
             logger.error("OpenSearch client not initialized");
             return false;
         }
 
         try {
-            deleteIndexOperation(indexName);
+            resetDataStoreOperation(indexName);
             logger.info("Deleted OpenSearch index '{}'", indexName);
             return true;
         } catch (OpenSearchException e) {

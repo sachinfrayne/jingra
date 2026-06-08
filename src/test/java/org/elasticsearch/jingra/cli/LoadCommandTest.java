@@ -128,8 +128,8 @@ class LoadCommandTest {
         JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         SchemaFreeMock engine = new SchemaFreeMock();
         LoadCommand.run(config, c -> engine);
-        assertTrue(engine.deleteCalled, "deleteIndex should be called to clear old data");
-        assertFalse(engine.createCalled, "createIndex must not be called for schema-free engines");
+        assertTrue(engine.deleteCalled, "resetDataStore should be called to clear old data");
+        assertFalse(engine.createCalled, "createDataStore must not be called for schema-free engines");
         assertTrue(engine.ingestCalls >= 1, "ingest must proceed");
     }
 
@@ -138,7 +138,7 @@ class LoadCommandTest {
         JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         MockBenchmarkEngine engine = new MockBenchmarkEngine() {
             @Override public boolean supportsIndexLifecycle() { return false; }
-            @Override public boolean deleteIndex(String indexName) { return false; }
+            @Override public boolean resetDataStore(String indexName) { return false; }
         };
         RuntimeException ex = assertThrows(RuntimeException.class, () -> LoadCommand.run(config, c -> engine));
         assertTrue(ex.getMessage().contains("Failed to clear"));
@@ -162,7 +162,7 @@ class LoadCommandTest {
         JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         MockBenchmarkEngine engine = new MockBenchmarkEngine() {
             @Override
-            public boolean deleteIndex(String indexName) {
+            public boolean resetDataStore(String indexName) {
                 return false;
             }
         };
@@ -175,12 +175,12 @@ class LoadCommandTest {
         JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         MockBenchmarkEngine engine = new MockBenchmarkEngine() {
             @Override
-            public boolean indexExists(String indexName) {
+            public boolean dataStoreExists(String indexName) {
                 return false;
             }
 
             @Override
-            public boolean createIndex(String indexName, String schemaName) {
+            public boolean createDataStore(String indexName, String schemaName) {
                 return false;
             }
         };
@@ -194,7 +194,7 @@ class LoadCommandTest {
         JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         MockBenchmarkEngine engine = new MockBenchmarkEngine() {
             @Override
-            public boolean indexExists(String indexName) {
+            public boolean dataStoreExists(String indexName) {
                 return false;
             }
 
@@ -213,7 +213,7 @@ class LoadCommandTest {
         JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
         MockBenchmarkEngine engine = new MockBenchmarkEngine() {
             @Override
-            public boolean indexExists(String indexName) {
+            public boolean dataStoreExists(String indexName) {
                 return false;
             }
 
@@ -383,7 +383,7 @@ class LoadCommandTest {
     void waitUntilIndexAbsentReturnsWhenAlreadyGone() {
         MockBenchmarkEngine engine = new MockBenchmarkEngine() {
             @Override
-            public boolean indexExists(String indexName) {
+            public boolean dataStoreExists(String indexName) {
                 return false;
             }
         };
@@ -396,7 +396,7 @@ class LoadCommandTest {
             int calls;
 
             @Override
-            public boolean indexExists(String indexName) {
+            public boolean dataStoreExists(String indexName) {
                 return calls++ < 5;
             }
         };
@@ -464,7 +464,7 @@ class LoadCommandTest {
         LoadCommand.indexAbsentPollNanosOverride = TimeUnit.MILLISECONDS.toNanos(1L);
         MockBenchmarkEngine engine = new MockBenchmarkEngine() {
             @Override
-            public boolean indexExists(String indexName) {
+            public boolean dataStoreExists(String indexName) {
                 return true;
             }
         };
@@ -480,7 +480,7 @@ class LoadCommandTest {
             private final AtomicInteger wave = new AtomicInteger();
 
             @Override
-            public boolean indexExists(String indexName) {
+            public boolean dataStoreExists(String indexName) {
                 return wave.getAndIncrement() < 25;
             }
         };
@@ -508,12 +508,12 @@ class LoadCommandTest {
             }
 
             @Override
-            public boolean indexExists(String indexName) {
+            public boolean dataStoreExists(String indexName) {
                 return false;
             }
 
             @Override
-            public boolean createIndex(String indexName, String schemaName) {
+            public boolean createDataStore(String indexName, String schemaName) {
                 return true;
             }
 
@@ -560,12 +560,12 @@ class LoadCommandTest {
             }
 
             @Override
-            public boolean indexExists(String indexName) {
+            public boolean dataStoreExists(String indexName) {
                 return false;
             }
 
             @Override
-            public boolean createIndex(String indexName, String schemaName) {
+            public boolean createDataStore(String indexName, String schemaName) {
                 return true;
             }
 
@@ -605,7 +605,7 @@ class LoadCommandTest {
         // Override the default no-op to detect if it is invoked; the no-op itself does nothing
         BenchmarkEngine mockEngine = new MockBenchmarkEngine() {
             @Override
-            public boolean indexExists(String indexName) {
+            public boolean dataStoreExists(String indexName) {
                 return false;
             }
 
@@ -631,7 +631,7 @@ class LoadCommandTest {
         IndexTrackingMock engine = new IndexTrackingMock();
         LoadCommand.run(config, c -> engine);
 
-        assertEquals(2, engine.createCalls.size(), "expected one createIndex per unique index");
+        assertEquals(2, engine.createCalls.size(), "expected one createDataStore per unique index");
         assertTrue(engine.createCalls.contains("idx"));
         assertTrue(engine.createCalls.contains("idx2"));
     }
@@ -797,9 +797,9 @@ class LoadCommandTest {
         }
 
         @Override
-        public boolean createIndex(String indexName, String schemaName) {
+        public boolean createDataStore(String indexName, String schemaName) {
             createCalls.add(indexName);
-            return super.createIndex(indexName, schemaName);
+            return super.createDataStore(indexName, schemaName);
         }
     }
 
@@ -807,9 +807,9 @@ class LoadCommandTest {
         boolean deleteCalled;
 
         @Override
-        public boolean deleteIndex(String indexName) {
+        public boolean resetDataStore(String indexName) {
             deleteCalled = true;
-            return super.deleteIndex(indexName);
+            return super.resetDataStore(indexName);
         }
     }
 
@@ -823,13 +823,13 @@ class LoadCommandTest {
         @Override public boolean supportsIndexLifecycle() { return false; }
 
         @Override
-        public boolean deleteIndex(String indexName) {
+        public boolean resetDataStore(String indexName) {
             deleteCalled = true;
             return true;
         }
 
         @Override
-        public boolean createIndex(String indexName, String schemaName) {
+        public boolean createDataStore(String indexName, String schemaName) {
             createCalled = true;
             return true;
         }
@@ -846,7 +846,7 @@ class LoadCommandTest {
         private final AtomicInteger batchIndex = new AtomicInteger();
 
         @Override
-        public boolean indexExists(String indexName) {
+        public boolean dataStoreExists(String indexName) {
             return false;
         }
 
@@ -869,7 +869,7 @@ class LoadCommandTest {
         int ingestCalls;
 
         @Override
-        public boolean indexExists(String indexName) {
+        public boolean dataStoreExists(String indexName) {
             return false;
         }
 

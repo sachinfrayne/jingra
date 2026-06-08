@@ -124,7 +124,7 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
     }
 
     @Override
-    public boolean indexExists(String indexName) {
+    public boolean dataStoreExists(String indexName) {
         if (!isConnected()) return false;
         try {
             return hasAnySeriesOperation();
@@ -135,7 +135,7 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
     }
 
     @Override
-    public boolean deleteIndex(String indexName) {
+    public boolean resetDataStore(String indexName) {
         if (!isConnected()) return false;
         try {
             deleteSeriesOperation();

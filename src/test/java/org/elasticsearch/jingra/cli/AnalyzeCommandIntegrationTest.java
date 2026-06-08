@@ -60,8 +60,8 @@ class AnalyzeCommandIntegrationTest {
     static void tearDown() throws Exception {
         if (engine != null) {
             // Clean up test index
-            if (engine.indexExists(RESULTS_INDEX)) {
-                engine.deleteIndex(RESULTS_INDEX);
+            if (engine.dataStoreExists(RESULTS_INDEX)) {
+                engine.resetDataStore(RESULTS_INDEX);
             }
             engine.close();
         }
@@ -79,8 +79,8 @@ class AnalyzeCommandIntegrationTest {
     @Order(1)
     void insertSampleBenchmarkResults() throws Exception {
         // Delete index if it exists from previous run
-        if (engine.indexExists(RESULTS_INDEX)) {
-            engine.deleteIndex(RESULTS_INDEX);
+        if (engine.dataStoreExists(RESULTS_INDEX)) {
+            engine.resetDataStore(RESULTS_INDEX);
         }
         // Create sample results for recall@100
         List<Map<String, Object>> results = List.of(

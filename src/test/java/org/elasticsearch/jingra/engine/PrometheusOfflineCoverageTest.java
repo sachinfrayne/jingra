@@ -68,9 +68,9 @@ class PrometheusOfflineCoverageTest {
         assertEquals("prometheus", e.getEngineName());
         assertEquals("prom", e.getShortName());
         assertEquals("unknown", e.getVersion());
-        assertTrue(e.createIndex("i", "s"));
-        assertFalse(e.indexExists("i"));
-        assertFalse(e.deleteIndex("i"));
+        assertTrue(e.createDataStore("i", "s"));
+        assertFalse(e.dataStoreExists("i"));
+        assertFalse(e.resetDataStore("i"));
         assertEquals(0, e.ingest(List.of(), "i", null));
         assertEquals(0, e.ingest(List.of(new Document()), "i", null));
         assertTrue(e.query("i", "q", new QueryParams()).getDocumentIds().isEmpty());
@@ -137,29 +137,29 @@ class PrometheusOfflineCoverageTest {
     }
 
     @Test
-    void indexExists_returnsTrueWhenSeriesExist() throws Exception {
+    void dataStoreExists_returnsTrueWhenSeriesExist() throws Exception {
         PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
             @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
             @Override protected boolean hasAnySeriesOperation() { return true; }
         };
         assertTrue(e.connect());
-        assertTrue(e.indexExists("metrics"));
+        assertTrue(e.dataStoreExists("metrics"));
         assertDoesNotThrow(() -> e.close());
     }
 
     @Test
-    void indexExists_returnsFalseWhenNoSeries() throws Exception {
+    void dataStoreExists_returnsFalseWhenNoSeries() throws Exception {
         PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
             @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
             @Override protected boolean hasAnySeriesOperation() { return false; }
         };
         assertTrue(e.connect());
-        assertFalse(e.indexExists("metrics"));
+        assertFalse(e.dataStoreExists("metrics"));
         assertDoesNotThrow(() -> e.close());
     }
 
     @Test
-    void indexExists_returnsFalseOnException() throws Exception {
+    void dataStoreExists_returnsFalseOnException() throws Exception {
         PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
             @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
             @Override protected boolean hasAnySeriesOperation() throws Exception {
@@ -167,31 +167,31 @@ class PrometheusOfflineCoverageTest {
             }
         };
         assertTrue(e.connect());
-        assertFalse(e.indexExists("metrics"));
+        assertFalse(e.dataStoreExists("metrics"));
         assertDoesNotThrow(() -> e.close());
     }
 
     @Test
-    void deleteIndex_returnsFalseWhenDisconnected() {
+    void resetDataStore_returnsFalseWhenDisconnected() {
         PrometheusEngine e = new PrometheusEngine(Map.of("url_env", BOGUS_URL_ENV));
         assertFalse(e.connect());
-        assertFalse(e.deleteIndex("metrics"));
+        assertFalse(e.resetDataStore("metrics"));
     }
 
     @Test
-    void deleteIndex_returnsTrueWhenBothOpsSucceed() throws Exception {
+    void resetDataStore_returnsTrueWhenBothOpsSucceed() throws Exception {
         PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
             @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
             @Override protected void deleteSeriesOperation() {}
             @Override protected void cleanTombstonesOperation() {}
         };
         assertTrue(e.connect());
-        assertTrue(e.deleteIndex("metrics"));
+        assertTrue(e.resetDataStore("metrics"));
         assertDoesNotThrow(() -> e.close());
     }
 
     @Test
-    void deleteIndex_returnsFalseWhenDeleteSeriesFails() throws Exception {
+    void resetDataStore_returnsFalseWhenDeleteSeriesFails() throws Exception {
         PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
             @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
             @Override protected void deleteSeriesOperation() throws Exception {
@@ -199,12 +199,12 @@ class PrometheusOfflineCoverageTest {
             }
         };
         assertTrue(e.connect());
-        assertFalse(e.deleteIndex("metrics"));
+        assertFalse(e.resetDataStore("metrics"));
         assertDoesNotThrow(() -> e.close());
     }
 
     @Test
-    void deleteIndex_returnsFalseWhenCleanTombstonesFails() throws Exception {
+    void resetDataStore_returnsFalseWhenCleanTombstonesFails() throws Exception {
         PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
             @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
             @Override protected void deleteSeriesOperation() {}
@@ -213,7 +213,7 @@ class PrometheusOfflineCoverageTest {
             }
         };
         assertTrue(e.connect());
-        assertFalse(e.deleteIndex("metrics"));
+        assertFalse(e.resetDataStore("metrics"));
         assertDoesNotThrow(() -> e.close());
     }
 
@@ -937,7 +937,7 @@ class PrometheusOfflineCoverageTest {
         java.net.http.HttpClient mockClient = Mockito.mock(java.net.http.HttpClient.class);
         java.net.http.HttpResponse<String> mockStringResp = Mockito.mock(java.net.http.HttpResponse.class);
         java.net.http.HttpResponse<Void> mockVoidResp = Mockito.mock(java.net.http.HttpResponse.class);
-        // connect → httpSendString (buildInfoOperation); deleteIndex → httpSendVoid (deleteSeriesOperation, cleanTombstonesOperation)
+        // connect → httpSendString (buildInfoOperation); resetDataStore → httpSendVoid (deleteSeriesOperation, cleanTombstonesOperation)
         Mockito.doReturn(mockStringResp).doReturn(mockVoidResp).doReturn(mockVoidResp)
                 .when(mockClient).send(ArgumentMatchers.any(), ArgumentMatchers.any());
         Mockito.when(mockStringResp.statusCode()).thenReturn(200);
@@ -949,8 +949,8 @@ class PrometheusOfflineCoverageTest {
             protected java.net.http.HttpClient buildHttpClient() { return mockClient; }
         };
         assertTrue(e.connect());
-        // deleteIndex() → deleteSeriesOperation() + cleanTombstonesOperation() → real httpSendVoid() → mockClient.send()
-        assertTrue(e.deleteIndex("m"));
+        // resetDataStore() → deleteSeriesOperation() + cleanTombstonesOperation() → real httpSendVoid() → mockClient.send()
+        assertTrue(e.resetDataStore("m"));
         assertDoesNotThrow(() -> e.close());
     }
 
@@ -1015,7 +1015,7 @@ class PrometheusOfflineCoverageTest {
             }
         };
         assertTrue(e.connect());
-        assertTrue(e.indexExists("m")); // delegates to hasAnySeriesOperation
+        assertTrue(e.dataStoreExists("m")); // delegates to hasAnySeriesOperation
         assertDoesNotThrow(() -> e.close());
     }
 
@@ -1036,7 +1036,7 @@ class PrometheusOfflineCoverageTest {
             }
         };
         assertTrue(e.connect());
-        assertFalse(e.indexExists("m"));
+        assertFalse(e.dataStoreExists("m"));
         assertDoesNotThrow(() -> e.close());
     }
 
@@ -1056,8 +1056,8 @@ class PrometheusOfflineCoverageTest {
             }
         };
         assertTrue(e.connect());
-        // non-200 from hasAnySeriesOperation → throws → indexExists catches → returns false
-        assertFalse(e.indexExists("m"));
+        // non-200 from hasAnySeriesOperation → throws → dataStoreExists catches → returns false
+        assertFalse(e.dataStoreExists("m"));
         assertDoesNotThrow(() -> e.close());
     }
 
@@ -1079,7 +1079,7 @@ class PrometheusOfflineCoverageTest {
             }
         };
         assertTrue(e.connect());
-        assertFalse(e.indexExists("m")); // values == null branch
+        assertFalse(e.dataStoreExists("m")); // values == null branch
         assertDoesNotThrow(() -> e.close());
     }
 
@@ -1100,7 +1100,7 @@ class PrometheusOfflineCoverageTest {
             }
         };
         assertTrue(e.connect());
-        assertTrue(e.deleteIndex("m")); // deleteSeriesOperation → real httpSendVoid → 204 → success
+        assertTrue(e.resetDataStore("m")); // deleteSeriesOperation → real httpSendVoid → 204 → success
         assertDoesNotThrow(() -> e.close());
     }
 
@@ -1121,7 +1121,7 @@ class PrometheusOfflineCoverageTest {
             }
         };
         assertTrue(e.connect());
-        assertFalse(e.deleteIndex("m")); // deleteSeriesOperation → 500 → throws → deleteIndex returns false
+        assertFalse(e.resetDataStore("m")); // deleteSeriesOperation → 500 → throws → resetDataStore returns false
         assertDoesNotThrow(() -> e.close());
     }
 
@@ -1142,7 +1142,7 @@ class PrometheusOfflineCoverageTest {
             }
         };
         assertTrue(e.connect());
-        assertFalse(e.deleteIndex("m")); // cleanTombstonesOperation → 500 → throws → deleteIndex returns false
+        assertFalse(e.resetDataStore("m")); // cleanTombstonesOperation → 500 → throws → resetDataStore returns false
         assertDoesNotThrow(() -> e.close());
     }
 
@@ -1163,7 +1163,7 @@ class PrometheusOfflineCoverageTest {
             }
         };
         assertTrue(e.connect());
-        assertTrue(e.deleteIndex("m")); // cleanTombstonesOperation → 204 → returns normally → deleteIndex returns true
+        assertTrue(e.resetDataStore("m")); // cleanTombstonesOperation → 204 → returns normally → resetDataStore returns true
         assertDoesNotThrow(() -> e.close());
     }
 }

@@ -191,18 +191,18 @@ class ElasticsearchEngineBehaviorTest {
     }
 
     @Test
-    void createIndexReturnsFalseWhenClientNull() {
-        assertFalse(new ElasticsearchEngine(new HashMap<>()).createIndex("i", "any"));
+    void createDataStoreReturnsFalseWhenClientNull() {
+        assertFalse(new ElasticsearchEngine(new HashMap<>()).createDataStore("i", "any"));
     }
 
     @Test
-    void indexExistsReturnsFalseWhenClientNull() {
-        assertFalse(new ElasticsearchEngine(new HashMap<>()).indexExists("i"));
+    void dataStoreExistsReturnsFalseWhenClientNull() {
+        assertFalse(new ElasticsearchEngine(new HashMap<>()).dataStoreExists("i"));
     }
 
     @Test
-    void deleteIndexReturnsFalseWhenClientNull() {
-        assertFalse(new ElasticsearchEngine(new HashMap<>()).deleteIndex("i"));
+    void resetDataStoreReturnsFalseWhenClientNull() {
+        assertFalse(new ElasticsearchEngine(new HashMap<>()).resetDataStore("i"));
     }
 
     @Test
@@ -249,14 +249,14 @@ class ElasticsearchEngineBehaviorTest {
     }
 
     @Test
-    void indexExistsReturnsFalseWhenOperationThrows() {
+    void dataStoreExistsReturnsFalseWhenOperationThrows() {
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
             @Override
-            protected boolean indexExistsOperation(String indexName) {
+            protected boolean dataStoreExistsOperation(String indexName) {
                 throw new RuntimeException("boom");
             }
         };
-        assertFalse(e.indexExists("x"));
+        assertFalse(e.dataStoreExists("x"));
     }
 
     @Test
@@ -282,66 +282,66 @@ class ElasticsearchEngineBehaviorTest {
     }
 
     @Test
-    void deleteIndexTrueOn404() {
+    void resetDataStoreTrueOn404() {
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
             @Override
-            protected void deleteIndexOperation(String indexName) {
+            protected void resetDataStoreOperation(String indexName) {
                 ErrorResponse er = ErrorResponse.of(b -> b.status(404)
                         .error(ErrorCause.of(x -> x.type("index_not_found_exception").reason("nf"))));
                 throw new ElasticsearchException("failed", er);
             }
         };
-        assertTrue(e.deleteIndex("missing"));
+        assertTrue(e.resetDataStore("missing"));
     }
 
     @Test
-    void deleteIndexFalseOnNon404ElasticsearchException() {
+    void resetDataStoreFalseOnNon404ElasticsearchException() {
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
             @Override
-            protected void deleteIndexOperation(String indexName) {
+            protected void resetDataStoreOperation(String indexName) {
                 ErrorResponse er = ErrorResponse.of(b -> b.status(500)
                         .error(ErrorCause.of(x -> x.type("internal_server_error").reason("err"))));
                 throw new ElasticsearchException("failed", er);
             }
         };
-        assertFalse(e.deleteIndex("x"));
+        assertFalse(e.resetDataStore("x"));
     }
 
     @Test
-    void deleteIndexFalseOnGenericException() {
+    void resetDataStoreFalseOnGenericException() {
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
             @Override
-            protected void deleteIndexOperation(String indexName) throws Exception {
+            protected void resetDataStoreOperation(String indexName) throws Exception {
                 throw new IOException("io");
             }
         };
-        assertFalse(e.deleteIndex("x"));
+        assertFalse(e.resetDataStore("x"));
     }
 
     @Test
-    void createIndexFalseWhenIndexAlreadyExists() {
+    void createDataStoreFalseWhenIndexAlreadyExists() {
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
             @Override
-            protected boolean indexExistsOperation(String indexName) {
+            protected boolean dataStoreExistsOperation(String indexName) {
                 return true;
             }
         };
-        assertFalse(e.createIndex("exists", "any"));
+        assertFalse(e.createDataStore("exists", "any"));
     }
 
     @Test
-    void createIndexFalseWhenSchemaMissing() {
+    void createDataStoreFalseWhenSchemaMissing() {
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
             @Override
-            protected boolean indexExistsOperation(String indexName) {
+            protected boolean dataStoreExistsOperation(String indexName) {
                 return false;
             }
         };
-        assertFalse(e.createIndex("i", "__schema_file_does_not_exist__"));
+        assertFalse(e.createDataStore("i", "__schema_file_does_not_exist__"));
     }
 
     @Test
-    void createIndexFalseWhenSchemaHasNoTemplateField() throws Exception {
+    void createDataStoreFalseWhenSchemaHasNoTemplateField() throws Exception {
         Path dir = Path.of("jingra-config/schemas");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-es-no-template-key.json");
@@ -349,22 +349,22 @@ class ElasticsearchEngineBehaviorTest {
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
                 @Override
-                protected boolean indexExistsOperation(String indexName) {
+                protected boolean dataStoreExistsOperation(String indexName) {
                     return false;
                 }
             };
             // Wrapped schemas are rejected under the direct-only contract.
-            assertFalse(e.createIndex("i", "behavior-es-no-template-key"));
+            assertFalse(e.createDataStore("i", "behavior-es-no-template-key"));
         } finally {
             Files.deleteIfExists(f);
         }
     }
 
     @Test
-    void createIndexOperationSendsRawJsonWithoutDeserializing() throws Exception {
+    void createDataStoreOperationSendsRawJsonWithoutDeserializing() throws Exception {
         // The typed CreateIndexRequest.withJson() deserializes JSON through the client model,
         // which rejects unknown fields like 'bits' in DenseVectorIndexOptions when the client
-        // version is behind the server. createIndexOperation must use the raw REST client instead.
+        // version is behind the server. createDataStoreOperation must use the raw REST client instead.
         com.sun.net.httpserver.HttpServer fakeEs =
                 com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
         AtomicReference<String> receivedBody = new AtomicReference<>();
@@ -386,7 +386,7 @@ class ElasticsearchEngineBehaviorTest {
                     "{\"mappings\":{\"properties\":{\"embedding\":{\"type\":\"dense_vector\","
                     + "\"index_options\":{\"type\":\"bbq_disk\",\"bits\":2}}}}}";
             // Must not throw JsonpMappingException for unknown 'bits' in index_options
-            assertDoesNotThrow(() -> e.createIndexOperation("test-bits-idx", schemaWithBits));
+            assertDoesNotThrow(() -> e.createDataStoreOperation("test-bits-idx", schemaWithBits));
             assertNotNull(receivedBody.get(), "Expected HTTP request to reach fake server");
             assertTrue(receivedBody.get().contains("\"bits\""),
                     "Raw JSON body must contain 'bits' field unchanged — no typed round-trip");
@@ -397,7 +397,7 @@ class ElasticsearchEngineBehaviorTest {
     }
 
     @Test
-    void createIndexFalseWhenCreateThrows() throws Exception {
+    void createDataStoreFalseWhenCreateThrows() throws Exception {
         Path dir = Path.of("jingra-config/schemas");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-es-create-fail.json");
@@ -405,16 +405,16 @@ class ElasticsearchEngineBehaviorTest {
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
                 @Override
-                protected boolean indexExistsOperation(String indexName) {
+                protected boolean dataStoreExistsOperation(String indexName) {
                     return false;
                 }
 
                 @Override
-                protected void createIndexOperation(String indexName, String schemaJson) throws Exception {
+                protected void createDataStoreOperation(String indexName, String schemaJson) throws Exception {
                     throw new IOException("create failed");
                 }
             };
-            assertFalse(e.createIndex("i", "behavior-es-create-fail"));
+            assertFalse(e.createDataStore("i", "behavior-es-create-fail"));
         } finally {
             Files.deleteIfExists(f);
         }

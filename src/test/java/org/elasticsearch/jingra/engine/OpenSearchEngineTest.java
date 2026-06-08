@@ -89,7 +89,7 @@ class OpenSearchEngineTest {
     @Test
     @Order(2)
     void testIndexExists_false() {
-        boolean exists = engine.indexExists(TEST_INDEX);
+        boolean exists = engine.dataStoreExists(TEST_INDEX);
         assertFalse(exists, "Index should not exist initially");
     }
 
@@ -130,14 +130,14 @@ class OpenSearchEngineTest {
         java.nio.file.Files.createDirectories(schemaPath.getParent());
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
-        boolean created = engine.createIndex(TEST_INDEX, "test-schema-os");
-        assertTrue(created || engine.indexExists(TEST_INDEX), "Index should be created");
+        boolean created = engine.createDataStore(TEST_INDEX, "test-schema-os");
+        assertTrue(created || engine.dataStoreExists(TEST_INDEX), "Index should be created");
     }
 
     @Test
     @Order(4)
     void testCreateIndex_alreadyExists() {
-        boolean created = engine.createIndex(TEST_INDEX, "test-schema-os");
+        boolean created = engine.createDataStore(TEST_INDEX, "test-schema-os");
         assertFalse(created, "Should return false when index already exists");
     }
 
@@ -180,7 +180,7 @@ class OpenSearchEngineTest {
         java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-os-no-id.json");
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
-        engine.createIndex(tempIndex, "test-schema-os-no-id");
+        engine.createDataStore(tempIndex, "test-schema-os-no-id");
 
         List<Document> docs = List.of(
                 new Document(Map.of("title", "Doc 1")),
@@ -195,7 +195,7 @@ class OpenSearchEngineTest {
         long count = engine.getDocumentCount(tempIndex);
         assertEquals(2, count);
 
-        engine.deleteIndex(tempIndex);
+        engine.resetDataStore(tempIndex);
     }
 
     @Test
@@ -331,12 +331,12 @@ class OpenSearchEngineTest {
         java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-os-delete.json");
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
-        engine.createIndex(tempIndex, "test-schema-os-delete");
-        assertTrue(engine.indexExists(tempIndex));
+        engine.createDataStore(tempIndex, "test-schema-os-delete");
+        assertTrue(engine.dataStoreExists(tempIndex));
 
-        boolean deleted = engine.deleteIndex(tempIndex);
+        boolean deleted = engine.resetDataStore(tempIndex);
         assertTrue(deleted);
-        assertFalse(engine.indexExists(tempIndex));
+        assertFalse(engine.dataStoreExists(tempIndex));
     }
 
     @Test
@@ -367,7 +367,7 @@ class OpenSearchEngineTest {
         java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-os-large.json");
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
-        engine.createIndex(tempIndex, "test-schema-os-large");
+        engine.createDataStore(tempIndex, "test-schema-os-large");
 
         List<Document> docs = new ArrayList<>();
         for (int i = 0; i < 1000; i++) {
@@ -385,13 +385,13 @@ class OpenSearchEngineTest {
         long count = engine.getDocumentCount(tempIndex);
         assertEquals(1000, count);
 
-        engine.deleteIndex(tempIndex);
+        engine.resetDataStore(tempIndex);
     }
 
     @Test
     @Order(15)
     void testIndexExists_true() {
-        boolean exists = engine.indexExists(TEST_INDEX);
+        boolean exists = engine.dataStoreExists(TEST_INDEX);
         assertTrue(exists, "Test index should exist after previous tests");
     }
 
@@ -409,7 +409,7 @@ class OpenSearchEngineTest {
     @Test
     @Order(17)
     void testDeleteIndex_idempotentWhenMissing() {
-        assertTrue(engine.deleteIndex("jingra-os-missing-index-" + UUID.randomUUID()));
+        assertTrue(engine.resetDataStore("jingra-os-missing-index-" + UUID.randomUUID()));
     }
 
     @Test

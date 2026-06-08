@@ -101,7 +101,7 @@ class QdrantEngineTest {
     private String createCollectionWithOneVectorPoint(String colPrefix) throws Exception {
         String col = uniqueCollectionName(colPrefix);
         writeQdrantSchemaFile("test-schema-qi-generic-128", SCHEMA_MINIMAL_QDRANT_VECTOR_128);
-        assertTrue(engine.createIndex(col, "test-schema-qi-generic-128"));
+        assertTrue(engine.createDataStore(col, "test-schema-qi-generic-128"));
         assertEquals(1, engine.ingest(List.of(
                 new Document(Map.of("id", "p1", "embedding", generateRandomVector(128)))), col, "id"));
         await().pollInSameThread().atMost(5, TimeUnit.SECONDS)
@@ -123,7 +123,7 @@ class QdrantEngineTest {
     @Test
     @Order(2)
     void testIndexExists_false() {
-        boolean exists = engine.indexExists(TEST_INDEX);
+        boolean exists = engine.dataStoreExists(TEST_INDEX);
         assertFalse(exists, "Collection should not exist initially");
     }
 
@@ -147,14 +147,14 @@ class QdrantEngineTest {
         java.nio.file.Files.createDirectories(schemaPath.getParent());
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
-        boolean created = engine.createIndex(TEST_INDEX, "test-schema-qdrant");
-        assertTrue(created || engine.indexExists(TEST_INDEX), "Collection should be created");
+        boolean created = engine.createDataStore(TEST_INDEX, "test-schema-qdrant");
+        assertTrue(created || engine.dataStoreExists(TEST_INDEX), "Collection should be created");
     }
 
     @Test
     @Order(23)
     void testCreateIndex_alreadyExists() {
-        boolean created = engine.createIndex(TEST_INDEX, "test-schema-qdrant");
+        boolean created = engine.createDataStore(TEST_INDEX, "test-schema-qdrant");
         assertFalse(created, "Should return false when collection already exists");
     }
 
@@ -198,7 +198,7 @@ class QdrantEngineTest {
         java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-qdrant-no-id.json");
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
-        engine.createIndex(tempIndex, "test-schema-qdrant-no-id");
+        engine.createDataStore(tempIndex, "test-schema-qdrant-no-id");
 
         // Qdrant needs vectors, so we need embedding field
         List<Document> docs = List.of(
@@ -214,7 +214,7 @@ class QdrantEngineTest {
         long count = engine.getDocumentCount(tempIndex);
         assertEquals(2, count);
 
-        engine.deleteIndex(tempIndex);
+        engine.resetDataStore(tempIndex);
     }
 
     @Test
@@ -362,18 +362,18 @@ class QdrantEngineTest {
         java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-qdrant-delete.json");
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
-        engine.createIndex(tempIndex, "test-schema-qdrant-delete");
-        assertTrue(engine.indexExists(tempIndex));
+        engine.createDataStore(tempIndex, "test-schema-qdrant-delete");
+        assertTrue(engine.dataStoreExists(tempIndex));
 
-        boolean deleted = engine.deleteIndex(tempIndex);
+        boolean deleted = engine.resetDataStore(tempIndex);
         assertTrue(deleted);
-        assertFalse(engine.indexExists(tempIndex));
+        assertFalse(engine.dataStoreExists(tempIndex));
     }
 
     @Test
     @Order(32)
     void testDeleteIndex_invalidNameReturnsFalse() {
-        assertFalse(engine.deleteIndex(""));
+        assertFalse(engine.resetDataStore(""));
     }
 
     @Test
@@ -408,7 +408,7 @@ class QdrantEngineTest {
         java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-qdrant-large.json");
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
-        engine.createIndex(tempIndex, "test-schema-qdrant-large");
+        engine.createDataStore(tempIndex, "test-schema-qdrant-large");
 
         List<Document> docs = new ArrayList<>();
         for (int i = 0; i < 1000; i++) {
@@ -427,13 +427,13 @@ class QdrantEngineTest {
         long count = engine.getDocumentCount(tempIndex);
         assertEquals(1000, count);
 
-        engine.deleteIndex(tempIndex);
+        engine.resetDataStore(tempIndex);
     }
 
     @Test
     @Order(35)
     void testIndexExists_true() {
-        boolean exists = engine.indexExists(TEST_INDEX);
+        boolean exists = engine.dataStoreExists(TEST_INDEX);
         assertTrue(exists, "Test collection should exist after previous tests");
     }
 
@@ -480,7 +480,7 @@ class QdrantEngineTest {
         writeQdrantQueryFile("test-query-size-default", """
                 {"comment": "default limit 10 when size omitted from QueryParams"}
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-qi-deflim"));
+        assertTrue(engine.createDataStore(col, "test-schema-qi-deflim"));
         try {
             assertEquals(1, engine.ingest(List.of(
                     new Document(Map.of("id", "u1", "embedding", generateRandomVector(128)))), col, "id"));
@@ -493,7 +493,7 @@ class QdrantEngineTest {
             assertNotNull(r.getClientLatencyMs());
             assertTrue(r.getDocumentIds().size() <= 10);
         } finally {
-            engine.deleteIndex(col);
+            engine.resetDataStore(col);
         }
     }
 
@@ -507,7 +507,7 @@ class QdrantEngineTest {
         writeQdrantQueryFile("test-query-empty-nested-params", """
                 {"template": {"params": {}}}
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-qi-empty-tpl-params"));
+        assertTrue(engine.createDataStore(col, "test-schema-qi-empty-tpl-params"));
         try {
             assertEquals(1, engine.ingest(List.of(
                     new Document(Map.of("id", "e1", "embedding", generateRandomVector(128)))), col, "id"));
@@ -521,7 +521,7 @@ class QdrantEngineTest {
             assertNotNull(r.getClientLatencyMs());
             assertTrue(r.getDocumentIds().size() <= 5);
         } finally {
-            engine.deleteIndex(col);
+            engine.resetDataStore(col);
         }
     }
 
@@ -551,7 +551,7 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-qi-hnsw-quant"));
+        assertTrue(engine.createDataStore(col, "test-schema-qi-hnsw-quant"));
         try {
             assertEquals(1, engine.ingest(List.of(
                     new Document(Map.of("id", "hq1", "embedding", generateRandomVector(128)))), col, "id"));
@@ -565,7 +565,7 @@ class QdrantEngineTest {
             assertNotNull(r.getClientLatencyMs());
             assertFalse(r.getDocumentIds().isEmpty());
         } finally {
-            engine.deleteIndex(col);
+            engine.resetDataStore(col);
         }
     }
 
@@ -583,7 +583,7 @@ class QdrantEngineTest {
             QueryResponse r = engine.query(col, "test-query-top-level-params", new QueryParams(p));
             assertNotNull(r.getClientLatencyMs());
         } finally {
-            engine.deleteIndex(col);
+            engine.resetDataStore(col);
         }
     }
 
@@ -601,7 +601,7 @@ class QdrantEngineTest {
             QueryResponse r = engine.query(col, "test-query-hnsw-bad", new QueryParams(p));
             assertNotNull(r.getClientLatencyMs());
         } finally {
-            engine.deleteIndex(col);
+            engine.resetDataStore(col);
         }
     }
 
@@ -625,7 +625,7 @@ class QdrantEngineTest {
             QueryResponse r = engine.query(col, "test-query-quant-bad", new QueryParams(p));
             assertNotNull(r.getClientLatencyMs());
         } finally {
-            engine.deleteIndex(col);
+            engine.resetDataStore(col);
         }
     }
 
@@ -643,7 +643,7 @@ class QdrantEngineTest {
             QueryResponse r = engine.query(col, "test-query-quant-no-oversample", new QueryParams(p));
             assertNotNull(r.getClientLatencyMs());
         } finally {
-            engine.deleteIndex(col);
+            engine.resetDataStore(col);
         }
     }
 
@@ -670,7 +670,7 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-qi-top-filter"));
+        assertTrue(engine.createDataStore(col, "test-schema-qi-top-filter"));
         try {
             Map<String, Object> fields = new HashMap<>();
             fields.put("id", "tf1");
@@ -687,7 +687,7 @@ class QdrantEngineTest {
             assertNotNull(r.getClientLatencyMs());
             assertEquals(1, r.getDocumentIds().size());
         } finally {
-            engine.deleteIndex(col);
+            engine.resetDataStore(col);
         }
     }
 
@@ -705,7 +705,7 @@ class QdrantEngineTest {
             QueryResponse r = engine.query(col, "test-query-filter-null", new QueryParams(p));
             assertNotNull(r.getClientLatencyMs());
         } finally {
-            engine.deleteIndex(col);
+            engine.resetDataStore(col);
         }
     }
 
@@ -723,7 +723,7 @@ class QdrantEngineTest {
             QueryResponse r = engine.query(col, "test-query-filter-empty-must", new QueryParams(p));
             assertNotNull(r.getClientLatencyMs());
         } finally {
-            engine.deleteIndex(col);
+            engine.resetDataStore(col);
         }
     }
 
@@ -738,7 +738,7 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-qi-numeric"));
+        assertTrue(engine.createDataStore(col, "test-schema-qi-numeric"));
         try {
             List<Document> docs = List.of(
                     new Document(Map.of("id", 7_010L, "embedding", generateRandomVector(128))),
@@ -758,7 +758,7 @@ class QdrantEngineTest {
             assertTrue(r.getDocumentIds().stream().anyMatch(id -> id.contains("7010") || id.contains("7011")),
                     "Expected numeric point id strings in response: " + r.getDocumentIds());
         } finally {
-            engine.deleteIndex(col);
+            engine.resetDataStore(col);
         }
     }
 
@@ -930,9 +930,9 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-ci-dot"));
-        assertTrue(engine.indexExists(col));
-        engine.deleteIndex(col);
+        assertTrue(engine.createDataStore(col, "test-schema-ci-dot"));
+        assertTrue(engine.dataStoreExists(col));
+        engine.resetDataStore(col);
     }
 
     @Test
@@ -946,8 +946,8 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-ci-manhattan"));
-        engine.deleteIndex(col);
+        assertTrue(engine.createDataStore(col, "test-schema-ci-manhattan"));
+        engine.resetDataStore(col);
     }
 
     @Test
@@ -961,8 +961,8 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-ci-euclid"));
-        engine.deleteIndex(col);
+        assertTrue(engine.createDataStore(col, "test-schema-ci-euclid"));
+        engine.resetDataStore(col);
     }
 
     @Test
@@ -976,8 +976,8 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-ci-unknown-dist"));
-        engine.deleteIndex(col);
+        assertTrue(engine.createDataStore(col, "test-schema-ci-unknown-dist"));
+        engine.resetDataStore(col);
     }
 
     @Test
@@ -992,8 +992,8 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-ci-shard-top"));
-        engine.deleteIndex(col);
+        assertTrue(engine.createDataStore(col, "test-schema-ci-shard-top"));
+        engine.resetDataStore(col);
     }
 
     @Test
@@ -1011,8 +1011,8 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-ci-settings-shard"));
-        engine.deleteIndex(col);
+        assertTrue(engine.createDataStore(col, "test-schema-ci-settings-shard"));
+        engine.resetDataStore(col);
     }
 
     @Test
@@ -1028,8 +1028,8 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-ci-repl-override"));
-        engine.deleteIndex(col);
+        assertTrue(engine.createDataStore(col, "test-schema-ci-repl-override"));
+        engine.resetDataStore(col);
     }
 
     @Test
@@ -1044,8 +1044,8 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-ci-hnsw-m"));
-        engine.deleteIndex(col);
+        assertTrue(engine.createDataStore(col, "test-schema-ci-hnsw-m"));
+        engine.resetDataStore(col);
     }
 
     @Test
@@ -1060,8 +1060,8 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-ci-hnsw-ef"));
-        engine.deleteIndex(col);
+        assertTrue(engine.createDataStore(col, "test-schema-ci-hnsw-ef"));
+        engine.resetDataStore(col);
     }
 
     @Test
@@ -1080,8 +1080,8 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-ci-quant-always-ram"));
-        engine.deleteIndex(col);
+        assertTrue(engine.createDataStore(col, "test-schema-ci-quant-always-ram"));
+        engine.resetDataStore(col);
     }
 
     @Test
@@ -1100,8 +1100,8 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-ci-quant-no-always-ram"));
-        engine.deleteIndex(col);
+        assertTrue(engine.createDataStore(col, "test-schema-ci-quant-no-always-ram"));
+        engine.resetDataStore(col);
     }
 
     @Test
@@ -1127,8 +1127,8 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertTrue(engine.createIndex(col, "test-schema-ci-mappings-payload"));
-        engine.deleteIndex(col);
+        assertTrue(engine.createDataStore(col, "test-schema-ci-mappings-payload"));
+        engine.resetDataStore(col);
     }
 
     @Test
@@ -1153,9 +1153,9 @@ class QdrantEngineTest {
                       }
                     }
                     """);
-            assertTrue(engine.createIndex(col, "test-schema-ci-payload-direct"));
+            assertTrue(engine.createDataStore(col, "test-schema-ci-payload-direct"));
         } finally {
-            engine.deleteIndex(col);
+            engine.resetDataStore(col);
         }
     }
 
@@ -1167,7 +1167,7 @@ class QdrantEngineTest {
                   "template": { "note": "no vectors or mappings" }
                 }
                 """);
-        assertFalse(engine.createIndex(uniqueCollectionName("ci_fail_nv"), "test-schema-ci-fail-no-vectors"));
+        assertFalse(engine.createDataStore(uniqueCollectionName("ci_fail_nv"), "test-schema-ci-fail-no-vectors"));
     }
 
     @Test
@@ -1178,7 +1178,7 @@ class QdrantEngineTest {
                   "template": { "mappings": {} }
                 }
                 """);
-        assertFalse(engine.createIndex(uniqueCollectionName("ci_fail_np"), "test-schema-ci-fail-no-props"));
+        assertFalse(engine.createDataStore(uniqueCollectionName("ci_fail_np"), "test-schema-ci-fail-no-props"));
     }
 
     @Test
@@ -1195,14 +1195,14 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertFalse(engine.createIndex(uniqueCollectionName("ci_fail_wv"), "test-schema-ci-fail-wrong-vec"));
+        assertFalse(engine.createDataStore(uniqueCollectionName("ci_fail_wv"), "test-schema-ci-fail-wrong-vec"));
     }
 
     @Test
     @Order(19)
     void testCreateIndex_returnsFalseWhenRootMissingTemplateKey() throws Exception {
         writeQdrantSchemaFile("test-schema-ci-fail-empty-root", "{}");
-        assertFalse(engine.createIndex(uniqueCollectionName("ci_fail_root"), "test-schema-ci-fail-empty-root"));
+        assertFalse(engine.createDataStore(uniqueCollectionName("ci_fail_root"), "test-schema-ci-fail-empty-root"));
     }
 
     @Test
@@ -1215,13 +1215,13 @@ class QdrantEngineTest {
                   }
                 }
                 """);
-        assertFalse(engine.createIndex(uniqueCollectionName("ci_fail_sz"), "test-schema-ci-fail-bad-size"));
+        assertFalse(engine.createDataStore(uniqueCollectionName("ci_fail_sz"), "test-schema-ci-fail-bad-size"));
     }
 
     @Test
     @Order(21)
     void testCreateIndex_returnsFalseWhenSchemaTemplateFileNotFound() {
-        assertFalse(engine.createIndex(uniqueCollectionName("ci_no_schema"), "missing-schema-zzz-42"));
+        assertFalse(engine.createDataStore(uniqueCollectionName("ci_no_schema"), "missing-schema-zzz-42"));
     }
 
     @Test
@@ -1324,7 +1324,7 @@ class QdrantEngineTest {
             QdrantEngine qe = new QdrantEngine(cfg);
             assertTrue(qe.connect());
             writeQdrantSchemaFile(schemaName, SCHEMA_MINIMAL_QDRANT_VECTOR_128);
-            assertTrue(qe.createIndex(col, schemaName));
+            assertTrue(qe.createDataStore(col, schemaName));
             assertEquals(1, qe.ingest(List.of(
                     new Document(Map.of("id", "dump-1", "embedding", generateRandomVector(128)))), col, "id"));
             await().pollInSameThread().atMost(5, TimeUnit.SECONDS)
@@ -1341,7 +1341,7 @@ class QdrantEngineTest {
             qe.close();
         } finally {
             deleteRecursivelyIfExists(dumpDir);
-            engine.deleteIndex(col);
+            engine.resetDataStore(col);
         }
     }
 
@@ -1362,9 +1362,9 @@ class QdrantEngineTest {
                 }
                 """);
         try {
-            assertTrue(engine.createIndex(col, "test-schema-ci-quant-always-ram-false"));
+            assertTrue(engine.createDataStore(col, "test-schema-ci-quant-always-ram-false"));
         } finally {
-            engine.deleteIndex(col);
+            engine.resetDataStore(col);
         }
     }
 

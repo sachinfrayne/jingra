@@ -50,11 +50,11 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
         return client != null;
     }
 
-    protected boolean indexExistsOperation(String indexName) throws Exception {
+    protected boolean dataStoreExistsOperation(String indexName) throws Exception {
         return client.indices().exists(ExistsRequest.of(b -> b.index(indexName))).value();
     }
 
-    protected void deleteIndexOperation(String indexName) throws Exception {
+    protected void resetDataStoreOperation(String indexName) throws Exception {
         client.indices().delete(DeleteIndexRequest.of(b -> b.index(indexName)));
     }
 
@@ -92,7 +92,7 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
         return client.indices().get(GetIndexRequest.of(b -> b.index(indexName)));
     }
 
-    protected void createIndexOperation(String indexName, String schemaJson) throws Exception {
+    protected void createDataStoreOperation(String indexName, String schemaJson) throws Exception {
         // Use the low-level REST client so the schema JSON is sent as raw bytes.
         // The typed CreateIndexRequest.withJson() round-trips through the client's object model,
         // which rejects fields unknown to the current client version (e.g. 'bits' in
@@ -226,7 +226,7 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
     }
 
     @Override
-    public boolean createIndex(String indexName, String schemaName) {
+    public boolean createDataStore(String indexName, String schemaName) {
         if (!hasClient()) {
             logger.error("Elasticsearch client not initialized");
             return false;
@@ -234,7 +234,7 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
         try {
             // Check if index already exists
-            if (indexExists(indexName)) {
+            if (dataStoreExists(indexName)) {
                 logger.warn("Index '{}' already exists", indexName);
                 return false;
             }
@@ -254,7 +254,7 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
             // Create index with schema
             String schemaJson = objectMapper.writeValueAsString(template);
-            createIndexOperation(indexName, schemaJson);
+            createDataStoreOperation(indexName, schemaJson);
             logger.info("Created Elasticsearch index '{}' with schema '{}'", indexName, schemaName);
             return true;
         } catch (Exception e) {
@@ -264,12 +264,12 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
     }
 
     @Override
-    public boolean indexExists(String indexName) {
+    public boolean dataStoreExists(String indexName) {
         if (!hasClient()) {
             return false;
         }
         try {
-            return indexExistsOperation(indexName);
+            return dataStoreExistsOperation(indexName);
         } catch (Exception e) {
             logger.error("Failed to check if index exists", e);
             return false;
@@ -277,14 +277,14 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
     }
 
     @Override
-    public boolean deleteIndex(String indexName) {
+    public boolean resetDataStore(String indexName) {
         if (!hasClient()) {
             logger.error("Elasticsearch client not initialized");
             return false;
         }
 
         try {
-            deleteIndexOperation(indexName);
+            resetDataStoreOperation(indexName);
             logger.info("Deleted Elasticsearch index '{}'", indexName);
             return true;
         } catch (ElasticsearchException e) {

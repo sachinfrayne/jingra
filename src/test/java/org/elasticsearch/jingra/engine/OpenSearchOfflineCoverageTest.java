@@ -55,9 +55,9 @@ class OpenSearchOfflineCoverageTest {
         assertEquals("opensearch", e.getEngineName());
         assertEquals("os", e.getShortName());
         assertEquals("unknown", e.getVersion());
-        assertFalse(e.createIndex("i", "s"));
-        assertFalse(e.indexExists("i"));
-        assertFalse(e.deleteIndex("i"));
+        assertFalse(e.createDataStore("i", "s"));
+        assertFalse(e.dataStoreExists("i"));
+        assertFalse(e.resetDataStore("i"));
         assertEquals(0, e.ingest(List.of(), "i", null));
         assertTrue(e.query("i", "q", new QueryParams()).getDocumentIds().isEmpty());
         assertEquals(0L, e.getDocumentCount("i"));
@@ -66,7 +66,7 @@ class OpenSearchOfflineCoverageTest {
     }
 
     @Test
-    void createIndexRejectsWrappedSchemaBody() throws Exception {
+    void createDataStoreRejectsWrappedSchemaBody() throws Exception {
         OpenSearchEngine e = new OpenSearchEngine(Map.of("url_env", BOGUS_URL_ENV)) {
             @Override
             protected boolean hasClient() {
@@ -74,7 +74,7 @@ class OpenSearchOfflineCoverageTest {
             }
 
             @Override
-            protected boolean indexExistsOperation(String indexName) {
+            protected boolean dataStoreExistsOperation(String indexName) {
                 return false;
             }
 
@@ -94,14 +94,14 @@ class OpenSearchOfflineCoverageTest {
             }
         };
         try {
-            assertFalse(e.createIndex("i", "wrapped"));
+            assertFalse(e.createDataStore("i", "wrapped"));
         } finally {
             assertDoesNotThrow(e::close);
         }
     }
 
     @Test
-    void createIndexRejectsWrappedSchemaBody_templateOnly() throws Exception {
+    void createDataStoreRejectsWrappedSchemaBody_templateOnly() throws Exception {
         OpenSearchEngine e = new OpenSearchEngine(Map.of("url_env", BOGUS_URL_ENV)) {
             @Override
             protected boolean hasClient() {
@@ -109,7 +109,7 @@ class OpenSearchOfflineCoverageTest {
             }
 
             @Override
-            protected boolean indexExistsOperation(String indexName) {
+            protected boolean dataStoreExistsOperation(String indexName) {
                 return false;
             }
 
@@ -130,14 +130,14 @@ class OpenSearchOfflineCoverageTest {
         };
 
         try {
-            assertFalse(e.createIndex("i", "wrapped"));
+            assertFalse(e.createDataStore("i", "wrapped"));
         } finally {
             assertDoesNotThrow(e::close);
         }
     }
 
     @Test
-    void createIndexRejectsWrappedSchemaBody_nameOnly() throws Exception {
+    void createDataStoreRejectsWrappedSchemaBody_nameOnly() throws Exception {
         OpenSearchEngine e = new OpenSearchEngine(Map.of("url_env", BOGUS_URL_ENV)) {
             @Override
             protected boolean hasClient() {
@@ -145,7 +145,7 @@ class OpenSearchOfflineCoverageTest {
             }
 
             @Override
-            protected boolean indexExistsOperation(String indexName) {
+            protected boolean dataStoreExistsOperation(String indexName) {
                 return false;
             }
 
@@ -166,7 +166,7 @@ class OpenSearchOfflineCoverageTest {
         };
 
         try {
-            assertFalse(e.createIndex("i", "wrapped"));
+            assertFalse(e.createDataStore("i", "wrapped"));
         } finally {
             assertDoesNotThrow(e::close);
         }

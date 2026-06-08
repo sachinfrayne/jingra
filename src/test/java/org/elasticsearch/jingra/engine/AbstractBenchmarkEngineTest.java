@@ -58,17 +58,17 @@ class AbstractBenchmarkEngineTest {
         }
 
         @Override
-        public boolean createIndex(String indexName, String schemaName) {
+        public boolean createDataStore(String indexName, String schemaName) {
             return true;
         }
 
         @Override
-        public boolean deleteIndex(String indexName) {
+        public boolean resetDataStore(String indexName) {
             return true;
         }
 
         @Override
-        public boolean indexExists(String indexName) {
+        public boolean dataStoreExists(String indexName) {
             return false;
         }
 

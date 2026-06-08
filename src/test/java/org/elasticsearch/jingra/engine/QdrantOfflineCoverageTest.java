@@ -68,9 +68,9 @@ class QdrantOfflineCoverageTest {
         assertEquals("qdrant", e.getEngineName());
         assertEquals("qd", e.getShortName());
         assertEquals("unknown", e.getVersion());
-        assertFalse(e.createIndex("c", "s"));
-        assertFalse(e.indexExists("c"));
-        assertFalse(e.deleteIndex("c"));
+        assertFalse(e.createDataStore("c", "s"));
+        assertFalse(e.dataStoreExists("c"));
+        assertFalse(e.resetDataStore("c"));
         assertEquals(0, e.ingest(List.of(new Document(Map.of("x", 1))), "c", null));
         assertTrue(e.query("c", "q", new QueryParams()).getDocumentIds().isEmpty());
         assertEquals(0L, e.getDocumentCount("c"));

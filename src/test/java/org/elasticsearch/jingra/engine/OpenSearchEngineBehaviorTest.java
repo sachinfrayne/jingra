@@ -134,19 +134,19 @@ class OpenSearchEngineBehaviorTest {
     }
 
     @Test
-    void createIndexReturnsFalseWhenClientNull() {
+    void createDataStoreReturnsFalseWhenClientNull() {
         OpenSearchEngine e = new OpenSearchEngine(new HashMap<>());
-        assertFalse(e.createIndex("i", "any"));
+        assertFalse(e.createDataStore("i", "any"));
     }
 
     @Test
-    void indexExistsReturnsFalseWhenClientNull() {
-        assertFalse(new OpenSearchEngine(new HashMap<>()).indexExists("i"));
+    void dataStoreExistsReturnsFalseWhenClientNull() {
+        assertFalse(new OpenSearchEngine(new HashMap<>()).dataStoreExists("i"));
     }
 
     @Test
-    void deleteIndexReturnsFalseWhenClientNull() {
-        assertFalse(new OpenSearchEngine(new HashMap<>()).deleteIndex("i"));
+    void resetDataStoreReturnsFalseWhenClientNull() {
+        assertFalse(new OpenSearchEngine(new HashMap<>()).resetDataStore("i"));
     }
 
     @Test
@@ -193,14 +193,14 @@ class OpenSearchEngineBehaviorTest {
     }
 
     @Test
-    void indexExistsReturnsFalseWhenClientThrows() {
+    void dataStoreExistsReturnsFalseWhenClientThrows() {
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
             @Override
-            protected boolean indexExistsOperation(String indexName) {
+            protected boolean dataStoreExistsOperation(String indexName) {
                 throw new RuntimeException("boom");
             }
         };
-        assertFalse(e.indexExists("x"));
+        assertFalse(e.dataStoreExists("x"));
     }
 
     @Test
@@ -226,66 +226,66 @@ class OpenSearchEngineBehaviorTest {
     }
 
     @Test
-    void deleteIndexTrueOn404() {
+    void resetDataStoreTrueOn404() {
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
             @Override
-            protected void deleteIndexOperation(String indexName) {
+            protected void resetDataStoreOperation(String indexName) {
                 ErrorResponse er = ErrorResponse.of(b -> b.status(404)
                         .error(ErrorCause.of(x -> x.type("index_not_found_exception").reason("nf"))));
                 throw new OpenSearchException(er);
             }
         };
-        assertTrue(e.deleteIndex("missing"));
+        assertTrue(e.resetDataStore("missing"));
     }
 
     @Test
-    void deleteIndexFalseOnNon404OpenSearchException() {
+    void resetDataStoreFalseOnNon404OpenSearchException() {
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
             @Override
-            protected void deleteIndexOperation(String indexName) {
+            protected void resetDataStoreOperation(String indexName) {
                 ErrorResponse er = ErrorResponse.of(b -> b.status(500)
                         .error(ErrorCause.of(x -> x.type("internal_server_error").reason("err"))));
                 throw new OpenSearchException(er);
             }
         };
-        assertFalse(e.deleteIndex("x"));
+        assertFalse(e.resetDataStore("x"));
     }
 
     @Test
-    void deleteIndexFalseOnGenericException() {
+    void resetDataStoreFalseOnGenericException() {
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
             @Override
-            protected void deleteIndexOperation(String indexName) throws Exception {
+            protected void resetDataStoreOperation(String indexName) throws Exception {
                 throw new IOException("io");
             }
         };
-        assertFalse(e.deleteIndex("x"));
+        assertFalse(e.resetDataStore("x"));
     }
 
     @Test
-    void createIndexFalseWhenIndexAlreadyExists() {
+    void createDataStoreFalseWhenIndexAlreadyExists() {
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
             @Override
-            protected boolean indexExistsOperation(String indexName) {
+            protected boolean dataStoreExistsOperation(String indexName) {
                 return true;
             }
         };
-        assertFalse(e.createIndex("exists", "any"));
+        assertFalse(e.createDataStore("exists", "any"));
     }
 
     @Test
-    void createIndexFalseWhenSchemaMissing() {
+    void createDataStoreFalseWhenSchemaMissing() {
         ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
             @Override
-            protected boolean indexExistsOperation(String indexName) {
+            protected boolean dataStoreExistsOperation(String indexName) {
                 return false;
             }
         };
-        assertFalse(e.createIndex("i", "__schema_file_does_not_exist__"));
+        assertFalse(e.createDataStore("i", "__schema_file_does_not_exist__"));
     }
 
     @Test
-    void createIndexFalseWhenSchemaHasNoTemplateField() throws Exception {
+    void createDataStoreFalseWhenSchemaHasNoTemplateField() throws Exception {
         Path dir = Path.of("jingra-config/schemas");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-no-template-key.json");
@@ -293,19 +293,19 @@ class OpenSearchEngineBehaviorTest {
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
                 @Override
-                protected boolean indexExistsOperation(String indexName) {
+                protected boolean dataStoreExistsOperation(String indexName) {
                     return false;
                 }
             };
             // Wrapped schemas are rejected under the direct-only contract.
-            assertFalse(e.createIndex("i", "behavior-os-no-template-key"));
+            assertFalse(e.createDataStore("i", "behavior-os-no-template-key"));
         } finally {
             Files.deleteIfExists(f);
         }
     }
 
     @Test
-    void createIndexFalseWhenPutThrows() throws Exception {
+    void createDataStoreFalseWhenPutThrows() throws Exception {
         Path dir = Path.of("jingra-config/schemas");
         Files.createDirectories(dir);
         Path f = dir.resolve("behavior-os-put-fail.json");
@@ -313,7 +313,7 @@ class OpenSearchEngineBehaviorTest {
         try {
             ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
                 @Override
-                protected boolean indexExistsOperation(String indexName) {
+                protected boolean dataStoreExistsOperation(String indexName) {
                     return false;
                 }
 
@@ -322,7 +322,7 @@ class OpenSearchEngineBehaviorTest {
                     throw new IOException("put failed");
                 }
             };
-            assertFalse(e.createIndex("i", "behavior-os-put-fail"));
+            assertFalse(e.createDataStore("i", "behavior-os-put-fail"));
         } finally {
             Files.deleteIfExists(f);
         }

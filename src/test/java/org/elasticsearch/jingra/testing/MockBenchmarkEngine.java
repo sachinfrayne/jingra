@@ -21,8 +21,8 @@ public class MockBenchmarkEngine implements BenchmarkEngine {
     public final List<String> receivedQueryNames = new ArrayList<>();
 
     /**
-     * Simulated index presence for load/delete flows. {@link #deleteIndex} clears it;
-     * {@link #createIndex} sets it again so eval tests that assume an index exists keep working.
+     * Simulated index presence for load/delete flows. {@link #resetDataStore} clears it;
+     * {@link #createDataStore} sets it again so eval tests that assume an index exists keep working.
      */
     protected volatile boolean indexPresent = true;
 
@@ -32,18 +32,18 @@ public class MockBenchmarkEngine implements BenchmarkEngine {
     }
 
     @Override
-    public boolean createIndex(String indexName, String schemaName) {
+    public boolean createDataStore(String indexName, String schemaName) {
         indexPresent = true;
         return true;
     }
 
     @Override
-    public boolean indexExists(String indexName) {
+    public boolean dataStoreExists(String indexName) {
         return indexPresent;
     }
 
     @Override
-    public boolean deleteIndex(String indexName) {
+    public boolean resetDataStore(String indexName) {
         indexPresent = false;
         return true;
     }

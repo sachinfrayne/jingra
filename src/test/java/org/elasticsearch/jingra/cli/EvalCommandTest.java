@@ -102,7 +102,7 @@ class EvalCommandTest {
     void runThrowsWhenIndexMissing() {
         MockBenchmarkEngine engine = new MockBenchmarkEngine() {
             @Override
-            public boolean indexExists(String indexName) {
+            public boolean dataStoreExists(String indexName) {
                 return false;
             }
         };

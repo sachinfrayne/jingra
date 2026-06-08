@@ -29,7 +29,7 @@ public interface BenchmarkEngine extends AutoCloseable {
      * @param schemaName the name of the schema template
      * @return true if created successfully
      */
-    default boolean createIndex(String indexName, String schemaName) {
+    default boolean createDataStore(String indexName, String schemaName) {
         return true;
     }
 
@@ -39,7 +39,7 @@ public interface BenchmarkEngine extends AutoCloseable {
      * @param indexName the index name
      * @return true if the index exists
      */
-    boolean indexExists(String indexName);
+    boolean dataStoreExists(String indexName);
 
     /**
      * Delete an index.
@@ -47,7 +47,7 @@ public interface BenchmarkEngine extends AutoCloseable {
      * @param indexName the index name
      * @return true if deletion successful
      */
-    boolean deleteIndex(String indexName);
+    boolean resetDataStore(String indexName);
 
     /**
      * Ingest documents into the index.
@@ -130,7 +130,7 @@ public interface BenchmarkEngine extends AutoCloseable {
      * Whether this engine uses the index lifecycle (create / exists-check / delete) that
      * {@code LoadCommand} manages.  Schema-full engines (Elasticsearch, OpenSearch, Qdrant)
      * return {@code true}; schema-free / TSDB engines (Prometheus) return {@code false} and
-     * handle data clearing themselves inside {@link #deleteIndex}.
+     * handle data clearing themselves inside {@link #resetDataStore}.
      */
     default boolean supportsIndexLifecycle() {
         return true;
