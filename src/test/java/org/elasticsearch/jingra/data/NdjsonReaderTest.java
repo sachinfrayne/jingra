@@ -311,6 +311,21 @@ class NdjsonReaderTest {
     }
 
     @Test
+    void ndjsonReader_listConstructor_readAll_limitFilledAtEndOfFile_skipsNextFile(@TempDir Path tmpDir)
+            throws IOException {
+        Path f1 = tmpDir.resolve("a.ndjson");
+        Path f2 = tmpDir.resolve("b.ndjson");
+        Files.writeString(f1, "{\"id\":\"1\"}\n{\"id\":\"2\"}\n");
+        Files.writeString(f2, "{\"id\":\"3\"}\n{\"id\":\"4\"}\n");
+
+        // limit == f1 doc count → outer pre-loop check fires, f2 is never opened
+        List<Document> docs = new NdjsonReader(List.of(f1.toString(), f2.toString())).readAll(2);
+        assertEquals(2, docs.size());
+        assertEquals("1", docs.get(0).getString("id"));
+        assertEquals("2", docs.get(1).getString("id"));
+    }
+
+    @Test
     void ndjsonReader_listConstructor_readInBatches_concatenatesAcrossFiles(@TempDir Path tmpDir) throws IOException {
         Path f1 = tmpDir.resolve("a.ndjson");
         Path f2 = tmpDir.resolve("b.ndjson");
@@ -395,6 +410,27 @@ class NdjsonReaderTest {
     }
 
     @Test
+    void ndjsonReader_listConstructor_emptyList_readAll_returnsEmpty() throws IOException {
+        assertEquals(0, new NdjsonReader(List.of()).readAll().size());
+    }
+
+    @Test
+    void readAll_invalidJson_throwsIOException(@TempDir Path tmpDir) throws IOException {
+        Path f = tmpDir.resolve("bad.ndjson");
+        Files.writeString(f, "not-valid-json\n");
+        assertThrows(IOException.class, () -> new NdjsonReader(f.toString()).readAll());
+    }
+
+    @Test
+    void expandGlob_questionMarkGlob_expandsMatchingPaths(@TempDir Path tmpDir) throws IOException {
+        Files.writeString(tmpDir.resolve("part-0.ndjson"), "");
+        Files.writeString(tmpDir.resolve("part-1.ndjson"), "");
+
+        List<String> result = DatasetReaderFactory.expandGlob(tmpDir + "/part-?.ndjson");
+        assertEquals(2, result.size());
+    }
+
+    @Test
     void expandGlob_nonGlobPath_returnsSingletonList() {
         assertEquals(List.of("some/path.ndjson"), DatasetReaderFactory.expandGlob("some/path.ndjson"));
     }
@@ -410,6 +446,14 @@ class NdjsonReaderTest {
         assertTrue(result.get(0).endsWith("part-0000.ndjson"));
         assertTrue(result.get(1).endsWith("part-0001.ndjson"));
         assertTrue(result.get(2).endsWith("part-0002.ndjson"));
+    }
+
+    @Test
+    void expandGlob_noDirectoryPrefix_usesCurrentDirectory() {
+        // Glob with no parent component (e.g. "*.ndjson") — parent is null → falls back to "."
+        // No such files exist in the working directory, but the call must not throw.
+        List<String> result = DatasetReaderFactory.expandGlob("*.ndjson.no.such.file.xyz");
+        assertTrue(result.isEmpty());
     }
 
     @Test

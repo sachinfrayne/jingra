@@ -12,6 +12,7 @@ import org.elasticsearch.jingra.testing.MockBenchmarkEngine;
 import org.elasticsearch.jingra.engine.BenchmarkEngine;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
@@ -863,6 +864,16 @@ class LoadCommandTest {
             }
             return documents.size();
         }
+    }
+
+    @Test
+    void run_whenQuestionMarkGlobDataPathHasNoMatches_throwsDataFileNotFound(@TempDir java.nio.file.Path tmpDir) {
+        // exercises the path.contains("?") branch in dataPathExists
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
+        JingraConfig config = buildLoadConfig(tmpDir + "/no-match-?.ndjson.gz");
+        TrackingMock engine = new TrackingMock();
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> LoadCommand.run(config, c -> engine));
+        assertTrue(ex.getMessage().contains("Data file not found"));
     }
 
     @Test

@@ -981,6 +981,243 @@ class PrometheusOfflineCoverageTest {
         }
     }
 
+    // ─── awaitIndexReady ─────────────────────────────────────────────────────────
+
+    @Test
+    void awaitIndexReady_noOpWhenNotConnected() {
+        PrometheusEngine e = new PrometheusEngine(Map.of("url_env", BOGUS_URL_ENV));
+        assertFalse(e.connect());
+        assertDoesNotThrow(() -> e.awaitIndexReady("metrics"));
+    }
+
+    @Test
+    void awaitIndexReady_returnsWhenCompactionsStable() throws Exception {
+        // elapsedMs always reports > stability → inner if true → returns immediately
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "3.12.0"; }
+            @Override protected long getPollIntervalMs()     { return 0L; }
+            @Override protected long getStabilityWindowMs() { return 0L; }
+            @Override protected long elapsedMs(long since)  { return 1L; } // always > 0 (stability)
+            @Override protected String instantQueryOperation(String promql) {
+                return "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\","
+                        + "\"result\":[{\"metric\":{},\"value\":[1700000000,\"5\"]}]}}";
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.awaitIndexReady("metrics"));
+    }
+
+    @Test
+    void awaitIndexReady_waitsForCountToRiseAboveZero() throws Exception {
+        // First call returns 0 (no compactions yet), second returns 1 (stable immediately)
+        AtomicInteger calls = new AtomicInteger();
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "3.12.0"; }
+            @Override protected long getPollIntervalMs()     { return 0L; }
+            @Override protected long getStabilityWindowMs() { return 0L; }
+            @Override protected String instantQueryOperation(String promql) {
+                int call = calls.getAndIncrement();
+                long count = call == 0 ? 0 : 1;
+                return "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\","
+                        + "\"result\":[{\"metric\":{},\"value\":[1700000000,\"" + count + "\"]}]}}";
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.awaitIndexReady("metrics"));
+        assertTrue(calls.get() >= 2);
+    }
+
+    @Test
+    void awaitIndexReady_proceedsOnQueryException() throws Exception {
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "3.12.0"; }
+            @Override protected long getPollIntervalMs()     { return 0L; }
+            @Override protected long getStabilityWindowMs() { return 0L; }
+            @Override protected String instantQueryOperation(String promql) throws Exception {
+                throw new Exception("TSDB metrics unavailable");
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.awaitIndexReady("metrics"));
+    }
+
+    @Test
+    void awaitIndexReady_throwsOnInterrupt() throws Exception {
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "3.12.0"; }
+            @Override protected long getPollIntervalMs()     { return 60_000L; }
+            @Override protected long getStabilityWindowMs() { return 60_000L; }
+            @Override protected String instantQueryOperation(String promql) {
+                // count=0, never stable → will sleep → we interrupt it
+                return "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\","
+                        + "\"result\":[{\"metric\":{},\"value\":[1700000000,\"0\"]}]}}";
+            }
+        };
+        assertTrue(e.connect());
+        Thread testThread = Thread.currentThread();
+        new Thread(() -> {
+            try { Thread.sleep(50); } catch (InterruptedException ignored) {}
+            testThread.interrupt();
+        }).start();
+        assertThrows(RuntimeException.class, () -> e.awaitIndexReady("metrics"));
+        Thread.interrupted(); // clear interrupt flag
+    }
+
+    // ─── queryCompactionCount branches ───────────────────────────────────────────
+
+    @Test
+    void awaitIndexReady_countStableAtZero_elseIfFalse_thenThrows() throws Exception {
+        // count stays at 0 across two calls → count == lastCount == 0
+        // → else if (count > 0) is FALSE (count ≤ 0 branch)
+        AtomicInteger calls = new AtomicInteger();
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "3.12.0"; }
+            @Override protected long getPollIntervalMs()     { return 0L; }
+            @Override protected long getStabilityWindowMs() { return 0L; }
+            @Override protected long elapsedMs(long since)  { return 0L; }
+            @Override protected String instantQueryOperation(String promql) throws Exception {
+                if (calls.getAndIncrement() < 2)
+                    return "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\","
+                            + "\"result\":[{\"metric\":{},\"value\":[1700000000,\"0\"]}]}}";
+                throw new Exception("done");
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.awaitIndexReady("metrics"));
+    }
+
+    @Test
+    void awaitIndexReady_stableCountButWindowNotYetExpired_loopsThenExits() throws Exception {
+        // elapsedMs always reports 0 → inner if false → loop continues → then throws
+        AtomicInteger calls = new AtomicInteger();
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "3.12.0"; }
+            @Override protected long getPollIntervalMs()     { return 0L; }
+            @Override protected long getStabilityWindowMs() { return 0L; }
+            @Override protected long elapsedMs(long since)  { return 0L; } // 0 > 0 = false → not stable
+            @Override protected String instantQueryOperation(String promql) throws Exception {
+                if (calls.getAndIncrement() < 2)
+                    return "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\","
+                            + "\"result\":[{\"metric\":{},\"value\":[1700000000,\"3\"]}]}}";
+                throw new Exception("exit");
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.awaitIndexReady("metrics"));
+        assertTrue(calls.get() >= 3);
+    }
+
+    @Test
+    void awaitIndexReady_queryCompactionCount_nullResult_returnsZero() throws Exception {
+        // "data" present but no "result" key → result == null → returns 0
+        AtomicInteger calls = new AtomicInteger();
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "3.12.0"; }
+            @Override protected long getPollIntervalMs()     { return 0L; }
+            @Override protected long getStabilityWindowMs() { return 0L; }
+            @Override protected String instantQueryOperation(String promql) throws Exception {
+                if (calls.getAndIncrement() == 0)
+                    return "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\"}}"; // no "result"
+                throw new Exception("done");
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.awaitIndexReady("metrics"));
+    }
+
+    @Test
+    void awaitIndexReady_queryCompactionCount_nullData_returnsZero() throws Exception {
+        // "data" key missing → count = 0 → never stable → exception branch exits
+        AtomicInteger calls = new AtomicInteger();
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "3.12.0"; }
+            @Override protected long getPollIntervalMs()     { return 0L; }
+            @Override protected long getStabilityWindowMs() { return 0L; }
+            @Override protected String instantQueryOperation(String promql) throws Exception {
+                if (calls.getAndIncrement() == 0) return "{\"status\":\"success\"}"; // null data → count=0
+                throw new Exception("done");
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.awaitIndexReady("metrics"));
+    }
+
+    @Test
+    void awaitIndexReady_queryCompactionCount_emptyResult_returnsZero() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "3.12.0"; }
+            @Override protected long getPollIntervalMs()     { return 0L; }
+            @Override protected long getStabilityWindowMs() { return 0L; }
+            @Override protected String instantQueryOperation(String promql) throws Exception {
+                if (calls.getAndIncrement() == 0)
+                    return "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[]}}";
+                throw new Exception("done");
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.awaitIndexReady("metrics"));
+    }
+
+    @Test
+    void awaitIndexReady_queryCompactionCount_missingValue_returnsZero() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "3.12.0"; }
+            @Override protected long getPollIntervalMs()     { return 0L; }
+            @Override protected long getStabilityWindowMs() { return 0L; }
+            @Override protected String instantQueryOperation(String promql) throws Exception {
+                if (calls.getAndIncrement() == 0)
+                    return "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\","
+                            + "\"result\":[{\"metric\":{}}]}}"; // no "value" key
+                throw new Exception("done");
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.awaitIndexReady("metrics"));
+    }
+
+    @Test
+    void awaitIndexReady_queryCompactionCount_valueTooShort_returnsZero() throws Exception {
+        // value array present but has only 1 element → size < 2 → returns 0
+        AtomicInteger calls = new AtomicInteger();
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "3.12.0"; }
+            @Override protected long getPollIntervalMs()     { return 0L; }
+            @Override protected long getStabilityWindowMs() { return 0L; }
+            @Override protected String instantQueryOperation(String promql) throws Exception {
+                if (calls.getAndIncrement() == 0)
+                    return "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\","
+                            + "\"result\":[{\"metric\":{},\"value\":[1700000000]}]}}"; // only 1 element
+                throw new Exception("done");
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.awaitIndexReady("metrics"));
+    }
+
+    @Test
+    void elapsedMs_defaultImplementation_returnsNonNegative() throws Exception {
+        PrometheusEngine e = connectedEngine();
+        assertTrue(e.connect());
+        java.lang.reflect.Method m = PrometheusEngine.class.getDeclaredMethod("elapsedMs", long.class);
+        m.setAccessible(true);
+        long result = (long) m.invoke(e, System.currentTimeMillis());
+        assertTrue(result >= 0);
+    }
+
+    @Test
+    void getPollIntervalMs_and_getStabilityWindowMs_defaultValues() throws Exception {
+        PrometheusEngine e = connectedEngine();
+        assertTrue(e.connect());
+        java.lang.reflect.Method poll = PrometheusEngine.class.getDeclaredMethod("getPollIntervalMs");
+        poll.setAccessible(true);
+        assertEquals(5_000L, poll.invoke(e));
+        java.lang.reflect.Method stability = PrometheusEngine.class.getDeclaredMethod("getStabilityWindowMs");
+        stability.setAccessible(true);
+        assertEquals(30_000L, stability.invoke(e));
+    }
+
     @Test
     void openPromqlClasspathStream_returnsNullForNonexistentResource() throws Exception {
         // No override of openPromqlClasspathStream — exercises the real getClass().getResourceAsStream() body

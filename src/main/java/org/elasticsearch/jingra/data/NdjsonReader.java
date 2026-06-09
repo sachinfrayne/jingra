@@ -51,18 +51,27 @@ public class NdjsonReader implements DatasetReader {
 
     @Override
     public List<Document> readAll(int limit) throws IOException {
-        List<Document> documents = new ArrayList<>();
+        List<Document> documents = limit > 0 ? new ArrayList<>(limit) : new ArrayList<>();
         logger.info("Reading {} NDJSON file(s)", filePaths.size());
 
-        outer:
         for (String path : filePaths) {
+            if (limit > 0 && documents.size() >= limit) {
+                break;
+            }
+
             logger.info("Reading: {}", path);
             try (BufferedReader reader = openReader(path)) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    if (line.isBlank()) continue;
+                    if (line.isBlank()) {
+                        continue;
+                    }
+
                     documents.add(parseLine(line));
-                    if (limit > 0 && documents.size() >= limit) break outer;
+
+                    if (limit > 0 && documents.size() >= limit) {
+                        break;
+                    }
                 }
             }
         }

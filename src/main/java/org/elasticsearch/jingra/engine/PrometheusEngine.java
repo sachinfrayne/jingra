@@ -231,6 +231,56 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
         return resp.body();
     }
 
+    protected long getPollIntervalMs()       { return 5_000L;  }
+    protected long getStabilityWindowMs()   { return 30_000L; }
+    protected long elapsedMs(long since)    { return System.currentTimeMillis() - since; }
+
+    @Override
+    public void awaitIndexReady(String indexName) {
+        if (!isConnected()) return;
+        logger.info("Waiting for Prometheus TSDB compaction to settle after load...");
+        long startMs    = System.currentTimeMillis();
+        long lastChange = startMs;
+        long lastCount  = -1;
+        while (true) {
+            try {
+                long count = queryCompactionCount();
+                if (count != lastCount) {
+                    logger.info("TSDB compactions: {} (elapsed {}m)", count,
+                            (System.currentTimeMillis() - startMs) / 60_000);
+                    lastCount  = count;
+                    lastChange = System.currentTimeMillis();
+                } else if (count > 0) {
+                    if (elapsedMs(lastChange) > getStabilityWindowMs()) {
+                        logger.info("TSDB compactions stable at {} after {}m — Prometheus ready.",
+                                count, (System.currentTimeMillis() - startMs) / 60_000);
+                        return;
+                    }
+                }
+                Thread.sleep(getPollIntervalMs());
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Interrupted while waiting for Prometheus TSDB compaction", ie);
+            } catch (Exception e) {
+                logger.warn("Error polling TSDB compaction status, proceeding anyway", e);
+                return;
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private long queryCompactionCount() throws Exception {
+        String body = instantQueryOperation("prometheus_tsdb_compactions_total");
+        Map<String, Object> parsed = objectMapper.readValue(body, new TypeReference<>() {});
+        Map<String, Object> data   = (Map<String, Object>) parsed.get("data");
+        if (data == null) return 0;
+        List<Map<String, Object>> result = (List<Map<String, Object>>) data.get("result");
+        if (result == null || result.isEmpty()) return 0;
+        List<Object> value = (List<Object>) result.get(0).get("value");
+        if (value == null || value.size() < 2) return 0;
+        return Long.parseLong(String.valueOf(value.get(1)));
+    }
+
     @Override
     public long getDocumentCount(String indexName) {
         return 0;
