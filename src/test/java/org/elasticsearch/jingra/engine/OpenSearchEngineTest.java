@@ -1,5 +1,6 @@
 package org.elasticsearch.jingra.engine;
 
+import org.awaitility.Awaitility;
 import org.elasticsearch.jingra.model.Document;
 import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
@@ -11,8 +12,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
-
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -156,7 +157,8 @@ class OpenSearchEngineTest {
         int ingested = engine.ingest(docs, TEST_INDEX, "id");
         assertEquals(10, ingested, "Should ingest 10 documents");
 
-        Thread.sleep(1000);
+        Awaitility.await().atMost(30, TimeUnit.SECONDS).pollInterval(500, TimeUnit.MILLISECONDS)
+                .until(() -> engine.getDocumentCount(TEST_INDEX) >= 10);
 
         long count = engine.getDocumentCount(TEST_INDEX);
         assertTrue(count >= 10, "Document count should be at least 10");
@@ -178,6 +180,7 @@ class OpenSearchEngineTest {
                 """;
 
         java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-os-no-id.json");
+        java.nio.file.Files.createDirectories(schemaPath.getParent());
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
         engine.createDataStore(tempIndex, "test-schema-os-no-id");
@@ -190,7 +193,8 @@ class OpenSearchEngineTest {
         int ingested = engine.ingest(docs, tempIndex, null);
         assertEquals(2, ingested);
 
-        Thread.sleep(1000);
+        Awaitility.await().atMost(30, TimeUnit.SECONDS).pollInterval(500, TimeUnit.MILLISECONDS)
+                .until(() -> engine.getDocumentCount(tempIndex) >= 2);
 
         long count = engine.getDocumentCount(tempIndex);
         assertEquals(2, count);
@@ -246,7 +250,8 @@ class OpenSearchEngineTest {
             docs.add(new Document(fields));
         }
         engine.ingest(docs, TEST_INDEX, "id");
-        Thread.sleep(1000);
+        Awaitility.await().atMost(30, TimeUnit.SECONDS).pollInterval(500, TimeUnit.MILLISECONDS)
+                .until(() -> engine.getDocumentCount(TEST_INDEX) >= 15);
 
         String queryTemplate = """
                 {
@@ -329,6 +334,7 @@ class OpenSearchEngineTest {
                 """;
 
         java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-os-delete.json");
+        java.nio.file.Files.createDirectories(schemaPath.getParent());
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
         engine.createDataStore(tempIndex, "test-schema-os-delete");
@@ -365,6 +371,7 @@ class OpenSearchEngineTest {
                 """;
 
         java.nio.file.Path schemaPath = java.nio.file.Paths.get("jingra-config/schemas/test-schema-os-large.json");
+        java.nio.file.Files.createDirectories(schemaPath.getParent());
         java.nio.file.Files.writeString(schemaPath, schemaContent);
 
         engine.createDataStore(tempIndex, "test-schema-os-large");
@@ -380,7 +387,8 @@ class OpenSearchEngineTest {
         int ingested = engine.ingest(docs, tempIndex, "id");
         assertEquals(1000, ingested);
 
-        Thread.sleep(2000);
+        Awaitility.await().atMost(60, TimeUnit.SECONDS).pollInterval(500, TimeUnit.MILLISECONDS)
+                .until(() -> engine.getDocumentCount(tempIndex) >= 1000);
 
         long count = engine.getDocumentCount(tempIndex);
         assertEquals(1000, count);
