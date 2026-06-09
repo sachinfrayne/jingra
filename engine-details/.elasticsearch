@@ -1,2 +1,4 @@
 github=https://github.com/elastic/elasticsearch
 releases=https://github.com/elastic/elasticsearch/releases
+maven_group=co.elastic.clients
+maven_artifact=elasticsearch-java

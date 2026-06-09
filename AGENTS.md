@@ -5,7 +5,7 @@ alwaysApply: true
 
 # AGENTS
 
-* **Source of truth:** Only this file defines the project instructions. `CLAUDE.md` and `.cursor/rules/jingra-project.mdc` must symlink to it. After cloning, run `./ensure-agent-links.sh` once.
+* **Source of truth:** Only this file defines the project instructions. `CLAUDE.md` and `.cursor/rules/jingra-project.mdc` must symlink to it. After cloning, run `./scripts/ensure-agent-links.sh` once.
 * **Environment:** Use Java 21 from `.envrc`. Run commands with `source .envrc && <command>`, for example `source .envrc && make test`.
 * **TDD first:** For every new behavior or bug fix, write or update the test first.
 * **Show the test first:** Show the new or changed test, or the diff, before changing implementation code.

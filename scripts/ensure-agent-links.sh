@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-
-# Create CLAUDE.md and .cursor/rules/jingra-project.mdc as symlinks to AGENTS.md.
-# TODO: add this to Makefile and delete this script
-
 set -euo pipefail
 
-cd "$(dirname "$0")"
+# Always operate from the project root, regardless of where this script is called from
+cd "$(dirname "$0")/.."
+
 if [[ ! -f AGENTS.md ]]; then
   echo "error: AGENTS.md not found in $(pwd)" >&2
   exit 1

@@ -1,0 +1,4 @@
+github=https://github.com/opensearch-project/OpenSearch
+releases=https://github.com/opensearch-project/OpenSearch/releases
+maven_group=org.opensearch.client
+maven_artifact=opensearch-rest-client

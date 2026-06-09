@@ -1,0 +1,4 @@
+github=https://github.com/qdrant/qdrant
+releases=https://github.com/qdrant/qdrant/releases
+maven_group=io.qdrant
+maven_artifact=client

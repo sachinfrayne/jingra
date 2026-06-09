@@ -19,6 +19,7 @@ help:
 	@echo "  make coverage                   View coverage report in browser"
 	@echo ""
 	@echo "Maintenance:"
+	@echo "  make upgrade-engines            Upgrade all engines to latest versions and run tests"
 	@echo "  make clean                      Clean build artifacts and Docker cache"
 	@echo ""
 	@echo "Example:"
@@ -28,18 +29,18 @@ help:
 # Run tests with fail-fast (default - best for CI/CD and development)
 test:
 	@echo "\n::: Validating Java version consistency"
-	@./validate-java-version.sh
+	@./scripts/validate-java-version.sh
 	@echo "\n::: Validating engine version consistency"
-	@./validate-engine-versions.sh
+	@./scripts/validate-engine-versions.sh
 	@echo "\n::: Running tests with fail-fast enabled"
 	mvn clean verify -Dsurefire.skipAfterFailureCount=1
 
 # Run all tests regardless of failures (useful for seeing all issues at once)
 test-all:
 	@echo "\n::: Validating Java version consistency"
-	@./validate-java-version.sh
+	@./scripts/validate-java-version.sh
 	@echo "\n::: Validating engine version consistency"
-	@./validate-engine-versions.sh
+	@./scripts/validate-engine-versions.sh
 	@echo "\n::: Running all tests with coverage enforcement"
 	mvn clean verify
 
@@ -58,6 +59,11 @@ coverage:
 	@echo "\n::: Opening coverage report"
 	@mvn jacoco:report
 	@open target/site/jacoco/index.html || xdg-open target/site/jacoco/index.html || echo "Coverage report: target/site/jacoco/index.html"
+
+upgrade-engines:
+	@echo "\n::: Fetching latest engine versions"
+	@./scripts/upgrade-engines.sh
+	$(MAKE) test
 
 clean:
 	@echo "\n::: Cleaning build artifacts and Docker cache"
