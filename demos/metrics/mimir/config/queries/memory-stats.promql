@@ -1,0 +1,3 @@
+topk({{size}},
+  avg_over_time(system_memory_usage{state="used"}[5m])
+)

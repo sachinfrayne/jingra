@@ -1,0 +1,32 @@
+multitenancy_enabled: false
+
+common:
+  storage:
+    backend: filesystem
+    filesystem:
+      dir: /tmp/mimir-data
+
+blocks_storage:
+  backend: filesystem
+  filesystem:
+    dir: /tmp/mimir-data/blocks
+
+compactor:
+  data_dir: /tmp/mimir-data/compactor
+
+store_gateway:
+  sharding_ring:
+    replication_factor: 1
+
+ingester:
+  ring:
+    replication_factor: 1
+
+server:
+  http_listen_port: 8080
+  grpc_listen_port: 9095
+  log_level: warn
+
+limits:
+  # Allow out-of-order ingestion for dataset replay
+  out_of_order_time_window: 5m

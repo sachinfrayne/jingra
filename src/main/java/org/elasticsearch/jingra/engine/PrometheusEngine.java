@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class PrometheusEngine extends AbstractBenchmarkEngine {
 
-    private String baseUrl;
+    protected String baseUrl;
     private final HttpClient httpClient;
 
     // Lazily computed once; maps old dataset timestamps into a recent window so Prometheus accepts them.
@@ -148,7 +148,7 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
     }
 
     // URL-encoded form of: match[]={__name__!=""}
-    private static final String DELETE_ALL_SERIES_BODY = "match%5B%5D=%7B__name__%21%3D%22%22%7D";
+    protected static final String DELETE_ALL_SERIES_BODY = "match%5B%5D=%7B__name__%21%3D%22%22%7D";
 
     @SuppressWarnings("unchecked")
     protected boolean hasAnySeriesOperation() throws Exception {

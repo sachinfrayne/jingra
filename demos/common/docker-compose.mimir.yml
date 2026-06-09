@@ -1,0 +1,23 @@
+services:
+  mimir:
+    image: grafana/mimir:${MIMIR_VERSION}
+    command:
+      - '--config.file=/etc/mimir/mimir.yaml'
+    volumes:
+      - ${MIMIR_CONFIG_FILE}:/etc/mimir/mimir.yaml:ro
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - jingra-net
+
+  jingra:
+    environment:
+      - MIMIR_URL=http://mimir:8080
+    depends_on:
+      mimir:
+        condition: service_healthy

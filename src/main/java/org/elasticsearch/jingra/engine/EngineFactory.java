@@ -16,6 +16,7 @@ public final class EngineFactory {
             case "opensearch" -> new OpenSearchEngine(config.getEngineConfig());
             case "qdrant" -> new QdrantEngine(config.getEngineConfig());
             case "prometheus" -> new PrometheusEngine(config.getEngineConfig());
+            case "mimir" -> new MimirEngine(config.getEngineConfig());
             default -> throw new IllegalArgumentException("Unknown engine: " + engineName);
         };
     }
