@@ -2,48 +2,30 @@ package org.elasticsearch.jingra.engine;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.opentelemetry.proto.collector.metrics.v1.ExportMetricsServiceRequest;
-import io.opentelemetry.proto.common.v1.AnyValue;
-import io.opentelemetry.proto.common.v1.KeyValue;
-import io.opentelemetry.proto.metrics.v1.Gauge;
-import io.opentelemetry.proto.metrics.v1.Metric;
-import io.opentelemetry.proto.metrics.v1.NumberDataPoint;
-import io.opentelemetry.proto.metrics.v1.ResourceMetrics;
-import io.opentelemetry.proto.metrics.v1.ScopeMetrics;
 import org.elasticsearch.jingra.model.Document;
 import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
 
-import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Prometheus engine implementation. Ingests metric documents via remote_write and
- * queries via the Prometheus instant-query HTTP API with PromQL templates.
- */
 public class PrometheusEngine extends AbstractBenchmarkEngine {
 
-    protected String baseUrl;
+    private String baseUrl;
     private final HttpClient httpClient;
-
-    // Lazily computed once; maps old dataset timestamps into a recent window so Prometheus accepts them.
-    // Long.MIN_VALUE = sentinel "not yet computed".
     private final AtomicLong ingestTimestampOffset = new AtomicLong(Long.MIN_VALUE);
+
+    private static final String DELETE_ALL_SERIES_BODY = "match%5B%5D=%7B__name__%21%3D%22%22%7D";
 
     public PrometheusEngine(Map<String, Object> config) {
         super(config);
@@ -147,9 +129,6 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
         }
     }
 
-    // URL-encoded form of: match[]={__name__!=""}
-    protected static final String DELETE_ALL_SERIES_BODY = "match%5B%5D=%7B__name__%21%3D%22%22%7D";
-
     @SuppressWarnings("unchecked")
     protected boolean hasAnySeriesOperation() throws Exception {
         HttpRequest req = HttpRequest.newBuilder()
@@ -194,7 +173,7 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
         if (!isConnected()) return 0;
         if (documents.isEmpty()) return 0;
         try {
-            ExportMetricsServiceRequest request = buildOtlpRequest(documents);
+            ExportMetricsServiceRequest request = OtlpEncoder.buildRequest(documents, ingestTimestampOffset);
             int status = otlpWriteOperation(request.toByteArray());
             if (status < 200 || status >= 300) {
                 logger.warn("OTLP write returned HTTP {}", status);
@@ -229,7 +208,7 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
             long start = System.nanoTime();
             String responseBody = instantQueryOperation(promql);
             double clientLatencyMs = (System.nanoTime() - start) / 1_000_000.0;
-            List<String> ids = parseQueryResultIds(responseBody);
+            List<String> ids = PromqlResponseParser.parseResultIds(responseBody, objectMapper, logger);
             return new QueryResponse(ids, clientLatencyMs, null);
         } catch (Exception e) {
             logger.error("Failed to execute PromQL query '{}'", queryName, e);
@@ -252,75 +231,6 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
         return resp.body();
     }
 
-    @SuppressWarnings("unchecked")
-    private List<String> parseQueryResultIds(String responseBody) {
-        try {
-            Map<String, Object> parsed = objectMapper.readValue(responseBody, new TypeReference<>() {});
-            Map<String, Object> data = (Map<String, Object>) parsed.get("data");
-            if (data == null) return List.of();
-            List<Map<String, Object>> results = (List<Map<String, Object>>) data.get("result");
-            if (results == null) return List.of();
-            List<String> ids = new ArrayList<>(results.size());
-            for (Map<String, Object> r : results) {
-                Map<String, String> metric = (Map<String, String>) r.get("metric");
-                ids.add(metric != null ? metric.toString() : "");
-            }
-            return ids;
-        } catch (Exception e) {
-            logger.warn("Failed to parse PromQL query response", e);
-            return List.of();
-        }
-    }
-
-    protected String loadPromqlTemplate(String queryName) {
-        String filename = queryName + ".promql";
-        File file = new File(JINGRA_CONFIG_DIR + "/" + queriesPath + "/" + filename);
-        if (file.exists()) {
-            try {
-                return Files.readString(file.toPath(), StandardCharsets.UTF_8);
-            } catch (IOException e) {
-                logger.warn("Failed to load PromQL template from file: {}", file.getAbsolutePath(), e);
-            }
-        }
-        String resourcePath = "/" + queriesPath + "/" + filename;
-        String fromClasspath = readPromqlClasspathTemplate(resourcePath);
-        if (fromClasspath != null) {
-            return fromClasspath;
-        }
-        throw new IllegalArgumentException("PromQL template '" + queryName + "' not found");
-    }
-
-    private String readPromqlClasspathTemplate(String resourcePath) {
-        InputStream is = openPromqlClasspathStream(resourcePath);
-        if (is == null) {
-            return null;
-        }
-        String content = null;
-        IOException error = null;
-        try {
-            content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            error = e;
-        } finally {
-            try {
-                is.close();
-            } catch (IOException e) {
-                if (error == null) {
-                    error = e;
-                }
-            }
-        }
-        if (error != null) {
-            logger.warn("Failed to load PromQL template from classpath: {}", resourcePath, error);
-            return null;
-        }
-        return content;
-    }
-
-    protected InputStream openPromqlClasspathStream(String resourcePath) {
-        return getClass().getResourceAsStream(resourcePath);
-    }
-
     @Override
     public long getDocumentCount(String indexName) {
         return 0;
@@ -339,76 +249,5 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
     @Override
     public String getShortName() {
         return "prom";
-    }
-
-    // ─── OTLP metrics encoding ────────────────────────────────────────────────
-
-    private ExportMetricsServiceRequest buildOtlpRequest(List<Document> documents) {
-        Map<String, List<NumberDataPoint>> pointsByMetric = new LinkedHashMap<>();
-
-        for (Document doc : documents) {
-            Map<String, Object> fields = doc.getFields();
-            long timeNano = parseTimestamp(fields.get("@timestamp")) * 1_000_000L;
-
-            List<KeyValue> attributes = new ArrayList<>();
-            for (Map.Entry<String, Object> entry : fields.entrySet()) {
-                String key = entry.getKey();
-                Object val = entry.getValue();
-                if ("@timestamp".equals(key) || val == null) continue;
-                if (val instanceof String || val instanceof Boolean) {
-                    attributes.add(KeyValue.newBuilder()
-                            .setKey(key)
-                            .setValue(AnyValue.newBuilder().setStringValue(String.valueOf(val)).build())
-                            .build());
-                }
-            }
-
-            for (Map.Entry<String, Object> entry : fields.entrySet()) {
-                String key = entry.getKey();
-                Object val = entry.getValue();
-                if ("@timestamp".equals(key) || !(val instanceof Number)) continue;
-                String metricName = key.replace('.', '_').replace('-', '_');
-                NumberDataPoint dp = NumberDataPoint.newBuilder()
-                        .addAllAttributes(attributes)
-                        .setTimeUnixNano(timeNano)
-                        .setAsDouble(((Number) val).doubleValue())
-                        .build();
-                pointsByMetric.computeIfAbsent(metricName, k -> new ArrayList<>()).add(dp);
-            }
-        }
-
-        List<Metric> metrics = new ArrayList<>();
-        for (Map.Entry<String, List<NumberDataPoint>> entry : pointsByMetric.entrySet()) {
-            metrics.add(Metric.newBuilder()
-                    .setName(entry.getKey())
-                    .setGauge(Gauge.newBuilder().addAllDataPoints(entry.getValue()).build())
-                    .build());
-        }
-
-        return ExportMetricsServiceRequest.newBuilder()
-                .addResourceMetrics(ResourceMetrics.newBuilder()
-                        .addScopeMetrics(ScopeMetrics.newBuilder()
-                                .addAllMetrics(metrics)
-                                .build())
-                        .build())
-                .build();
-    }
-
-    private long parseTimestamp(Object ts) {
-        if (ts == null) return System.currentTimeMillis();
-        try {
-            long ms = Instant.parse(ts.toString()).toEpochMilli();
-            long offset = ingestTimestampOffset.get();
-            if (offset == Long.MIN_VALUE) {
-                long nowMs = System.currentTimeMillis();
-                long ageMs = nowMs - ms;
-                long computed = ageMs > 30 * 60 * 1000L ? nowMs - 180_000L - ms : 0L;
-                ingestTimestampOffset.compareAndSet(Long.MIN_VALUE, computed);
-                offset = ingestTimestampOffset.get();
-            }
-            return ms + offset;
-        } catch (Exception e) {
-            return System.currentTimeMillis();
-        }
     }
 }

@@ -53,6 +53,53 @@ class MimirOfflineCoverageTest {
     }
 
     @Test
+    void connect_stripsTrailingSlash() {
+        AtomicReference<String> capturedUri = new AtomicReference<>();
+        MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080/")) {
+            @Override
+            @SuppressWarnings("unchecked")
+            protected java.net.http.HttpResponse<String> httpSendString(HttpRequest req) throws Exception {
+                capturedUri.set(req.uri().toString());
+                java.net.http.HttpResponse<String> resp =
+                        (java.net.http.HttpResponse<String>) Mockito.mock(java.net.http.HttpResponse.class);
+                Mockito.when(resp.statusCode()).thenReturn(200);
+                Mockito.when(resp.body()).thenReturn("{\"data\":{\"version\":\"3.1.0\"}}");
+                return resp;
+            }
+        };
+        assertTrue(e.connect());
+        assertFalse(capturedUri.get().startsWith("http://localhost:8080//"),
+                "trailing slash should be stripped before building URL");
+    }
+
+    @Test
+    void connectFailsWhenBuildInfoThrows() {
+        MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
+            @Override
+            protected String buildInfoOperation(String url) throws Exception {
+                throw new Exception("connection refused");
+            }
+        };
+        assertFalse(e.connect());
+    }
+
+    @Test
+    void connect_usesUrlFromEnv() {
+        MimirEngine e = new MimirEngine(Map.of("url_env", "MIMIR_URL")) {
+            @Override
+            protected String getEnv(String envVarName, String fallback) {
+                return "MIMIR_URL".equals(envVarName) ? "http://mimir:8080" : fallback;
+            }
+
+            @Override
+            protected String buildInfoOperation(String url) {
+                return "3.1.0";
+            }
+        };
+        assertTrue(e.connect());
+    }
+
+    @Test
     void connect_usesPrometheusCompatibleBuildInfoPath() {
         AtomicReference<String> capturedUri = new AtomicReference<>();
         MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
@@ -214,6 +261,51 @@ class MimirOfflineCoverageTest {
                 capturedReq.get().headers().firstValue("X-Scope-OrgID").orElse(null));
     }
 
+    @Test
+    void ingest_returnsZeroForEmptyList_whenConnected() {
+        MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
+            @Override
+            protected String buildInfoOperation(String url) { return "3.1.0"; }
+        };
+        assertTrue(e.connect());
+        assertEquals(0, e.ingest(List.of(), "m", null));
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void ingest_returnsZeroWhenOtlpWriteThrows() throws Exception {
+        MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
+            @Override
+            protected String buildInfoOperation(String url) { return "3.1.0"; }
+
+            @Override
+            protected int otlpWriteOperation(byte[] body) throws Exception {
+                throw new Exception("network error");
+            }
+        };
+        assertTrue(e.connect());
+        Document doc = new Document(Map.of("@timestamp", "2024-01-01T00:00:00Z", "val", 1.0));
+        assertEquals(0, e.ingest(List.of(doc), "m", null));
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void httpSendString_delegatesToHttpClient() throws Exception {
+        java.net.http.HttpClient mockClient = Mockito.mock(java.net.http.HttpClient.class);
+        java.net.http.HttpResponse<String> mockResp = Mockito.mock(java.net.http.HttpResponse.class);
+        Mockito.doReturn(mockResp).when(mockClient).send(ArgumentMatchers.any(), ArgumentMatchers.any());
+        Mockito.when(mockResp.statusCode()).thenReturn(200);
+        Mockito.when(mockResp.body()).thenReturn("{\"data\":{\"version\":\"3.1.0\"}}");
+
+        MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
+            @Override
+            protected java.net.http.HttpClient buildHttpClient() { return mockClient; }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.close());
+    }
+
     // ─── Instant query ─────────────────────────────────────────────────────────
 
     @Test
@@ -349,20 +441,27 @@ class MimirOfflineCoverageTest {
     @Test
     void resetDataStore_returnsTrue_withoutHttpCalls() {
         // Mimir starts each demo run fresh; data clearing is a no-op in MimirEngine.
-        AtomicReference<Object> capturedVoidReq = new AtomicReference<>();
+        // Verify that resetDataStore returns true and makes no HTTP requests.
+        AtomicReference<String> capturedUri = new AtomicReference<>();
         MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
             @Override
-            protected String buildInfoOperation(String url) { return "2.15.0"; }
+            protected String buildInfoOperation(String url) { return "3.1.0"; }
 
             @Override
-            protected java.net.http.HttpResponse<Void> httpSendVoid(HttpRequest req) throws Exception {
-                capturedVoidReq.set(req); // should never be called
-                throw new AssertionError("httpSendVoid should not be called by resetDataStore");
+            @SuppressWarnings("unchecked")
+            protected java.net.http.HttpResponse<String> httpSendString(HttpRequest req) throws Exception {
+                capturedUri.set(req.uri().toString());
+                java.net.http.HttpResponse<String> resp =
+                        (java.net.http.HttpResponse<String>) Mockito.mock(java.net.http.HttpResponse.class);
+                Mockito.when(resp.statusCode()).thenReturn(200);
+                Mockito.when(resp.body()).thenReturn("{\"data\":{\"version\":\"3.1.0\"}}");
+                return resp;
             }
         };
         assertTrue(e.connect());
-        assertTrue(e.resetDataStore("m")); // no HTTP call expected
-        assertNull(capturedVoidReq.get(), "httpSendVoid must not be called");
+        String uriAfterConnect = capturedUri.get();
+        assertTrue(e.resetDataStore("m")); // no HTTP call beyond connect expected
+        assertEquals(uriAfterConnect, capturedUri.get(), "resetDataStore must not make additional HTTP calls");
         assertDoesNotThrow(() -> e.close());
     }
 

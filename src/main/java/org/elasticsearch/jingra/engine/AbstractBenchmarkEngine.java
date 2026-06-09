@@ -254,10 +254,56 @@ public abstract class AbstractBenchmarkEngine implements BenchmarkEngine {
         return content;
     }
 
-    /**
-     * Opens a classpath ESQL template stream. Subclasses in tests may override to simulate I/O failures.
-     */
     protected java.io.InputStream openEsqlClasspathStream(String resourcePath) {
+        return getClass().getResourceAsStream(resourcePath);
+    }
+
+    protected String loadPromqlTemplate(String queryName) {
+        String filename = queryName + ".promql";
+        File file = new File(JINGRA_CONFIG_DIR + "/" + queriesPath + "/" + filename);
+        if (file.exists()) {
+            try {
+                return Files.readString(file.toPath(), StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                logger.warn("Failed to load PromQL template from file: {}", file.getAbsolutePath(), e);
+            }
+        }
+        String resourcePath = "/" + queriesPath + "/" + filename;
+        String fromClasspath = readPromqlClasspathTemplate(resourcePath);
+        if (fromClasspath != null) {
+            return fromClasspath;
+        }
+        throw new IllegalArgumentException("PromQL template '" + queryName + "' not found");
+    }
+
+    private String readPromqlClasspathTemplate(String resourcePath) {
+        java.io.InputStream is = openPromqlClasspathStream(resourcePath);
+        if (is == null) {
+            return null;
+        }
+        String content = null;
+        IOException error = null;
+        try {
+            content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            error = e;
+        } finally {
+            try {
+                is.close();
+            } catch (IOException e) {
+                if (error == null) {
+                    error = e;
+                }
+            }
+        }
+        if (error != null) {
+            logger.warn("Failed to load PromQL template from classpath: {}", resourcePath, error);
+            return null;
+        }
+        return content;
+    }
+
+    protected java.io.InputStream openPromqlClasspathStream(String resourcePath) {
         return getClass().getResourceAsStream(resourcePath);
     }
 
