@@ -39,6 +39,18 @@ public final class LoadCommand {
 
     private LoadCommand() {}
 
+    /**
+     * Returns true if {@code path} resolves to at least one existing file.
+     * Plain paths use a direct {@link java.io.File#exists()} check; glob patterns
+     * (containing {@code *} or {@code ?}) are expanded via {@link DatasetReaderFactory#expandGlob}.
+     */
+    private static boolean dataPathExists(String path) {
+        if (path.contains("*") || path.contains("?")) {
+            return !DatasetReaderFactory.expandGlob(path).isEmpty();
+        }
+        return new java.io.File(path).exists();
+    }
+
     /** Default engine factory for {@link #run(JingraConfig)}; tests may replace temporarily. */
     static Function<JingraConfig, BenchmarkEngine> engineFactory = EngineFactory::create;
 
@@ -202,7 +214,7 @@ public final class LoadCommand {
         String dataUrlEnv = dataset.getPath().getDataUrlEnv();
         if (dataUrlEnv != null) {
             FileDownloader.ensureFileExists(dataPath, dataUrlEnv);
-        } else if (!new java.io.File(dataPath).exists()) {
+        } else if (!dataPathExists(dataPath)) {
             throw new RuntimeException("Data file not found: " + dataPath);
         }
         logger.info("Loading data from: {}", dataPath);

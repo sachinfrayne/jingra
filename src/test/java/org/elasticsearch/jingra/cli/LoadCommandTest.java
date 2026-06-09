@@ -865,6 +865,25 @@ class LoadCommandTest {
         }
     }
 
+    @Test
+    void run_whenGlobDataPathHasNoMatches_throwsDataFileNotFound(@TempDir java.nio.file.Path tmpDir) {
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
+        JingraConfig config = buildLoadConfig(tmpDir + "/no-match-*.ndjson.gz");
+        TrackingMock engine = new TrackingMock();
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> LoadCommand.run(config, c -> engine));
+        assertTrue(ex.getMessage().contains("Data file not found"));
+    }
+
+    @Test
+    void run_whenGlobDataPathHasMatches_proceeds(@TempDir java.nio.file.Path tmpDir) throws Exception {
+        java.nio.file.Files.writeString(tmpDir.resolve("part-0000.ndjson"), "{\"id\":\"1\"}\n");
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
+        JingraConfig config = buildLoadConfig(tmpDir + "/part-*.ndjson");
+        TrackingMock engine = new TrackingMock();
+        LoadCommand.run(config, c -> engine);
+        assertTrue(engine.ingestCalls >= 1);
+    }
+
     private static class SlowIngest extends MockBenchmarkEngine {
         int ingestCalls;
 

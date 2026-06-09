@@ -8,17 +8,25 @@ import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.GZIPInputStream;
 
 /**
  * Reads NDJSON (newline-delimited JSON) files and converts each line to a {@link Document}.
  *
- * <p>Each non-blank line must be a valid JSON object. The {@code conversionThreads} hint
- * accepted by {@link #readInBatches(int, int, DatasetReader.BatchConsumer)} is ignored —
+ * <p>Supports plain {@code .ndjson} and gzip-compressed {@code .ndjson.gz} files.
+ * Accepts a list of paths so that glob-expanded sets of chunk files are treated as one
+ * logical dataset — files are streamed in the order they are supplied.</p>
+ *
+ * <p>The {@code conversionThreads} hint accepted by
+ * {@link #readInBatches(int, int, DatasetReader.BatchConsumer)} is ignored —
  * JSON line parsing is fast enough to do single-threaded.</p>
  */
 public class NdjsonReader implements DatasetReader {
@@ -26,10 +34,14 @@ public class NdjsonReader implements DatasetReader {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
 
-    private final String filePath;
+    private final List<String> filePaths;
 
     public NdjsonReader(String filePath) {
-        this.filePath = filePath;
+        this.filePaths = List.of(filePath);
+    }
+
+    public NdjsonReader(List<String> filePaths) {
+        this.filePaths = List.copyOf(filePaths);
     }
 
     @Override
@@ -40,18 +52,22 @@ public class NdjsonReader implements DatasetReader {
     @Override
     public List<Document> readAll(int limit) throws IOException {
         List<Document> documents = new ArrayList<>();
-        logger.info("Reading NDJSON file: {}", filePath);
+        logger.info("Reading {} NDJSON file(s)", filePaths.size());
 
-        try (BufferedReader reader = Files.newBufferedReader(Paths.get(filePath))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (line.isBlank()) continue;
-                documents.add(parseLine(line));
-                if (limit > 0 && documents.size() >= limit) break;
+        outer:
+        for (String path : filePaths) {
+            logger.info("Reading: {}", path);
+            try (BufferedReader reader = openReader(path)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.isBlank()) continue;
+                    documents.add(parseLine(line));
+                    if (limit > 0 && documents.size() >= limit) break outer;
+                }
             }
         }
 
-        logger.info("Finished reading {} documents from NDJSON file", documents.size());
+        logger.info("Finished reading {} documents", documents.size());
         return documents;
     }
 
@@ -62,19 +78,22 @@ public class NdjsonReader implements DatasetReader {
 
     @Override
     public void readInBatches(int batchSize, int conversionThreads, BatchConsumer consumer) throws IOException {
-        logger.info("Reading NDJSON file in batches of {}: {}", batchSize, filePath);
+        logger.info("Reading {} NDJSON file(s) in batches of {}", filePaths.size(), batchSize);
         List<Document> batch = new ArrayList<>(batchSize);
         int total = 0;
 
-        try (BufferedReader reader = Files.newBufferedReader(Paths.get(filePath))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (line.isBlank()) continue;
-                batch.add(parseLine(line));
-                if (batch.size() >= batchSize) {
-                    consumer.accept(batch);
-                    total += batch.size();
-                    batch = new ArrayList<>(batchSize);
+        for (String path : filePaths) {
+            logger.info("Reading: {}", path);
+            try (BufferedReader reader = openReader(path)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.isBlank()) continue;
+                    batch.add(parseLine(line));
+                    if (batch.size() >= batchSize) {
+                        consumer.accept(batch);
+                        total += batch.size();
+                        batch = new ArrayList<>(batchSize);
+                    }
                 }
             }
         }
@@ -84,19 +103,29 @@ public class NdjsonReader implements DatasetReader {
             total += batch.size();
         }
 
-        logger.info("Finished processing {} documents from NDJSON file", total);
+        logger.info("Finished processing {} documents", total);
     }
 
     @Override
     public long getRowCount() throws IOException {
         long count = 0;
-        try (BufferedReader reader = Files.newBufferedReader(Paths.get(filePath))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (!line.isBlank()) count++;
+        for (String path : filePaths) {
+            try (BufferedReader reader = openReader(path)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (!line.isBlank()) count++;
+                }
             }
         }
         return count;
+    }
+
+    private static BufferedReader openReader(String path) throws IOException {
+        InputStream in = Files.newInputStream(Paths.get(path));
+        if (path.endsWith(".gz")) {
+            in = new GZIPInputStream(in);
+        }
+        return new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
     }
 
     private Document parseLine(String line) throws IOException {

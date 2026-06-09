@@ -283,4 +283,145 @@ class NdjsonReaderTest {
         DatasetReader reader = DatasetReaderFactory.create(null);
         assertInstanceOf(ParquetReader.class, reader);
     }
+
+    // ── Multi-file (List<String> constructor) ──────────────────────────────────
+
+    @Test
+    void ndjsonReader_listConstructor_readAll_concatenatesDocuments(@TempDir Path tmpDir) throws IOException {
+        Path f1 = tmpDir.resolve("a.ndjson");
+        Path f2 = tmpDir.resolve("b.ndjson");
+        Files.writeString(f1, "{\"id\":\"1\"}\n{\"id\":\"2\"}\n");
+        Files.writeString(f2, "{\"id\":\"3\"}\n");
+
+        List<Document> docs = new NdjsonReader(List.of(f1.toString(), f2.toString())).readAll();
+        assertEquals(3, docs.size());
+        assertEquals("1", docs.get(0).getString("id"));
+        assertEquals("3", docs.get(2).getString("id"));
+    }
+
+    @Test
+    void ndjsonReader_listConstructor_readAll_limitStopsAcrossFiles(@TempDir Path tmpDir) throws IOException {
+        Path f1 = tmpDir.resolve("a.ndjson");
+        Path f2 = tmpDir.resolve("b.ndjson");
+        Files.writeString(f1, "{\"id\":\"1\"}\n{\"id\":\"2\"}\n");
+        Files.writeString(f2, "{\"id\":\"3\"}\n{\"id\":\"4\"}\n");
+
+        List<Document> docs = new NdjsonReader(List.of(f1.toString(), f2.toString())).readAll(3);
+        assertEquals(3, docs.size());
+    }
+
+    @Test
+    void ndjsonReader_listConstructor_readInBatches_concatenatesAcrossFiles(@TempDir Path tmpDir) throws IOException {
+        Path f1 = tmpDir.resolve("a.ndjson");
+        Path f2 = tmpDir.resolve("b.ndjson");
+        Files.writeString(f1, "{\"id\":\"1\"}\n{\"id\":\"2\"}\n");
+        Files.writeString(f2, "{\"id\":\"3\"}\n");
+
+        List<Document> collected = new ArrayList<>();
+        new NdjsonReader(List.of(f1.toString(), f2.toString())).readInBatches(10, collected::addAll);
+        assertEquals(3, collected.size());
+    }
+
+    @Test
+    void ndjsonReader_listConstructor_getRowCount_sumsAcrossFiles(@TempDir Path tmpDir) throws IOException {
+        Path f1 = tmpDir.resolve("a.ndjson");
+        Path f2 = tmpDir.resolve("b.ndjson");
+        Files.writeString(f1, "{\"id\":\"1\"}\n{\"id\":\"2\"}\n");
+        Files.writeString(f2, "{\"id\":\"3\"}\n");
+
+        assertEquals(3, new NdjsonReader(List.of(f1.toString(), f2.toString())).getRowCount());
+    }
+
+    // ── Gzip (.ndjson.gz) ─────────────────────────────────────────────────────
+
+    @Test
+    void ndjsonReader_gzippedFile_readAll(@TempDir Path tmpDir) throws IOException {
+        Path gz = tmpDir.resolve("data.ndjson.gz");
+        writeGzip(gz, "{\"id\":\"x\"}\n{\"id\":\"y\"}\n");
+
+        List<Document> docs = new NdjsonReader(gz.toString()).readAll();
+        assertEquals(2, docs.size());
+        assertEquals("x", docs.get(0).getString("id"));
+        assertEquals("y", docs.get(1).getString("id"));
+    }
+
+    @Test
+    void ndjsonReader_gzippedFile_readInBatches(@TempDir Path tmpDir) throws IOException {
+        Path gz = tmpDir.resolve("data.ndjson.gz");
+        writeGzip(gz, "{\"id\":\"a\"}\n{\"id\":\"b\"}\n{\"id\":\"c\"}\n");
+
+        List<Document> collected = new ArrayList<>();
+        new NdjsonReader(gz.toString()).readInBatches(2, collected::addAll);
+        assertEquals(3, collected.size());
+    }
+
+    @Test
+    void ndjsonReader_gzippedFile_getRowCount(@TempDir Path tmpDir) throws IOException {
+        Path gz = tmpDir.resolve("data.ndjson.gz");
+        writeGzip(gz, "{\"id\":\"1\"}\n{\"id\":\"2\"}\n");
+
+        assertEquals(2, new NdjsonReader(gz.toString()).getRowCount());
+    }
+
+    // ── DatasetReaderFactory: .ndjson.gz and glob ─────────────────────────────
+
+    @Test
+    void datasetReaderFactory_returnsNdjsonReaderForGzipNdjson() {
+        assertInstanceOf(NdjsonReader.class, DatasetReaderFactory.create("path/data.ndjson.gz"));
+    }
+
+    @Test
+    void datasetReaderFactory_globPattern_expandsAndReturnsNdjsonReader(@TempDir Path tmpDir) throws IOException {
+        writeGzip(tmpDir.resolve("part-0000.ndjson.gz"), "");
+        writeGzip(tmpDir.resolve("part-0001.ndjson.gz"), "");
+
+        assertInstanceOf(NdjsonReader.class, DatasetReaderFactory.create(tmpDir + "/part-*.ndjson.gz"));
+    }
+
+    @Test
+    void datasetReaderFactory_globPattern_noMatchThrowsRuntimeException(@TempDir Path tmpDir) {
+        assertThrows(RuntimeException.class,
+            () -> DatasetReaderFactory.create(tmpDir + "/no-match-*.ndjson.gz"));
+    }
+
+    @Test
+    void datasetReaderFactory_globPattern_multipleParquetFiles_throwsIllegalArgumentException(@TempDir Path tmpDir)
+            throws IOException {
+        Files.writeString(tmpDir.resolve("part-0.parquet"), "");
+        Files.writeString(tmpDir.resolve("part-1.parquet"), "");
+
+        assertThrows(IllegalArgumentException.class,
+            () -> DatasetReaderFactory.create(tmpDir + "/part-*.parquet"));
+    }
+
+    @Test
+    void expandGlob_nonGlobPath_returnsSingletonList() {
+        assertEquals(List.of("some/path.ndjson"), DatasetReaderFactory.expandGlob("some/path.ndjson"));
+    }
+
+    @Test
+    void expandGlob_globPattern_returnsSortedMatchingPaths(@TempDir Path tmpDir) throws IOException {
+        Files.writeString(tmpDir.resolve("part-0002.ndjson"), "");
+        Files.writeString(tmpDir.resolve("part-0000.ndjson"), "");
+        Files.writeString(tmpDir.resolve("part-0001.ndjson"), "");
+
+        List<String> result = DatasetReaderFactory.expandGlob(tmpDir + "/part-*.ndjson");
+        assertEquals(3, result.size());
+        assertTrue(result.get(0).endsWith("part-0000.ndjson"));
+        assertTrue(result.get(1).endsWith("part-0001.ndjson"));
+        assertTrue(result.get(2).endsWith("part-0002.ndjson"));
+    }
+
+    @Test
+    void expandGlob_parentDirectoryMissing_throwsRuntimeException() {
+        assertThrows(RuntimeException.class,
+            () -> DatasetReaderFactory.expandGlob("/no/such/directory/part-*.ndjson"));
+    }
+
+    private static void writeGzip(Path path, String content) throws IOException {
+        try (var out = new java.util.zip.GZIPOutputStream(Files.newOutputStream(path));
+             var w = new java.io.OutputStreamWriter(out, java.nio.charset.StandardCharsets.UTF_8)) {
+            w.write(content);
+        }
+    }
 }
