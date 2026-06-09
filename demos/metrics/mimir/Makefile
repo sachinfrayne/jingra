@@ -5,4 +5,5 @@ export MIMIR_VERSION := $(shell cat ../../../engine-versions/.mimir | tr -d '[:s
 export MIMIR_CONFIG_FILE := $(abspath ../../common/mimir.yaml)
 COMPOSE_OVERRIDES = -f ../../common/docker-compose.mimir.yml
 ENGINE_SERVICE := mimir
+ENGINE_READY_URL := http://localhost:8080/ready
 include ../../common/demo.mk

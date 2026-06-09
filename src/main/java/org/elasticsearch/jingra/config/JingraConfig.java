@@ -29,6 +29,9 @@ public class JingraConfig {
     @JsonProperty("prometheus")
     private Map<String, Object> prometheus;
 
+    @JsonProperty("mimir")
+    private Map<String, Object> mimir;
+
     @JsonProperty("datasets")
     private Map<String, DatasetConfig> datasets;
 
@@ -141,6 +144,14 @@ public class JingraConfig {
         this.prometheus = prometheus;
     }
 
+    public Map<String, Object> getMimir() {
+        return mimir;
+    }
+
+    public void setMimir(Map<String, Object> mimir) {
+        this.mimir = mimir;
+    }
+
     public Map<String, DatasetConfig> getDatasets() {
         return datasets;
     }
@@ -198,6 +209,7 @@ public class JingraConfig {
             case "opensearch" -> opensearch;
             case "qdrant" -> qdrant;
             case "prometheus" -> prometheus;
+            case "mimir" -> mimir;
             default -> throw new IllegalStateException("Unknown engine: " + engine);
         };
     }

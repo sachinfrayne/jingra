@@ -7,6 +7,9 @@ ENGINE_SERVICE ?= elasticsearch
 SINK_SERVICE    ?= elasticsearch-sink
 DEMO_OUTPUT_DIRS ?= output
 POST_START_HOOK ?=
+# Set ENGINE_READY_URL to poll a host-accessible URL instead of relying on Docker health status.
+# Useful for engines whose container image lacks a shell/wget for Docker-internal health checks.
+ENGINE_READY_URL ?=
 
 SINK_ENGINE ?= elasticsearch
 export SINK_ENGINE
@@ -44,7 +47,22 @@ build:
 start:
 	@echo "Starting $(ENGINE_SERVICE)..."
 	$(COMPOSE) up -d --build $(SINK_SERVICE) $(ENGINE_SERVICE)
-	@if $(COMPOSE) ps $(ENGINE_SERVICE) | grep -q "healthy"; then \
+	@if [ -n "$(ENGINE_READY_URL)" ]; then \
+		echo "Waiting for $(ENGINE_SERVICE) at $(ENGINE_READY_URL)..."; \
+		timeout=90; \
+		while [ $$timeout -gt 0 ]; do \
+			sleep 1; \
+			timeout=$$((timeout - 1)); \
+			if curl -sf "$(ENGINE_READY_URL)" > /dev/null 2>&1; then \
+				echo "✓ $(ENGINE_SERVICE) is ready"; \
+				break; \
+			fi; \
+		done; \
+		if [ $$timeout -eq 0 ]; then \
+			echo "❌ $(ENGINE_SERVICE) failed to become ready at $(ENGINE_READY_URL)"; \
+			exit 1; \
+		fi; \
+	elif $(COMPOSE) ps $(ENGINE_SERVICE) | grep -q "healthy"; then \
 		echo "✓ $(ENGINE_SERVICE) is ready"; \
 	else \
 		echo "Waiting for $(ENGINE_SERVICE) to be healthy..."; \

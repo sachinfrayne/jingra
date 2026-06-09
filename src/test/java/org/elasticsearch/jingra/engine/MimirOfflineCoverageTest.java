@@ -344,54 +344,33 @@ class MimirOfflineCoverageTest {
                 capturedReq.get().headers().firstValue("X-Scope-OrgID").orElse(null));
     }
 
-    // ─── deleteSeriesOperation / cleanTombstonesOperation ──────────────────────
+    // ─── resetDataStore ────────────────────────────────────────────────────────
 
     @Test
-    void resetDataStore_usesPrometheusCompatibleDeletePath() {
-        AtomicReference<String> capturedUri = new AtomicReference<>();
+    void resetDataStore_returnsTrue_withoutHttpCalls() {
+        // Mimir starts each demo run fresh; data clearing is a no-op in MimirEngine.
+        AtomicReference<Object> capturedVoidReq = new AtomicReference<>();
         MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
             @Override
             protected String buildInfoOperation(String url) { return "2.15.0"; }
 
             @Override
-            @SuppressWarnings("unchecked")
             protected java.net.http.HttpResponse<Void> httpSendVoid(HttpRequest req) throws Exception {
-                capturedUri.set(req.uri().toString());
-                java.net.http.HttpResponse<Void> resp =
-                        (java.net.http.HttpResponse<Void>) Mockito.mock(java.net.http.HttpResponse.class);
-                Mockito.when(resp.statusCode()).thenReturn(204);
-                return resp;
+                capturedVoidReq.set(req); // should never be called
+                throw new AssertionError("httpSendVoid should not be called by resetDataStore");
             }
         };
         assertTrue(e.connect());
-        assertTrue(e.resetDataStore("m"));
-        assertNotNull(capturedUri.get());
-        assertTrue(capturedUri.get().contains("/prometheus/api/v1/admin/tsdb/"),
-                "expected /prometheus/ prefix for admin ops, got: " + capturedUri.get());
+        assertTrue(e.resetDataStore("m")); // no HTTP call expected
+        assertNull(capturedVoidReq.get(), "httpSendVoid must not be called");
+        assertDoesNotThrow(() -> e.close());
     }
 
     @Test
-    void resetDataStore_includesXScopeOrgIdHeader() {
-        AtomicReference<HttpRequest> capturedReq = new AtomicReference<>();
-        MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080", "org_id", "prod")) {
-            @Override
-            protected String buildInfoOperation(String url) { return "2.15.0"; }
-
-            @Override
-            @SuppressWarnings("unchecked")
-            protected java.net.http.HttpResponse<Void> httpSendVoid(HttpRequest req) throws Exception {
-                capturedReq.set(req);
-                java.net.http.HttpResponse<Void> resp =
-                        (java.net.http.HttpResponse<Void>) Mockito.mock(java.net.http.HttpResponse.class);
-                Mockito.when(resp.statusCode()).thenReturn(204);
-                return resp;
-            }
-        };
-        assertTrue(e.connect());
-        assertTrue(e.resetDataStore("m"));
-        assertNotNull(capturedReq.get());
-        assertEquals("prod",
-                capturedReq.get().headers().firstValue("X-Scope-OrgID").orElse(null));
+    void resetDataStore_returnsFalseWhenDisconnected() {
+        MimirEngine e = new MimirEngine(Map.of("url_env", BOGUS_URL_ENV));
+        assertFalse(e.connect());
+        assertFalse(e.resetDataStore("m"));
     }
 
     // ─── operationsNoOpWhenNeverConnected ───────────────────────────────────────
@@ -591,48 +570,6 @@ class MimirOfflineCoverageTest {
         };
         assertTrue(e.connect());
         assertFalse(e.dataStoreExists("m")); // data == null → false
-        assertDoesNotThrow(() -> e.close());
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void deleteSeriesOperation_throwsOnNon204() throws Exception {
-        MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
-            @Override
-            protected String buildInfoOperation(String url) { return "2.15.0"; }
-            @Override protected void cleanTombstonesOperation() {}
-
-            @Override
-            protected java.net.http.HttpResponse<Void> httpSendVoid(HttpRequest req) throws Exception {
-                java.net.http.HttpResponse<Void> resp =
-                        (java.net.http.HttpResponse<Void>) Mockito.mock(java.net.http.HttpResponse.class);
-                Mockito.when(resp.statusCode()).thenReturn(500);
-                return resp;
-            }
-        };
-        assertTrue(e.connect());
-        assertFalse(e.resetDataStore("m")); // throws → resetDataStore returns false
-        assertDoesNotThrow(() -> e.close());
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void cleanTombstonesOperation_throwsOnNon204() throws Exception {
-        MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
-            @Override
-            protected String buildInfoOperation(String url) { return "2.15.0"; }
-            @Override protected void deleteSeriesOperation() {}
-
-            @Override
-            protected java.net.http.HttpResponse<Void> httpSendVoid(HttpRequest req) throws Exception {
-                java.net.http.HttpResponse<Void> resp =
-                        (java.net.http.HttpResponse<Void>) Mockito.mock(java.net.http.HttpResponse.class);
-                Mockito.when(resp.statusCode()).thenReturn(500);
-                return resp;
-            }
-        };
-        assertTrue(e.connect());
-        assertFalse(e.resetDataStore("m")); // cleanTombstonesOperation throws → returns false
         assertDoesNotThrow(() -> e.close());
     }
 

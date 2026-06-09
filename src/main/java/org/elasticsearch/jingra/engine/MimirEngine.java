@@ -104,30 +104,10 @@ public class MimirEngine extends PrometheusEngine {
     }
 
     @Override
-    protected void deleteSeriesOperation() throws Exception {
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/prometheus/api/v1/admin/tsdb/delete_series"))
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .header("X-Scope-OrgID", orgId())
-                .POST(HttpRequest.BodyPublishers.ofString(DELETE_ALL_SERIES_BODY))
-                .build();
-        HttpResponse<Void> resp = httpSendVoid(req);
-        if (resp.statusCode() != 204) {
-            throw new IOException("delete_series returned HTTP " + resp.statusCode()
-                    + "; ensure Mimir is configured with appropriate admin settings");
-        }
-    }
-
-    @Override
-    protected void cleanTombstonesOperation() throws Exception {
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/prometheus/api/v1/admin/tsdb/clean_tombstones"))
-                .header("X-Scope-OrgID", orgId())
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
-        HttpResponse<Void> resp = httpSendVoid(req);
-        if (resp.statusCode() != 204) {
-            throw new IOException("clean_tombstones returned HTTP " + resp.statusCode());
-        }
+    public boolean resetDataStore(String indexName) {
+        if (!isConnected()) return false;
+        // Mimir's admin TSDB API requires additional configuration and is not needed for demo
+        // runs where docker-compose down -v always wipes all data before a new run.
+        return true;
     }
 }

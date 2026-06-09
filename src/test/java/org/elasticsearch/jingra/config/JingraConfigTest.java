@@ -321,6 +321,25 @@ class JingraConfigTest {
     }
 
     @Test
+    void deserializesYaml_acceptsMimirEngine() throws Exception {
+        String yaml =
+                """
+                engine: mimir
+                dataset: metrics
+                mimir:
+                  url_env: MIMIR_URL
+                  org_id: anonymous
+                datasets:
+                  metrics:
+                    type: metrics
+                """;
+        JingraConfig c = YAML_MAPPER.readValue(yaml, JingraConfig.class);
+        assertEquals("mimir", c.getEngine());
+        assertEquals("MIMIR_URL", c.getMimir().get("url_env"));
+        assertSame(c.getMimir(), c.getEngineConfig());
+    }
+
+    @Test
     void deserializesYaml_acceptsListForDatasetField() throws Exception {
         String yaml =
                 """
