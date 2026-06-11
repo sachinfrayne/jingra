@@ -139,8 +139,14 @@ public class DatasetConfig {
         @JsonProperty("data_url_env")
         private String dataUrlEnv;
 
+        @JsonProperty("data_url_base_env")
+        private String dataUrlBaseEnv;
+
         @JsonProperty("queries_url_env")
         private String queriesUrlEnv;
+
+        @JsonProperty("queries_url_base_env")
+        private String queriesUrlBaseEnv;
 
         public String getDataPath() {
             return dataPath;
@@ -166,12 +172,28 @@ public class DatasetConfig {
             this.dataUrlEnv = dataUrlEnv;
         }
 
+        public String getDataUrlBaseEnv() {
+            return dataUrlBaseEnv;
+        }
+
+        public void setDataUrlBaseEnv(String dataUrlBaseEnv) {
+            this.dataUrlBaseEnv = dataUrlBaseEnv;
+        }
+
         public String getQueriesUrlEnv() {
             return queriesUrlEnv;
         }
 
         public void setQueriesUrlEnv(String queriesUrlEnv) {
             this.queriesUrlEnv = queriesUrlEnv;
+        }
+
+        public String getQueriesUrlBaseEnv() {
+            return queriesUrlBaseEnv;
+        }
+
+        public void setQueriesUrlBaseEnv(String queriesUrlBaseEnv) {
+            this.queriesUrlBaseEnv = queriesUrlBaseEnv;
         }
     }
 

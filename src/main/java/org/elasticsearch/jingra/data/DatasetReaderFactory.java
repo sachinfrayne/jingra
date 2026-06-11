@@ -45,11 +45,68 @@ public class DatasetReaderFactory {
     }
 
     /**
+     * Enumerate all strings that MATCH a glob pattern containing {@code [X-Y]} character ranges
+     * or character lists {@code [abc]}, without touching the filesystem.
+     *
+     * <p>Wildcard {@code *} and {@code ?} are NOT supported — use explicit ranges instead.
+     * Works on both file-system paths and URL strings.</p>
+     *
+     * <p>Example: {@code "dir/part-000[0-4].ndjson.gz"} →
+     * {@code ["dir/part-0000.ndjson.gz", …, "dir/part-0004.ndjson.gz"]}</p>
+     */
+    public static List<String> enumerateGlobPattern(String pattern) {
+        if (pattern.contains("*") || pattern.contains("?")) {
+            throw new IllegalArgumentException(
+                "enumerateGlobPattern does not support * or ? wildcards — "
+                + "use explicit character ranges like [0-9] instead: " + pattern);
+        }
+        return expandPattern(pattern);
+    }
+
+    private static List<String> expandPattern(String pattern) {
+        int start = pattern.indexOf('[');
+        if (start < 0) {
+            return List.of(pattern);
+        }
+        int end = pattern.indexOf(']', start);
+        if (end < 0) {
+            throw new IllegalArgumentException("Unclosed '[' in pattern: " + pattern);
+        }
+        String prefix = pattern.substring(0, start);
+        List<Character> chars = parseCharClass(pattern.substring(start + 1, end));
+        List<String> suffixes = expandPattern(pattern.substring(end + 1));
+        List<String> results = new ArrayList<>();
+        for (char c : chars) {
+            for (String suffix : suffixes) {
+                results.add(prefix + c + suffix);
+            }
+        }
+        return results;
+    }
+
+    private static List<Character> parseCharClass(String spec) {
+        List<Character> chars = new ArrayList<>();
+        int i = 0;
+        while (i < spec.length()) {
+            if (i + 2 < spec.length() && spec.charAt(i + 1) == '-') {
+                for (char c = spec.charAt(i); c <= spec.charAt(i + 2); c++) {
+                    chars.add(c);
+                }
+                i += 3;
+            } else {
+                chars.add(spec.charAt(i));
+                i++;
+            }
+        }
+        return chars;
+    }
+
+    /**
      * If {@code path} contains glob characters expand it; otherwise return it as-is.
      * Results are sorted so chunk files arrive in a stable, predictable order.
      */
     public static List<String> expandGlob(String path) {
-        if (!path.contains("*") && !path.contains("?")) {
+        if (!path.contains("*") && !path.contains("?") && !path.contains("[")) {
             return List.of(path);
         }
         Path p = Paths.get(path);

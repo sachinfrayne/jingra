@@ -430,6 +430,61 @@ class NdjsonReaderTest {
         assertEquals(2, result.size());
     }
 
+    // ── DatasetReaderFactory.enumerateGlobPattern ─────────────────────────────────
+
+    @Test
+    void enumerateGlobPattern_literalPath_returnsSingleElement() {
+        assertEquals(List.of("datasets/foo/data.ndjson"),
+            DatasetReaderFactory.enumerateGlobPattern("datasets/foo/data.ndjson"));
+    }
+
+    @Test
+    void enumerateGlobPattern_numericRange_expandsInOrder() {
+        assertEquals(List.of("dir/part-0.txt", "dir/part-1.txt", "dir/part-2.txt"),
+            DatasetReaderFactory.enumerateGlobPattern("dir/part-[0-2].txt"));
+    }
+
+    @Test
+    void enumerateGlobPattern_paddedNumericRange_generatesCorrectNames() {
+        assertEquals(List.of(
+            "datasets/part-0000.ndjson.gz",
+            "datasets/part-0001.ndjson.gz",
+            "datasets/part-0002.ndjson.gz",
+            "datasets/part-0003.ndjson.gz",
+            "datasets/part-0004.ndjson.gz"),
+            DatasetReaderFactory.enumerateGlobPattern("datasets/part-000[0-4].ndjson.gz"));
+    }
+
+    @Test
+    void enumerateGlobPattern_charList_expandsEachCharacter() {
+        assertEquals(List.of("file-a.txt", "file-b.txt", "file-c.txt"),
+            DatasetReaderFactory.enumerateGlobPattern("file-[abc].txt"));
+    }
+
+    @Test
+    void enumerateGlobPattern_multipleRanges_returnsAllCombinations() {
+        assertEquals(List.of("0-a.txt", "0-b.txt", "1-a.txt", "1-b.txt"),
+            DatasetReaderFactory.enumerateGlobPattern("[0-1]-[a-b].txt"));
+    }
+
+    @Test
+    void enumerateGlobPattern_starWildcard_throwsIllegalArgument() {
+        assertThrows(IllegalArgumentException.class,
+            () -> DatasetReaderFactory.enumerateGlobPattern("dir/part-*.ndjson.gz"));
+    }
+
+    @Test
+    void enumerateGlobPattern_questionWildcard_throwsIllegalArgument() {
+        assertThrows(IllegalArgumentException.class,
+            () -> DatasetReaderFactory.enumerateGlobPattern("dir/part-?.ndjson.gz"));
+    }
+
+    @Test
+    void enumerateGlobPattern_unclosedBracket_throwsIllegalArgument() {
+        assertThrows(IllegalArgumentException.class,
+            () -> DatasetReaderFactory.enumerateGlobPattern("dir/part-[0-4.ndjson.gz"));
+    }
+
     @Test
     void expandGlob_nonGlobPath_returnsSingletonList() {
         assertEquals(List.of("some/path.ndjson"), DatasetReaderFactory.expandGlob("some/path.ndjson"));
@@ -454,6 +509,17 @@ class NdjsonReaderTest {
         // No such files exist in the working directory, but the call must not throw.
         List<String> result = DatasetReaderFactory.expandGlob("*.ndjson.no.such.file.xyz");
         assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void expandGlob_bracketRange_expandsViaFilesystem(@TempDir Path tmpDir) throws IOException {
+        Files.writeString(tmpDir.resolve("part-0000.ndjson.gz"), "");
+        Files.writeString(tmpDir.resolve("part-0001.ndjson.gz"), "");
+
+        List<String> result = DatasetReaderFactory.expandGlob(tmpDir + "/part-000[0-1].ndjson.gz");
+        assertEquals(2, result.size());
+        assertTrue(result.stream().anyMatch(p -> p.endsWith("part-0000.ndjson.gz")));
+        assertTrue(result.stream().anyMatch(p -> p.endsWith("part-0001.ndjson.gz")));
     }
 
     @Test

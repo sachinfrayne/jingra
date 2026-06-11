@@ -3,13 +3,22 @@ package org.elasticsearch.jingra.utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.elasticsearch.jingra.data.DatasetReaderFactory;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Utility for downloading files from URLs with validation.
@@ -26,6 +35,23 @@ public class FileDownloader {
     static final ThreadLocal<String> downloadUrlOverrideForTests = new ThreadLocal<>();
 
     /**
+     * When set (same-package tests only), used as the base URL for
+     * {@link #ensureFilesExistFromBaseUrl} instead of the env-var value.
+     */
+    public static final ThreadLocal<String> downloadBaseUrlOverrideForTests = new ThreadLocal<>();
+
+    /**
+     * When set, returned as the GCS list API JSON response body instead of making a real HTTP call.
+     */
+    public static final ThreadLocal<String> gcsListResponseOverrideForTests = new ThreadLocal<>();
+
+    /**
+     * When set, replaces {@code https://storage.googleapis.com/storage/v1/b} as the GCS list API base.
+     * Allows tests to point the list API at a local HTTP server.
+     */
+    public static final ThreadLocal<String> gcsApiBaseUrlOverrideForTests = new ThreadLocal<>();
+
+    /**
      * When set (same-package tests only), minimum milliseconds between download progress log lines.
      * Default production behavior uses 10000 ms.
      */
@@ -39,14 +65,12 @@ public class FileDownloader {
         File file = new File(filePath);
 
         if (file.exists() && file.length() > 0) {
-            // Validate existing Parquet file has correct magic bytes
-            if (isValidParquetFile(file)) {
+            if (!filePath.endsWith(".parquet") || isValidParquetFile(file)) {
                 logger.info("File already exists locally: {} ({} bytes)", filePath, file.length());
                 return;
-            } else {
-                logger.warn("Existing file is corrupted, deleting: {}", filePath);
-                file.delete();
             }
+            logger.warn("Existing Parquet file is corrupted, deleting: {}", filePath);
+            file.delete();
         }
 
         // File doesn't exist or is corrupted, download from URL
@@ -154,6 +178,179 @@ public class FileDownloader {
         } finally {
             connection.disconnect();
         }
+    }
+
+    /**
+     * Ensure all files described by {@code localGlobPath} exist locally, downloading any that
+     * are missing from {@code ${baseUrl}/${filename}}.
+     *
+     * <p>The base URL (read from {@code baseUrlEnvVar}) is a plain URL prefix with no glob
+     * characters, e.g. {@code https://storage.googleapis.com/bucket/prefix}.  Filenames are
+     * derived from the local path pattern:</p>
+     * <ul>
+     *   <li>No glob — the single filename is taken from the local path.</li>
+     *   <li>{@code [X-Y]} ranges — enumerated without a network call.</li>
+     *   <li>{@code *} — a GCS URL is constructed from base + filename pattern and the GCS
+     *       JSON list API is called to discover matching objects.</li>
+     * </ul>
+     */
+    public static void ensureFilesExistFromBaseUrl(String localGlobPath, String baseUrlEnvVar)
+            throws Exception {
+        java.nio.file.Path localPath = Paths.get(localGlobPath);
+        java.nio.file.Path localDir  = localPath.getParent();
+        if (localDir == null) localDir = Paths.get(".");
+        String filenamePattern = localPath.getFileName().toString();
+
+        // Fast path: if all expected files already exist locally, skip the URL entirely.
+        if (allFilesExistLocally(localDir, filenamePattern)) {
+            logger.info("All files already present locally, skipping download.");
+            return;
+        }
+
+        String baseUrl = downloadBaseUrlOverrideForTests.get();
+        if (baseUrl == null) {
+            baseUrl = System.getenv(baseUrlEnvVar);
+        }
+        if (baseUrl == null || baseUrl.isEmpty()) {
+            throw new RuntimeException("Base URL not set in env var: " + baseUrlEnvVar);
+        }
+        // If the URL contains glob characters it is a full URL pattern, not a bare base URL.
+        // Strip the filename portion so we get the directory-level base for constructing
+        // per-file download URLs (e.g. "https://host/bucket/part-000[0-4].ndjson.gz"
+        // becomes "https://host/bucket").
+        String trimmedBase;
+        if (baseUrl.contains("[") || baseUrl.contains("*")) {
+            int lastSlash = baseUrl.lastIndexOf('/');
+            trimmedBase = lastSlash > 0 ? baseUrl.substring(0, lastSlash) : baseUrl;
+        } else {
+            trimmedBase = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        }
+        localDir.toFile().mkdirs();
+
+        List<String> filenames = expandFilenamePattern(filenamePattern, trimmedBase);
+        for (String filename : filenames) {
+            File localFile = localDir.resolve(filename).toFile();
+            if (!localFile.exists() || localFile.length() == 0) {
+                downloadFile(trimmedBase + "/" + filename, localFile);
+            } else {
+                logger.info("File already exists: {}", localFile.getPath());
+            }
+        }
+    }
+
+    private static boolean allFilesExistLocally(java.nio.file.Path dir, String pattern) {
+        if (!pattern.contains("*") && !pattern.contains("?") && !pattern.contains("[")) {
+            File f = dir.resolve(pattern).toFile();
+            return f.exists() && f.length() > 0;
+        }
+        if (!pattern.contains("*") && !pattern.contains("?")) {
+            // Character range — enumerate locally without hitting the network
+            for (String filename : DatasetReaderFactory.enumerateGlobPattern(pattern)) {
+                File f = dir.resolve(filename).toFile();
+                if (!f.exists() || f.length() == 0) return false;
+            }
+            return true;
+        }
+        // Wildcard (*/?): use filesystem glob to check if anything is present
+        try {
+            List<String> existing = DatasetReaderFactory.expandGlob(dir.resolve(pattern).toString());
+            return !existing.isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static List<String> expandFilenamePattern(String pattern, String baseUrl) throws Exception {
+        if (pattern.contains("[")) {
+            return DatasetReaderFactory.enumerateGlobPattern(pattern);
+        }
+        if (pattern.contains("*")) {
+            String urlPattern = baseUrl + "/" + pattern;
+            return extractFilenamesFromUrls(expandGcsWildcardUrl(urlPattern));
+        }
+        return List.of(pattern);
+    }
+
+    private static List<String> extractFilenamesFromUrls(List<String> urls) {
+        List<String> names = new ArrayList<>();
+        for (String url : urls) {
+            names.add(url.substring(url.lastIndexOf('/') + 1));
+        }
+        return names;
+    }
+
+    private static List<String> expandGcsWildcardUrl(String urlPattern) throws Exception {
+        // Allow tests to inject any URL pattern by having the list response pre-set.
+        // In production, only GCS URLs are supported.
+        if (gcsListResponseOverrideForTests.get() == null
+                && gcsApiBaseUrlOverrideForTests.get() == null
+                && !urlPattern.contains("storage.googleapis.com")) {
+            throw new IllegalArgumentException(
+                "Wildcard (*) URL patterns are only supported for GCS URLs "
+                + "(storage.googleapis.com). Use [X-Y] ranges for other URLs: " + urlPattern);
+        }
+
+        // Parse the URL: extract the base (up to and including the last '/' before '*'),
+        // the filename prefix, and the filename suffix.
+        int starIdx = urlPattern.indexOf('*');
+        int lastSlashBeforeStar = urlPattern.lastIndexOf('/', starIdx);
+        String urlBase    = urlPattern.substring(0, lastSlashBeforeStar + 1);
+        String filePrefix = urlPattern.substring(lastSlashBeforeStar + 1, starIdx);
+        String fileSuffix = urlPattern.substring(starIdx + 1);
+
+        // Parse bucket from a GCS URL; fall back to a placeholder for non-GCS test URLs.
+        String bucket;
+        if (urlPattern.contains("storage.googleapis.com")) {
+            String host = "storage.googleapis.com/";
+            int bucketStart = urlPattern.indexOf(host) + host.length();
+            int slashAfterBucket = urlPattern.indexOf('/', bucketStart);
+            bucket = urlPattern.substring(bucketStart, slashAfterBucket);
+        } else {
+            bucket = "test-bucket"; // only reachable in test mode (non-GCS URL, overrides active)
+        }
+        List<String> objectNames = listGcsObjectNames(bucket, filePrefix);
+
+        List<String> urls = new ArrayList<>();
+        for (String name : objectNames) {
+            String filename = name.substring(name.lastIndexOf('/') + 1);
+            if (filename.startsWith(filePrefix) && filename.endsWith(fileSuffix)) {
+                urls.add(urlBase + filename);
+            }
+        }
+        return urls;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> listGcsObjectNames(String bucket, String prefix) throws Exception {
+        String json = gcsListResponseOverrideForTests.get();
+        if (json == null) {
+            String apiBase = gcsApiBaseUrlOverrideForTests.get();
+            if (apiBase == null) apiBase = "https://storage.googleapis.com/storage/v1/b";
+            String listUrl = apiBase + "/"
+                + URLEncoder.encode(bucket, StandardCharsets.UTF_8)
+                + "/o?prefix=" + URLEncoder.encode(prefix, StandardCharsets.UTF_8);
+            HttpURLConnection conn = (HttpURLConnection) new URL(listUrl).openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(10_000);
+            conn.setReadTimeout(30_000);
+            if (conn.getResponseCode() != 200) {
+                throw new RuntimeException("GCS list API returned HTTP " + conn.getResponseCode()
+                    + " for bucket=" + bucket + " prefix=" + prefix);
+            }
+            try (InputStream in = conn.getInputStream()) {
+                json = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            } finally {
+                conn.disconnect();
+            }
+        }
+        Map<String, Object> body = new ObjectMapper().readValue(json, new TypeReference<>() {});
+        List<Map<String, Object>> items = (List<Map<String, Object>>) body.get("items");
+        if (items == null) return List.of();
+        List<String> names = new ArrayList<>();
+        for (Map<String, Object> item : items) {
+            names.add((String) item.get("name"));
+        }
+        return names;
     }
 
     /**

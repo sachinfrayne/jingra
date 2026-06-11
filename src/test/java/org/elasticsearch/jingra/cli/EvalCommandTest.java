@@ -130,6 +130,47 @@ class EvalCommandTest {
     }
 
     @Test
+    void run_whenQueriesUrlBaseEnvSet_filePresent_runsWithoutDownload() throws Exception {
+        jingraConfig.getActiveDataset().getPath().setQueriesUrlBaseEnv("UNUSED_BASE_URL_ENV");
+        MockBenchmarkEngine engine = new MockBenchmarkEngine();
+        MockResultsSink sink = new MockResultsSink();
+        EvalCommand.run(jingraConfig, c -> engine, c -> List.of(sink));
+        assertTrue(engine.queryCount > 0);
+    }
+
+    @Test
+    void run_whenQueriesUrlBaseEnvSet_fileMissing_downloadsFile(@org.junit.jupiter.api.io.TempDir java.nio.file.Path tmpDir)
+            throws Exception {
+        byte[] body = new byte[]{1, 2, 3};
+        com.sun.net.httpserver.HttpServer server =
+            com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+        String filename = "test_vector_queries.parquet";
+        server.createContext("/base/" + filename, ex -> {
+            ex.getResponseHeaders().set("Content-Type", "application/octet-stream");
+            ex.sendResponseHeaders(200, body.length);
+            try (java.io.OutputStream os = ex.getResponseBody()) { os.write(body); }
+        });
+        server.setExecutor(null);
+        server.start();
+        try {
+            int port = server.getAddress().getPort();
+            org.elasticsearch.jingra.utils.FileDownloader.downloadBaseUrlOverrideForTests
+                .set("http://127.0.0.1:" + port + "/base");
+            java.nio.file.Path localQueries = tmpDir.resolve(filename);
+            jingraConfig.getActiveDataset().getPath().setQueriesPath(localQueries.toString());
+            jingraConfig.getActiveDataset().getPath().setQueriesUrlBaseEnv("DATASET_QUERIES_URL");
+            MockBenchmarkEngine engine = new MockBenchmarkEngine();
+            // The query file is 3 garbage bytes so EvalCommand fails reading it, but the download happened
+            assertThrows(RuntimeException.class,
+                () -> EvalCommand.run(jingraConfig, c -> engine, c -> List.of(new MockResultsSink())));
+            assertTrue(localQueries.toFile().exists(), "file should have been downloaded");
+        } finally {
+            server.stop(0);
+            org.elasticsearch.jingra.utils.FileDownloader.downloadBaseUrlOverrideForTests.remove();
+        }
+    }
+
+    @Test
     void privateCtor() throws Exception {
         var cl = Class.forName("org.elasticsearch.jingra.cli.EvalCommand");
         var ctor = cl.getDeclaredConstructor();

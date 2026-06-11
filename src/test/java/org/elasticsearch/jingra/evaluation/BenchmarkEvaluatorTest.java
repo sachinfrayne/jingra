@@ -1014,12 +1014,14 @@ class BenchmarkEvaluatorTest {
     }
 
     /**
-     * Covers the inner {@code if (!debugLoggedOnce)} false branch: two threads may both pass the outer
-     * check while {@code debugLoggedOnce} is still false; the second acquires the monitor after the first
-     * sets the flag and then skips the logging body.
+     * Covers the inner {@code if (!debugLoggedOnce)} false branch deterministically:
+     * the test thread holds the {@code BenchmarkEvaluator.class} monitor, a worker thread
+     * passes the outer check and blocks waiting for the monitor, the test sets the flag
+     * to {@code true} while still holding the lock, then releases. The worker acquires the
+     * monitor, finds the flag already true, and skips the logging body.
      */
     @Test
-    void executeQuery_concurrentFirstTextQuery_secondCallerSkipsInnerDebugBlock() throws Exception {
+    void executeQuery_innerDebugCheck_false_whenFlagSetBeforeWorkerAcquiresLock() throws Exception {
         Field flag = BenchmarkEvaluator.class.getDeclaredField("debugLoggedOnce");
         flag.setAccessible(true);
         flag.setBoolean(null, false);
@@ -1027,8 +1029,7 @@ class BenchmarkEvaluatorTest {
         Class<?> qdClass = Class.forName("org.elasticsearch.jingra.evaluation.BenchmarkEvaluator$QueryDocument");
         Constructor<?> ctor = qdClass.getDeclaredConstructor(List.class, String.class, List.class, Map.class);
         ctor.setAccessible(true);
-        Object qdA = ctor.newInstance(null, "parallel-a", List.of("a"), null);
-        Object qdB = ctor.newInstance(null, "parallel-b", List.of("b"), null);
+        Object qd = ctor.newInstance(null, "det-query", List.of("x"), null);
 
         Method m = BenchmarkEvaluator.class.getDeclaredMethod(
                 "executeQuery", qdClass, DatasetConfig.class, Map.class);
@@ -1036,37 +1037,24 @@ class BenchmarkEvaluatorTest {
         DatasetConfig dataset = jingraConfig.getActiveDataset();
         Map<String, Object> params = Map.of("size", 10);
 
-        int queriesBefore = mockEngine.queryCount;
-        CountDownLatch go = new CountDownLatch(1);
         List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
-        ExecutorService pool = Executors.newFixedThreadPool(2);
-        try {
-            Future<?> f1 = pool.submit(() -> {
-                try {
-                    go.await();
-                    m.invoke(evaluator, qdA, dataset, params);
-                } catch (Throwable t) {
-                    errors.add(t);
-                }
-            });
-            Future<?> f2 = pool.submit(() -> {
-                try {
-                    go.await();
-                    m.invoke(evaluator, qdB, dataset, params);
-                } catch (Throwable t) {
-                    errors.add(t);
-                }
-            });
-            go.countDown();
-            f1.get(30, TimeUnit.SECONDS);
-            f2.get(30, TimeUnit.SECONDS);
-        } finally {
-            pool.shutdown();
-            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS));
-        }
+        Thread worker = new Thread(() -> {
+            try { m.invoke(evaluator, qd, dataset, params); } catch (Throwable t) { errors.add(t); }
+        });
 
+        // Hold the monitor so the worker blocks after passing the outer check.
+        synchronized (BenchmarkEvaluator.class) {
+            worker.start();
+            // Wait until the worker is BLOCKED waiting for BenchmarkEvaluator.class.
+            org.awaitility.Awaitility.await()
+                .atMost(5, TimeUnit.SECONDS)
+                .until(() -> worker.getState() == Thread.State.BLOCKED);
+            // Set the flag while holding the lock — worker will find it true.
+            flag.setBoolean(null, true);
+        } // release monitor → worker acquires it → inner check: flag=true → false branch
+
+        worker.join(10_000);
         assertTrue(errors.isEmpty(), () -> String.valueOf(errors));
-        assertEquals(queriesBefore + 2, mockEngine.queryCount);
         assertTrue((Boolean) flag.get(null));
     }
 

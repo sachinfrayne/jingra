@@ -867,6 +867,45 @@ class LoadCommandTest {
     }
 
     @Test
+    void run_whenDataUrlBaseEnvSet_filesPresent_loadsWithoutDownload(@TempDir java.nio.file.Path tmpDir) throws Exception {
+        java.nio.file.Files.write(tmpDir.resolve("part-0000.ndjson.gz"), new byte[]{1, 2, 3});
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
+        JingraConfig config = buildLoadConfig(tmpDir + "/part-000[0-0].ndjson.gz");
+        config.getActiveDataset().getPath().setDataUrlBaseEnv("UNUSED_BASE_URL_ENV");
+        TrackingMock engine = new TrackingMock();
+        LoadCommand.run(config, c -> engine);
+        assertTrue(engine.ingestCalls >= 1);
+    }
+
+    @Test
+    void run_whenDataUrlBaseEnvSet_filesMissing_downloadsAndLoads(@TempDir java.nio.file.Path tmpDir) throws Exception {
+        byte[] body = new byte[]{1, 2, 3};
+        com.sun.net.httpserver.HttpServer server =
+            com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+        server.createContext("/base/part-0000.ndjson.gz", ex -> {
+            ex.getResponseHeaders().set("Content-Type", "application/octet-stream");
+            ex.sendResponseHeaders(200, body.length);
+            try (java.io.OutputStream os = ex.getResponseBody()) { os.write(body); }
+        });
+        server.setExecutor(null);
+        server.start();
+        try {
+            int port = server.getAddress().getPort();
+            org.elasticsearch.jingra.utils.FileDownloader.downloadBaseUrlOverrideForTests
+                .set("http://127.0.0.1:" + port + "/base");
+            LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
+            JingraConfig config = buildLoadConfig(tmpDir + "/part-000[0-0].ndjson.gz");
+            config.getActiveDataset().getPath().setDataUrlBaseEnv("DATASET_DATA_URL");
+            TrackingMock engine = new TrackingMock();
+            LoadCommand.run(config, c -> engine);
+            assertTrue(engine.ingestCalls >= 1);
+        } finally {
+            server.stop(0);
+            org.elasticsearch.jingra.utils.FileDownloader.downloadBaseUrlOverrideForTests.remove();
+        }
+    }
+
+    @Test
     void run_whenQuestionMarkGlobDataPathHasNoMatches_throwsDataFileNotFound(@TempDir java.nio.file.Path tmpDir) {
         // exercises the path.contains("?") branch in dataPathExists
         LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));

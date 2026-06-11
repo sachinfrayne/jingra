@@ -211,9 +211,12 @@ public final class LoadCommand {
         }
 
         String dataPath = dataset.getPath().getDataPath();
-        String dataUrlEnv = dataset.getPath().getDataUrlEnv();
-        if (dataUrlEnv != null) {
-            FileDownloader.ensureFileExists(dataPath, dataUrlEnv);
+        String dataUrlBaseEnv = dataset.getPath().getDataUrlBaseEnv();
+        String dataUrlEnv    = dataset.getPath().getDataUrlEnv();
+        if (dataUrlBaseEnv != null) {
+            FileDownloader.ensureFilesExistFromBaseUrl(dataPath, dataUrlBaseEnv);
+        } else if (dataUrlEnv != null) {
+            FileDownloader.ensureFilesExistFromBaseUrl(dataPath, dataUrlEnv);
         } else if (!dataPathExists(dataPath)) {
             throw new RuntimeException("Data file not found: " + dataPath);
         }
@@ -221,7 +224,7 @@ public final class LoadCommand {
 
         DatasetReader reader = datasetReaderFactory.apply(dataPath);
         long rowCount = reader.getRowCount();
-        logger.info("Parquet file contains {} documents", rowCount);
+        logger.info("Dataset contains {} documents", rowCount);
 
         String idField = dataset.getDataMapping() != null ? dataset.getDataMapping().getIdField() : null;
         LoadConfig load = config.getLoad();
@@ -242,12 +245,12 @@ public final class LoadCommand {
 
         ExecutorService executor = loadExecutorFactory.apply(numThreads, queueCapacity);
 
-        // Use same number of threads for Parquet conversion as for ES ingestion
+        // Use same number of threads for document conversion as for ES ingestion
         // This ensures conversion keeps pace with ingestion without excessive thread contention
         int conversionThreads = numThreads;
 
         logger.info("Starting parallel ingestion with {} threads (queue capacity: {})...", numThreads, queueCapacity);
-        logger.info("Using {} threads for parallel Parquet conversion", conversionThreads);
+        logger.info("Using {} threads for parallel document conversion", conversionThreads);
 
         reader.readInBatches(batchSize, conversionThreads, batch -> {
             while (true) {
@@ -319,7 +322,7 @@ public final class LoadCommand {
 
         if (finalCount != rowCount) {
             throw new IllegalStateException(
-                    String.format("Ingested %d documents but parquet row count is %d (incomplete load)", finalCount, rowCount));
+                    String.format("Ingested %d documents but source row count is %d (incomplete load)", finalCount, rowCount));
         }
 
         if (config.getLoad() != null && config.getLoad().isAwaitIndexReady()) {

@@ -64,9 +64,12 @@ public final class EvalCommand {
                 logger.info("Dataset '{}' index '{}' contains {} documents", datasetName, indexName, docCount);
 
                 String queriesPath = dataset.getPath().getQueriesPath();
-                String queriesUrlEnv = dataset.getPath().getQueriesUrlEnv();
-                if (queriesUrlEnv != null) {
-                    FileDownloader.ensureFileExists(queriesPath, queriesUrlEnv);
+                String queriesUrlBaseEnv = dataset.getPath().getQueriesUrlBaseEnv();
+                String queriesUrlEnv     = dataset.getPath().getQueriesUrlEnv();
+                if (queriesUrlBaseEnv != null) {
+                    FileDownloader.ensureFilesExistFromBaseUrl(queriesPath, queriesUrlBaseEnv);
+                } else if (queriesUrlEnv != null) {
+                    FileDownloader.ensureFilesExistFromBaseUrl(queriesPath, queriesUrlEnv);
                 } else if (!new java.io.File(queriesPath).exists()) {
                     throw new RuntimeException("Queries file not found: " + queriesPath);
                 }
