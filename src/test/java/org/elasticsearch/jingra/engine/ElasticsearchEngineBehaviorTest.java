@@ -1185,6 +1185,156 @@ class ElasticsearchEngineBehaviorTest {
         assertEquals(1, captured.get().operations().size());
     }
 
+    // ── Data stream HTTP operations ───────────────────────────────────────────────
+
+    @Test
+    void dataStreamExistsOperation_returns_true_on_200() throws Exception {
+        com.sun.net.httpserver.HttpServer srv = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress(0), 0);
+        srv.createContext("/_data_stream/metrics", ex -> {
+            ex.sendResponseHeaders(200, 2); ex.getResponseBody().write("{}".getBytes()); ex.close();
+        });
+        srv.setExecutor(null); srv.start();
+        Rest5Client rc = Rest5Client.builder(new HttpHost("http", "127.0.0.1", srv.getAddress().getPort())).build();
+        try {
+            ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+            injectRestClient(e, rc);
+            Method m = ElasticsearchEngine.class.getDeclaredMethod("dataStreamExistsOperation", String.class);
+            m.setAccessible(true);
+            assertTrue((Boolean) m.invoke(e, "metrics"));
+        } finally { rc.close(); srv.stop(0); }
+    }
+
+    @Test
+    void dataStreamExistsOperation_returns_false_on_404() throws Exception {
+        com.sun.net.httpserver.HttpServer srv = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress(0), 0);
+        srv.createContext("/_data_stream/missing", ex -> {
+            ex.sendResponseHeaders(404, 2); ex.getResponseBody().write("{}".getBytes()); ex.close();
+        });
+        srv.setExecutor(null); srv.start();
+        Rest5Client rc = Rest5Client.builder(new HttpHost("http", "127.0.0.1", srv.getAddress().getPort())).build();
+        try {
+            ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+            injectRestClient(e, rc);
+            Method m = ElasticsearchEngine.class.getDeclaredMethod("dataStreamExistsOperation", String.class);
+            m.setAccessible(true);
+            assertFalse((Boolean) m.invoke(e, "missing"));
+        } finally { rc.close(); srv.stop(0); }
+    }
+
+    @Test
+    void applyIlmPolicyOperation_sendsCorrectRequest() throws Exception {
+        AtomicReference<String> method = new AtomicReference<>();
+        AtomicReference<String> body = new AtomicReference<>();
+        com.sun.net.httpserver.HttpServer srv = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress(0), 0);
+        srv.createContext("/_ilm/policy/test-policy", ex -> {
+            method.set(ex.getRequestMethod());
+            body.set(new String(ex.getRequestBody().readAllBytes()));
+            ex.sendResponseHeaders(200, 2); ex.getResponseBody().write("{}".getBytes()); ex.close();
+        });
+        srv.setExecutor(null); srv.start();
+        Rest5Client rc = Rest5Client.builder(new HttpHost("http", "127.0.0.1", srv.getAddress().getPort())).build();
+        try {
+            ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+            injectRestClient(e, rc);
+            Method m = ElasticsearchEngine.class.getDeclaredMethod("applyIlmPolicyOperation", String.class, String.class);
+            m.setAccessible(true);
+            m.invoke(e, "test-policy", "{\"policy\":{}}");
+            assertEquals("PUT", method.get());
+            assertTrue(body.get().contains("policy"));
+        } finally { rc.close(); srv.stop(0); }
+    }
+
+    @Test
+    void applyIndexTemplateOperation_sendsCorrectRequest() throws Exception {
+        AtomicReference<String> method = new AtomicReference<>();
+        com.sun.net.httpserver.HttpServer srv = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress(0), 0);
+        srv.createContext("/_index_template/test-template", ex -> {
+            method.set(ex.getRequestMethod());
+            ex.getRequestBody().readAllBytes();
+            ex.sendResponseHeaders(200, 2); ex.getResponseBody().write("{}".getBytes()); ex.close();
+        });
+        srv.setExecutor(null); srv.start();
+        Rest5Client rc = Rest5Client.builder(new HttpHost("http", "127.0.0.1", srv.getAddress().getPort())).build();
+        try {
+            ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+            injectRestClient(e, rc);
+            Method m = ElasticsearchEngine.class.getDeclaredMethod("applyIndexTemplateOperation", String.class, String.class);
+            m.setAccessible(true);
+            m.invoke(e, "test-template", "{\"index_patterns\":[\"metrics\"]}");
+            assertEquals("PUT", method.get());
+        } finally { rc.close(); srv.stop(0); }
+    }
+
+    @Test
+    void createDataStreamOperation_sendsCorrectRequest() throws Exception {
+        AtomicReference<String> method = new AtomicReference<>();
+        com.sun.net.httpserver.HttpServer srv = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress(0), 0);
+        srv.createContext("/_data_stream/metrics", ex -> {
+            method.set(ex.getRequestMethod());
+            ex.sendResponseHeaders(200, 2); ex.getResponseBody().write("{}".getBytes()); ex.close();
+        });
+        srv.setExecutor(null); srv.start();
+        Rest5Client rc = Rest5Client.builder(new HttpHost("http", "127.0.0.1", srv.getAddress().getPort())).build();
+        try {
+            ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+            injectRestClient(e, rc);
+            Method m = ElasticsearchEngine.class.getDeclaredMethod("createDataStreamOperation", String.class);
+            m.setAccessible(true);
+            m.invoke(e, "metrics");
+            assertEquals("PUT", method.get());
+        } finally { rc.close(); srv.stop(0); }
+    }
+
+    @Test
+    void deleteDataStreamOperation_sendsCorrectRequest() throws Exception {
+        AtomicReference<String> method = new AtomicReference<>();
+        com.sun.net.httpserver.HttpServer srv = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress(0), 0);
+        srv.createContext("/_data_stream/metrics", ex -> {
+            method.set(ex.getRequestMethod());
+            ex.sendResponseHeaders(200, 2); ex.getResponseBody().write("{}".getBytes()); ex.close();
+        });
+        srv.setExecutor(null); srv.start();
+        Rest5Client rc = Rest5Client.builder(new HttpHost("http", "127.0.0.1", srv.getAddress().getPort())).build();
+        try {
+            ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+            injectRestClient(e, rc);
+            Method m = ElasticsearchEngine.class.getDeclaredMethod("deleteDataStreamOperation", String.class);
+            m.setAccessible(true);
+            m.invoke(e, "metrics");
+            assertEquals("DELETE", method.get());
+        } finally { rc.close(); srv.stop(0); }
+    }
+
+    @Test
+    void loadIlmFile_readsFromFilesystem() throws Exception {
+        Path ilmDir = Path.of("jingra-config/ilm");
+        Files.createDirectories(ilmDir);
+        Path pf = ilmDir.resolve("test-ilm-real.json");
+        Files.writeString(pf, "{\"policy\":{}}");
+        try {
+            Method m = ElasticsearchEngine.class.getDeclaredMethod("loadIlmFile", String.class);
+            m.setAccessible(true);
+            Object result = m.invoke(new ElasticsearchEngine(new HashMap<>()), "test-ilm-real.json");
+            assertNotNull(result);
+            assertTrue(result.toString().contains("policy"));
+        } finally { Files.deleteIfExists(pf); }
+    }
+
+    @Test
+    void loadIlmFile_returnsNullWhenNotFound() throws Exception {
+        Method m = ElasticsearchEngine.class.getDeclaredMethod("loadIlmFile", String.class);
+        m.setAccessible(true);
+        ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+        Object result = m.invoke(e, "nonexistent-xyz-policy.json");
+        assertNull(result);
+    }
+
     @Test
     void ingestBulkErrorsWithNullItemErrorStillCountsAsFailure() throws Exception {
         BulkResponseItem okItem = BulkResponseItem.of(b -> b.operationType(OperationType.Index).index("idx").status(201));

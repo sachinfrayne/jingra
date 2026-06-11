@@ -11,9 +11,12 @@ import co.elastic.clients.elasticsearch.core.search.TotalHitsRelation;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.mockito.Mockito;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -241,6 +244,155 @@ class ElasticsearchOfflineCoverageTest {
         } finally {
             assertDoesNotThrow(e::close);
         }
+    }
+
+    // ── Data stream tests ──────────────────────────────────────────────────────────
+
+    @Test
+    void dataStream_dataStoreExists_callsDataStreamApi() throws Exception {
+        AtomicBoolean called = new AtomicBoolean(false);
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("data_stream", true)) {
+            @Override protected boolean hasClient() { return true; }
+            @Override protected boolean dataStreamExistsOperation(String n) { called.set(true); return true; }
+        };
+        assertTrue(e.dataStoreExists("metrics"));
+        assertTrue(called.get());
+    }
+
+    @Test
+    void noDataStream_dataStoreExists_usesRegularIndex() {
+        AtomicBoolean called = new AtomicBoolean(false);
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of()) {
+            @Override protected boolean hasClient() { return true; }
+            @Override protected boolean dataStoreExistsOperation(String n) throws Exception { called.set(true); return false; }
+        };
+        assertFalse(e.dataStoreExists("metrics"));
+        assertTrue(called.get());
+    }
+
+    @Test
+    void dataStream_createDataStore_appliesPolicyThenTemplateThendataStream() throws Exception {
+        List<String> ops = new ArrayList<>();
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("data_stream", true)) {
+            @Override protected boolean hasClient() { return true; }
+            @Override protected boolean dataStreamExistsOperation(String n) { return false; }
+            @Override protected String loadIlmFile(String f) { return "{}"; }
+            @Override protected void applyIlmPolicyOperation(String n, String j) { ops.add("policy:" + n); }
+            @Override protected void applyIndexTemplateOperation(String n, String j) { ops.add("template:" + n); }
+            @Override protected void createDataStreamOperation(String n) { ops.add("stream:" + n); }
+        };
+        assertTrue(e.createDataStore("metrics", "metrics-schema"));
+        assertEquals(List.of("policy:metrics-policy", "template:metrics-template", "stream:metrics"), ops);
+    }
+
+    @Test
+    void dataStream_createDataStore_returnsFalseWhenAlreadyExists() {
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("data_stream", true)) {
+            @Override protected boolean hasClient() { return true; }
+            @Override protected boolean dataStreamExistsOperation(String n) { return true; }
+        };
+        assertFalse(e.createDataStore("metrics", "metrics-schema"));
+    }
+
+    @Test
+    void dataStream_createDataStore_loadsIlmFilesForIndexName() throws Exception {
+        List<String> loaded = new ArrayList<>();
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("data_stream", true)) {
+            @Override protected boolean hasClient() { return true; }
+            @Override protected boolean dataStreamExistsOperation(String n) { return false; }
+            @Override protected String loadIlmFile(String f) { loaded.add(f); return "{}"; }
+            @Override protected void applyIlmPolicyOperation(String n, String j) {}
+            @Override protected void applyIndexTemplateOperation(String n, String j) {}
+            @Override protected void createDataStreamOperation(String n) {}
+        };
+        assertTrue(e.createDataStore("metrics", null));
+        assertTrue(loaded.contains("metrics-policy.json"));
+        assertTrue(loaded.contains("metrics-template.json"));
+    }
+
+    @Test
+    void dataStream_createDataStore_returnsFalseOnOperationException() throws Exception {
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("data_stream", true)) {
+            @Override protected boolean hasClient() { return true; }
+            @Override protected boolean dataStreamExistsOperation(String n) { return false; }
+            @Override protected String loadIlmFile(String f) { return "{}"; }
+            @Override protected void applyIlmPolicyOperation(String n, String j) throws Exception {
+                throw new Exception("failed to apply policy");
+            }
+        };
+        assertFalse(e.createDataStore("metrics", null));
+    }
+
+    @Test
+    void dataStream_createDataStore_returnsFalseWhenPolicyFileMissing() {
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("data_stream", true)) {
+            @Override protected boolean hasClient() { return true; }
+            @Override protected boolean dataStreamExistsOperation(String n) { return false; }
+            @Override protected String loadIlmFile(String f) { return null; } // both null
+        };
+        assertFalse(e.createDataStore("metrics", null));
+    }
+
+    @Test
+    void dataStream_createDataStore_returnsFalseWhenTemplateFileMissing() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("data_stream", true)) {
+            @Override protected boolean hasClient() { return true; }
+            @Override protected boolean dataStreamExistsOperation(String n) { return false; }
+            @Override protected String loadIlmFile(String f) throws java.io.IOException {
+                return calls.getAndIncrement() == 0 ? "{}" : null; // policy ok, template null
+            }
+        };
+        assertFalse(e.createDataStore("metrics", null));
+    }
+
+    @Test
+    void dataStream_resetDataStore_callsDeleteApi() throws Exception {
+        AtomicBoolean called = new AtomicBoolean(false);
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("data_stream", true)) {
+            @Override protected boolean hasClient() { return true; }
+            @Override protected void deleteDataStreamOperation(String n) { called.set(true); }
+        };
+        assertTrue(e.resetDataStore("metrics"));
+        assertTrue(called.get());
+    }
+
+    @Test
+    void dataStream_resetDataStore_404IsIdempotent() {
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("data_stream", true)) {
+            @Override protected boolean hasClient() { return true; }
+            @Override protected void deleteDataStreamOperation(String n) throws Exception {
+                throw new Exception("404 data_stream_not_found");
+            }
+        };
+        assertTrue(e.resetDataStore("metrics"));
+    }
+
+    @Test
+    void noDataStream_createDataStore_usesRegularIndex() throws Exception {
+        AtomicBoolean called = new AtomicBoolean(false);
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of()) {
+            @Override protected boolean hasClient() { return true; }
+            @Override protected boolean dataStoreExistsOperation(String n) { return false; }
+            @Override protected void createDataStoreOperation(String n, String s) { called.set(true); }
+            @Override protected JsonNode loadSchemaTemplate(String n) {
+                try { return AbstractBenchmarkEngine.objectMapper.readTree("{\"mappings\":{}}"); }
+                catch (Exception ex) { throw new RuntimeException(ex); }
+            }
+        };
+        e.createDataStore("metrics", "metrics-schema");
+        assertTrue(called.get());
+    }
+
+    @Test
+    void noDataStream_resetDataStore_usesRegularIndex() throws Exception {
+        AtomicBoolean called = new AtomicBoolean(false);
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of()) {
+            @Override protected boolean hasClient() { return true; }
+            @Override protected void resetDataStoreOperation(String n) { called.set(true); }
+        };
+        assertTrue(e.resetDataStore("metrics"));
+        assertTrue(called.get());
     }
 
     @Test

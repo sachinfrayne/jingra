@@ -92,6 +92,47 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
         return client.indices().get(GetIndexRequest.of(b -> b.index(indexName)));
     }
 
+    // ── Data stream support ───────────────────────────────────────────────────────
+
+    boolean isDataStream() {
+        return getConfigBoolean("data_stream", false);
+    }
+
+    protected boolean dataStreamExistsOperation(String name) throws Exception {
+        Response response = restClient.performRequest(new Request("GET", "/_data_stream/" + name));
+        return response.getStatusCode() == 200;
+    }
+
+    protected void applyIlmPolicyOperation(String policyName, String policyJson) throws Exception {
+        Request req = new Request("PUT", "/_ilm/policy/" + policyName);
+        req.setJsonEntity(policyJson);
+        restClient.performRequest(req);
+    }
+
+    protected void applyIndexTemplateOperation(String templateName, String templateJson) throws Exception {
+        Request req = new Request("PUT", "/_index_template/" + templateName);
+        req.setJsonEntity(templateJson);
+        restClient.performRequest(req);
+    }
+
+    protected void createDataStreamOperation(String name) throws Exception {
+        restClient.performRequest(new Request("PUT", "/_data_stream/" + name));
+    }
+
+    protected void deleteDataStreamOperation(String name) throws Exception {
+        restClient.performRequest(new Request("DELETE", "/_data_stream/" + name));
+    }
+
+    protected String loadIlmFile(String filename) throws java.io.IOException {
+        java.io.File file = new java.io.File(JINGRA_CONFIG_DIR + "/ilm/" + filename);
+        if (!file.exists()) {
+            logger.error("ILM file '{}' not found in {}/ilm/", filename, JINGRA_CONFIG_DIR);
+            return null;
+        }
+        return new String(java.nio.file.Files.readAllBytes(file.toPath()),
+                java.nio.charset.StandardCharsets.UTF_8);
+    }
+
     protected void createDataStoreOperation(String indexName, String schemaJson) throws Exception {
         // Use the low-level REST client so the schema JSON is sent as raw bytes.
         // The typed CreateIndexRequest.withJson() round-trips through the client's object model,
@@ -232,6 +273,28 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
             return false;
         }
 
+        if (isDataStream()) {
+            if (dataStoreExists(indexName)) {
+                logger.warn("Data stream '{}' already exists", indexName);
+                return false;
+            }
+            try {
+                String policyJson   = loadIlmFile(indexName + "-policy.json");
+                String templateJson = loadIlmFile(indexName + "-template.json");
+                if (policyJson == null || templateJson == null) {
+                    return false;
+                }
+                applyIlmPolicyOperation(indexName + "-policy", policyJson);
+                applyIndexTemplateOperation(indexName + "-template", templateJson);
+                createDataStreamOperation(indexName);
+                logger.info("Created data stream '{}' with ILM policy and index template", indexName);
+                return true;
+            } catch (Exception e) {
+                logger.error("Failed to create data stream '{}'", indexName, e);
+                return false;
+            }
+        }
+
         try {
             // Check if index already exists
             if (dataStoreExists(indexName)) {
@@ -269,6 +332,9 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
             return false;
         }
         try {
+            if (isDataStream()) {
+                return dataStreamExistsOperation(indexName);
+            }
             return dataStoreExistsOperation(indexName);
         } catch (Exception e) {
             logger.error("Failed to check if index exists", e);
@@ -281,6 +347,17 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
         if (!hasClient()) {
             logger.error("Elasticsearch client not initialized");
             return false;
+        }
+
+        if (isDataStream()) {
+            try {
+                deleteDataStreamOperation(indexName);
+                logger.info("Deleted data stream '{}'", indexName);
+                return true;
+            } catch (Exception e) {
+                logger.info("Data stream '{}' delete: {} (treating as idempotent)", indexName, e.getMessage());
+                return true;
+            }
         }
 
         try {
