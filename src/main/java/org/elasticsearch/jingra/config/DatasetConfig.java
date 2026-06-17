@@ -23,6 +23,18 @@ public class DatasetConfig {
     @JsonProperty("schema_name")
     private String schemaName;
 
+    @JsonProperty("ilm_policy")
+    private String ilmPolicy;
+
+    @JsonProperty("index_template")
+    private String indexTemplate;
+
+    @JsonProperty("component_template")
+    private String componentTemplate;
+
+    @JsonProperty("timestamp_shift_to_now")
+    private boolean timestampShiftToNow = false;
+
     @JsonProperty("query_name")
     private String queryName;
 
@@ -79,6 +91,38 @@ public class DatasetConfig {
 
     public void setSchemaName(String schemaName) {
         this.schemaName = schemaName;
+    }
+
+    public String getIlmPolicy() {
+        return ilmPolicy;
+    }
+
+    public void setIlmPolicy(String ilmPolicy) {
+        this.ilmPolicy = ilmPolicy;
+    }
+
+    public String getIndexTemplate() {
+        return indexTemplate;
+    }
+
+    public void setIndexTemplate(String indexTemplate) {
+        this.indexTemplate = indexTemplate;
+    }
+
+    public String getComponentTemplate() {
+        return componentTemplate;
+    }
+
+    public void setComponentTemplate(String componentTemplate) {
+        this.componentTemplate = componentTemplate;
+    }
+
+    public boolean isTimestampShiftToNow() {
+        return timestampShiftToNow;
+    }
+
+    public void setTimestampShiftToNow(boolean timestampShiftToNow) {
+        this.timestampShiftToNow = timestampShiftToNow;
     }
 
     public String getQueryName() {

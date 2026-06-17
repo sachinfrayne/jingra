@@ -555,6 +555,16 @@ class ConfigValidatorTest {
     }
 
     @Test
+    void validateForLoad_ok_whenMetricsgenSetAndDataPathAbsent() {
+        JingraConfig c = loadCompleteConfig();
+        c.getActiveDataset().getPath().setDataPath(null); // no data file — metricsgen handles ingest
+        org.elasticsearch.jingra.config.LoadConfig load = new org.elasticsearch.jingra.config.LoadConfig();
+        load.setMetricsgen(new org.elasticsearch.jingra.config.MetricsgenConfig());
+        c.setLoad(load);
+        assertDoesNotThrow(() -> ConfigValidator.validateForLoad(c));
+    }
+
+    @Test
     void validateForLoad_dataPathBlank() {
         JingraConfig c = loadCompleteConfig();
         c.getActiveDataset().getPath().setDataPath("  ");

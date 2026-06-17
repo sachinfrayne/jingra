@@ -1,5 +1,7 @@
 package org.elasticsearch.jingra.engine;
 
+import org.elasticsearch.jingra.config.DatasetConfig;
+import org.elasticsearch.jingra.config.JingraConfig;
 import org.elasticsearch.jingra.model.Document;
 import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
@@ -34,6 +36,15 @@ public interface BenchmarkEngine extends AutoCloseable {
     }
 
     /**
+     * Create a data store for the given dataset, using all dataset-level config
+     * (schema name, ILM policy, index template, etc.).
+     * Default delegates to {@link #createDataStore(String, String)}.
+     */
+    default boolean createDataStore(String indexName, org.elasticsearch.jingra.config.DatasetConfig dataset) {
+        return createDataStore(indexName, dataset != null ? dataset.getSchemaName() : null);
+    }
+
+    /**
      * Check if an index exists.
      *
      * @param indexName the index name
@@ -59,6 +70,18 @@ public interface BenchmarkEngine extends AutoCloseable {
      * @return number of documents successfully ingested
      */
     int ingest(List<Document> documents, String indexName, String idField);
+
+    /**
+     * Insert documents using {@code op_type: create}. No explicit document ID is set; the engine
+     * derives identity from the document content (e.g. Elasticsearch TSID for data streams).
+     * Required for data streams which reject {@code index} operations.
+     *
+     * <p>Default delegates to {@link #ingest} so engines that do not distinguish between
+     * create and index get the existing behaviour for free.</p>
+     */
+    default int create(List<Document> documents, String indexName, String idField) {
+        return ingest(documents, indexName, idField);
+    }
 
     /**
      * Execute a query against the engine.
@@ -134,5 +157,31 @@ public interface BenchmarkEngine extends AutoCloseable {
      */
     default boolean supportsIndexLifecycle() {
         return true;
+    }
+
+    /**
+     * Whether this engine can drive data ingest via the {@code metricsgenreceiver} binary
+     * instead of the standard file-batch path. When {@code true} and {@code load.metricsgen}
+     * is configured, {@code LoadCommand} calls {@link #customLoad} instead of reading files.
+     */
+    default boolean supportsCustomLoad() {
+        return false;
+    }
+
+    /**
+     * Drive data ingest via an external generator (e.g. {@code metricsgenreceiver}).
+     * Called by {@code LoadCommand} only when {@link #supportsCustomLoad()} is {@code true}
+     * and {@code load.metricsgen} is present in config. The engine is responsible for
+     * launching the binary, streaming its output, and returning the number of data points
+     * (or documents) ingested so that the summary log can report them.
+     *
+     * @param config    full benchmark config (for load.metricsgen settings)
+     * @param dataset   the dataset being loaded (for index name, etc.)
+     * @param indexName the resolved index / data-stream name
+     * @return number of data points ingested
+     */
+    default int customLoad(JingraConfig config, DatasetConfig dataset, String indexName) throws Exception {
+        throw new UnsupportedOperationException(
+                getEngineName() + " does not implement customLoad; override supportsCustomLoad() and customLoad()");
     }
 }

@@ -4,6 +4,7 @@ import org.elasticsearch.jingra.config.ConfigLoader;
 import org.elasticsearch.jingra.config.DatasetConfig;
 import org.elasticsearch.jingra.config.JingraConfig;
 import org.elasticsearch.jingra.config.LoadConfig;
+import org.elasticsearch.jingra.config.MetricsgenConfig;
 import org.elasticsearch.jingra.data.DatasetReader;
 import org.elasticsearch.jingra.data.DatasetReaderFactory;
 import org.elasticsearch.jingra.engine.BenchmarkEngine;
@@ -13,9 +14,12 @@ import org.elasticsearch.jingra.utils.RetryHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.concurrent.ExecutorService;
@@ -198,7 +202,7 @@ public final class LoadCommand {
             }
 
             logger.info("Creating index '{}'...", indexName);
-            if (!engine.createDataStore(indexName, dataset.getSchemaName())) {
+            if (!engine.createDataStore(indexName, dataset)) {
                 throw new RuntimeException("Failed to create index");
             }
             logger.info("Index created successfully");
@@ -208,6 +212,33 @@ public final class LoadCommand {
                 throw new RuntimeException("Failed to clear existing data for '" + indexName + "'");
             }
             logger.info("Data cleared successfully");
+        }
+
+        // Custom-load path: engine drives an external binary (e.g. metricsgenreceiver)
+        // instead of reading from a file. Skips DatasetReader, executor, and row-count check.
+        MetricsgenConfig metricsgen = config.getLoad() != null ? config.getLoad().getMetricsgen() : null;
+        if (engine.supportsCustomLoad() && metricsgen != null) {
+            long customStartTime = System.currentTimeMillis();
+            int ingested = engine.customLoad(config, dataset, indexName);
+            if (config.getLoad().isAwaitIndexReady()) {
+                logger.info("Waiting for index '{}' to be ready...", indexName);
+                engine.awaitIndexReady(indexName);
+                logger.info("Index ready; load command complete.");
+            }
+            long customEndTime = System.currentTimeMillis();
+            double customTimeSec = (customEndTime - customStartTime) / 1000.0;
+            logger.info("=".repeat(80));
+            logger.info("Data loading complete!");
+            logger.info("  Total ingested: {} data points", ingested);
+            logger.info("  Total time: {} ({} min)",
+                    String.format("%.1f sec", customTimeSec),
+                    String.format("%.1f", customTimeSec / 60));
+            if (ingested > 0) {
+                double safeTimeSec = Math.max(customTimeSec, 0.001);
+                logger.info("  Average rate: {} dp/sec", String.format("%.0f", ingested / safeTimeSec));
+            }
+            logger.info("=".repeat(80));
+            return;
         }
 
         String dataPath = dataset.getPath().getDataPath();
@@ -225,6 +256,19 @@ public final class LoadCommand {
         DatasetReader reader = datasetReaderFactory.apply(dataPath);
         long rowCount = reader.getRowCount();
         logger.info("Dataset contains {} documents", rowCount);
+
+        // Timestamp rebasing: shift all @timestamp values so the dataset's latest point
+        // lands ~1 minute before now. This makes a once-generated dataset valid forever
+        // regardless of how old the timestamps are.
+        Duration timestampShift = Duration.ZERO;
+        if (dataset.isTimestampShiftToNow()) {
+            Optional<Instant> maxTs = reader.findMaxTimestamp();
+            if (maxTs.isPresent()) {
+                timestampShift = Duration.between(maxTs.get(), Instant.now()).minus(Duration.ofMinutes(1));
+                logger.info("Timestamp shift: {} (rebasing dataset to now)", timestampShift);
+            }
+        }
+        final Duration shift = timestampShift;
 
         String idField = dataset.getDataMapping() != null ? dataset.getDataMapping().getIdField() : null;
         LoadConfig load = config.getLoad();
@@ -253,6 +297,16 @@ public final class LoadCommand {
         logger.info("Using {} threads for parallel document conversion", conversionThreads);
 
         reader.readInBatches(batchSize, conversionThreads, batch -> {
+            if (!shift.isZero()) {
+                for (org.elasticsearch.jingra.model.Document doc : batch) {
+                    Object ts = doc.get("@timestamp");
+                    if (ts instanceof String s) {
+                        try {
+                            doc.put("@timestamp", Instant.parse(s).plus(shift).toString());
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
             while (true) {
                 try {
                     executor.submit(() -> {

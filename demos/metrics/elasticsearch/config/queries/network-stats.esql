@@ -1,7 +1,0 @@
-FROM metrics
-| WHERE `system.network.io` IS NOT NULL AND device == "eth0"
-| STATS total_bytes = sum(`system.network.io`),
-        avg_bytes = avg(`system.network.io`)
-  BY `host.name`, direction
-| SORT total_bytes DESC
-| LIMIT {{size}}

@@ -299,16 +299,21 @@ public class FileDownloader {
         String fileSuffix = urlPattern.substring(starIdx + 1);
 
         // Parse bucket from a GCS URL; fall back to a placeholder for non-GCS test URLs.
+        // For listing, use the full object path prefix (e.g. "metrics-1tb-24h/part-"), not
+        // just the filename portion ("part-"), because GCS object names include the folder path.
         String bucket;
+        String gcsListPrefix;
         if (urlPattern.contains("storage.googleapis.com")) {
             String host = "storage.googleapis.com/";
             int bucketStart = urlPattern.indexOf(host) + host.length();
             int slashAfterBucket = urlPattern.indexOf('/', bucketStart);
             bucket = urlPattern.substring(bucketStart, slashAfterBucket);
+            gcsListPrefix = urlPattern.substring(slashAfterBucket + 1, starIdx); // e.g. "metrics-1tb-24h/part-"
         } else {
             bucket = "test-bucket"; // only reachable in test mode (non-GCS URL, overrides active)
+            gcsListPrefix = filePrefix;
         }
-        List<String> objectNames = listGcsObjectNames(bucket, filePrefix);
+        List<String> objectNames = listGcsObjectNames(bucket, gcsListPrefix);
 
         List<String> urls = new ArrayList<>();
         for (String name : objectNames) {

@@ -1066,15 +1066,14 @@ class PrometheusOfflineCoverageTest {
     // ─── queryCompactionCount branches ───────────────────────────────────────────
 
     @Test
-    void awaitIndexReady_countStableAtZero_elseIfFalse_thenThrows() throws Exception {
-        // count stays at 0 across two calls → count == lastCount == 0
-        // → else if (count > 0) is FALSE (count ≤ 0 branch)
+    void awaitIndexReady_countStableAtZero_windowNotExpired_loopsUntilException() throws Exception {
+        // count stays at 0, elapsedMs always 0 → stability window never expires → loops
         AtomicInteger calls = new AtomicInteger();
         PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
             @Override protected String buildInfoOperation(String url) { return "3.12.0"; }
             @Override protected long getPollIntervalMs()     { return 0L; }
             @Override protected long getStabilityWindowMs() { return 0L; }
-            @Override protected long elapsedMs(long since)  { return 0L; }
+            @Override protected long elapsedMs(long since)  { return 0L; } // 0 > 0 = false
             @Override protected String instantQueryOperation(String promql) throws Exception {
                 if (calls.getAndIncrement() < 2)
                     return "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\","
@@ -1084,6 +1083,23 @@ class PrometheusOfflineCoverageTest {
         };
         assertTrue(e.connect());
         assertDoesNotThrow(() -> e.awaitIndexReady("metrics"));
+    }
+
+    @Test
+    void awaitIndexReady_countStableAtZero_windowExpired_returnsImmediately() throws Exception {
+        // count = 0 and stability window elapsed → should exit normally (small dataset, no compaction)
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "3.12.0"; }
+            @Override protected long getPollIntervalMs()     { return 0L; }
+            @Override protected long getStabilityWindowMs() { return 0L; }
+            @Override protected long elapsedMs(long since)  { return 1L; } // 1 > 0 → stable
+            @Override protected String instantQueryOperation(String promql) {
+                return "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\","
+                        + "\"result\":[{\"metric\":{},\"value\":[1700000000,\"0\"]}]}}";
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.awaitIndexReady("metrics")); // must return, not loop forever
     }
 
     @Test
@@ -1402,5 +1418,215 @@ class PrometheusOfflineCoverageTest {
         assertTrue(e.connect());
         assertTrue(e.resetDataStore("m")); // cleanTombstonesOperation → 204 → returns normally → resetDataStore returns true
         assertDoesNotThrow(() -> e.close());
+    }
+
+    // ── logProgressPoll / parseInstantQueryLong ───────────────────────────────────
+
+    private static final String INSTANT_QUERY_RESPONSE_TEMPLATE =
+            "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[{\"metric\":{}," +
+            "\"value\":[1717000000,\"%d\"]}]}}";
+
+    @Test
+    void logProgressPoll_logsSeriesCountWithoutThrowing() {
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
+            @Override protected String instantQueryOperation(String promql) {
+                return String.format(INSTANT_QUERY_RESPONSE_TEMPLATE, 14801);
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.logProgressPoll());
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void logProgressPoll_silentOnException() {
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
+            @Override protected String instantQueryOperation(String promql) throws Exception {
+                throw new Exception("connection reset");
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.logProgressPoll()); // must swallow exception
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void logProgressPoll_parsesNullDataGracefully() {
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
+            @Override protected String instantQueryOperation(String promql) {
+                return "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[]}}";
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.logProgressPoll());
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void logProgressPoll_parsesNullValueFieldGracefully() {
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
+            @Override protected String instantQueryOperation(String promql) {
+                return "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\"," +
+                       "\"result\":[{\"metric\":{}}]}}"; // no "value" key
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.logProgressPoll());
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void logProgressPoll_parsesAbsentDataKey() {
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
+            @Override protected String instantQueryOperation(String promql) {
+                return "{\"status\":\"success\"}"; // no "data" key → data == null
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.logProgressPoll());
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void logProgressPoll_parsesNullResult() {
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
+            @Override protected String instantQueryOperation(String promql) {
+                return "{\"data\":{\"result\":null}}"; // result is JSON null
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.logProgressPoll());
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void logProgressPoll_parsesValueWithOnlyTimestamp() {
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
+            @Override protected String instantQueryOperation(String promql) {
+                // value has only 1 element (timestamp only, no scalar value)
+                return "{\"data\":{\"result\":[{\"metric\":{},\"value\":[1717000000]}]}}";
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.logProgressPoll());
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void logProgressPoll_handlesInvalidJsonFromQuery() {
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
+            @Override protected String instantQueryOperation(String promql) {
+                return "this-is-not-valid-json";
+            }
+        };
+        assertTrue(e.connect());
+        assertDoesNotThrow(() -> e.logProgressPoll()); // exception caught internally
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void runMetricsgenreceiver_usesMetricsgenLoaderWithRealBinary(@org.junit.jupiter.api.io.TempDir Path tmpDir)
+            throws Exception {
+        byte[] scriptContent = ("#!/bin/sh\necho '{\"datapoints\":1000}' >&2\n").getBytes();
+        Path script = tmpDir.resolve("metricsgenreceiver");
+        java.nio.file.Files.write(script, scriptContent);
+        java.nio.file.Files.setPosixFilePermissions(script,
+                java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"));
+
+        MetricsgenLoader.binaryPathOverrideForTests.set(script);
+        try {
+            PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+                @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
+            };
+            assertTrue(e.connect());
+            org.elasticsearch.jingra.config.MetricsgenConfig cfg =
+                    new org.elasticsearch.jingra.config.MetricsgenConfig();
+            cfg.setVersion("1.0.7");
+            Path cfgFile = tmpDir.resolve("config.yaml");
+            java.nio.file.Files.writeString(cfgFile, "placeholder: true\n");
+            // Call the real runMetricsgenreceiver (not overridden)
+            MetricsgenLoader.ProcessResult result = e.runMetricsgenreceiver(cfgFile, cfg);
+            assertEquals(0, result.exitCode());
+            assertTrue(result.stderr().contains("datapoints"), result.stderr());
+            assertDoesNotThrow(() -> e.close());
+        } finally {
+            MetricsgenLoader.binaryPathOverrideForTests.remove();
+        }
+    }
+
+    // ── customLoad ───────────────────────────────────────────────────────────────
+
+    @Test
+    void supportsCustomLoad_returnsTrue() {
+        assertTrue(connectedEngine().supportsCustomLoad());
+    }
+
+    @Test
+    void customLoad_runsBinaryAndReturnsDatapointCount() throws Exception {
+        String fakeSterrr = "{\"datapoints\":225180000,\"data_points_per_second\":413987.0}\n";
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
+            @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
+                    java.nio.file.Path configFile, org.elasticsearch.jingra.config.MetricsgenConfig cfg) {
+                // verify config file was written
+                assertTrue(java.nio.file.Files.exists(configFile));
+                return new MetricsgenLoader.ProcessResult(0, fakeSterrr);
+            }
+        };
+        assertTrue(e.connect());
+        int dp = e.customLoad(buildCustomLoadConfig(), null, "metrics");
+        assertEquals(225_180_000, dp);
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void customLoad_zerodatapoints_logsWithoutRateWhenDpIsZero() throws Exception {
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
+            @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
+                    java.nio.file.Path configFile, org.elasticsearch.jingra.config.MetricsgenConfig cfg) {
+                return new MetricsgenLoader.ProcessResult(0, "no datapoints in this run\n");
+            }
+        };
+        assertTrue(e.connect());
+        int dp = e.customLoad(buildCustomLoadConfig(), null, "metrics");
+        assertEquals(0, dp); // covers if (dp > 0) false branch
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void customLoad_throwsWhenBinaryExitsNonZero() {
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
+            @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
+                    java.nio.file.Path configFile, org.elasticsearch.jingra.config.MetricsgenConfig cfg) {
+                return new MetricsgenLoader.ProcessResult(1, "error: binary not found\n");
+            }
+        };
+        assertTrue(e.connect());
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> e.customLoad(buildCustomLoadConfig(), null, "metrics"));
+        assertTrue(ex.getMessage().contains("exited with code 1"), ex.getMessage());
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    private static org.elasticsearch.jingra.config.JingraConfig buildCustomLoadConfig() {
+        org.elasticsearch.jingra.config.JingraConfig cfg = new org.elasticsearch.jingra.config.JingraConfig();
+        org.elasticsearch.jingra.config.LoadConfig load = new org.elasticsearch.jingra.config.LoadConfig();
+        org.elasticsearch.jingra.config.MetricsgenConfig mg = new org.elasticsearch.jingra.config.MetricsgenConfig();
+        mg.setScale(10);
+        mg.setStartNowMinus("5m");
+        load.setMetricsgen(mg);
+        load.setAwaitIndexReady(false);
+        cfg.setLoad(load);
+        return cfg;
     }
 }

@@ -3,7 +3,13 @@ package org.elasticsearch.jingra.engine;
 import org.elasticsearch.jingra.model.Document;
 import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import org.mockito.Mockito;
 import org.mockito.ArgumentMatchers;
 
@@ -682,5 +688,119 @@ class MimirOfflineCoverageTest {
         BenchmarkEngine engine = EngineFactory.create(config);
         assertInstanceOf(MimirEngine.class, engine);
         assertEquals("mimir", engine.getEngineName());
+    }
+
+    // ─── customLoad ────────────────────────────────────────────────────────────
+
+    @AfterEach
+    void clearOverrides() {
+        MetricsgenLoader.binaryPathOverrideForTests.remove();
+    }
+
+    @Test
+    void supportsCustomLoad_returnsTrue() {
+        assertTrue(connectedEngine().supportsCustomLoad());
+    }
+
+    private static org.elasticsearch.jingra.config.JingraConfig buildCustomLoadConfig() {
+        org.elasticsearch.jingra.config.JingraConfig cfg = new org.elasticsearch.jingra.config.JingraConfig();
+        org.elasticsearch.jingra.config.LoadConfig load = new org.elasticsearch.jingra.config.LoadConfig();
+        org.elasticsearch.jingra.config.MetricsgenConfig mg = new org.elasticsearch.jingra.config.MetricsgenConfig();
+        mg.setScale(10);
+        mg.setStartNowMinus("5m");
+        load.setMetricsgen(mg);
+        cfg.setLoad(load);
+        return cfg;
+    }
+
+    @Test
+    void customLoad_runsBinaryAndReturnsDatapointCount() throws Exception {
+        String fakeStderr = "{\"datapoints\":50000,\"data_points_per_second\":25000.0}\n";
+        MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
+            @Override protected String buildInfoOperation(String url) { return "2.15.0"; }
+            @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
+                    Path configFile, org.elasticsearch.jingra.config.MetricsgenConfig cfg) {
+                assertTrue(Files.exists(configFile));
+                return new MetricsgenLoader.ProcessResult(0, fakeStderr);
+            }
+        };
+        assertTrue(e.connect());
+        int dp = e.customLoad(buildCustomLoadConfig(), null, "metrics");
+        assertEquals(50_000, dp);
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void customLoad_zerodatapoints_logsSilently() throws Exception {
+        MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
+            @Override protected String buildInfoOperation(String url) { return "2.15.0"; }
+            @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
+                    Path configFile, org.elasticsearch.jingra.config.MetricsgenConfig cfg) {
+                return new MetricsgenLoader.ProcessResult(0, "no metrics here\n");
+            }
+        };
+        assertTrue(e.connect());
+        int dp = e.customLoad(buildCustomLoadConfig(), null, "metrics");
+        assertEquals(0, dp);
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void customLoad_throwsWhenBinaryExitsNonZero() {
+        MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
+            @Override protected String buildInfoOperation(String url) { return "2.15.0"; }
+            @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
+                    Path configFile, org.elasticsearch.jingra.config.MetricsgenConfig cfg) {
+                return new MetricsgenLoader.ProcessResult(1, "fatal: cannot connect\n");
+            }
+        };
+        assertTrue(e.connect());
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> e.customLoad(buildCustomLoadConfig(), null, "metrics"));
+        assertTrue(ex.getMessage().contains("exited with code 1"), ex.getMessage());
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void runMetricsgenreceiver_usesMetricsgenLoaderWithRealBinary(@TempDir Path tmpDir) throws Exception {
+        byte[] script = ("#!/bin/sh\necho '{\"datapoints\":100}' >&2\n").getBytes();
+        Path bin = tmpDir.resolve("metricsgenreceiver");
+        Files.write(bin, script);
+        Files.setPosixFilePermissions(bin, PosixFilePermissions.fromString("rwxr-xr-x"));
+        MetricsgenLoader.binaryPathOverrideForTests.set(bin);
+
+        MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
+            @Override protected String buildInfoOperation(String url) { return "2.15.0"; }
+        };
+        assertTrue(e.connect());
+        org.elasticsearch.jingra.config.MetricsgenConfig cfg = new org.elasticsearch.jingra.config.MetricsgenConfig();
+        cfg.setVersion("1.0.7");
+        Path cfgFile = tmpDir.resolve("otel.yaml");
+        Files.writeString(cfgFile, "placeholder: true\n");
+        MetricsgenLoader.ProcessResult result = e.runMetricsgenreceiver(cfgFile, cfg);
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stderr().contains("datapoints"), result.stderr());
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void progressPoller_runnableInvokesHasAnySeriesOperation() {
+        java.util.concurrent.atomic.AtomicBoolean called = new java.util.concurrent.atomic.AtomicBoolean();
+        MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
+            @Override protected boolean hasAnySeriesOperation() { called.set(true); return true; }
+        };
+        Runnable poller = e.progressPoller();
+        poller.run();
+        assertTrue(called.get());
+    }
+
+    @Test
+    void progressPoller_silentOnException() {
+        MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
+            @Override protected boolean hasAnySeriesOperation() throws Exception {
+                throw new Exception("mimir unavailable");
+            }
+        };
+        assertDoesNotThrow(() -> e.progressPoller().run());
     }
 }

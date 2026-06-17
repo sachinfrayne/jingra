@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 class BenchmarkEngineTest {
@@ -94,6 +95,15 @@ class BenchmarkEngineTest {
     void defaultAwaitIndexReadyIsNoOp() throws Exception {
         try (BenchmarkEngine engine = new StubEngine()) {
             assertDoesNotThrow(() -> engine.awaitIndexReady("index-a"));
+        }
+    }
+
+    @Test
+    void defaultCreateDelegatesToIngest() throws Exception {
+        // StubEngine does not override create(), so the interface default runs.
+        // ingest() always returns 0, so create() must also return 0.
+        try (BenchmarkEngine engine = new StubEngine()) {
+            assertEquals(0, engine.create(Collections.emptyList(), "i", null));
         }
     }
 }

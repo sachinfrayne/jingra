@@ -13,9 +13,11 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.zip.GZIPInputStream;
 
 /**
@@ -117,13 +119,56 @@ public class NdjsonReader implements DatasetReader {
 
     @Override
     public long getRowCount() throws IOException {
-        long count = 0;
+        if (filePaths.size() == 1) {
+            return countLinesInFile(filePaths.get(0));
+        }
+        int threads = Math.min(filePaths.size(), Runtime.getRuntime().availableProcessors());
+        java.util.concurrent.ExecutorService pool =
+                java.util.concurrent.Executors.newFixedThreadPool(threads);
+        try {
+            java.util.List<java.util.concurrent.Future<Long>> futures = filePaths.stream()
+                    .map(path -> pool.submit(() -> countLinesInFile(path)))
+                    .collect(java.util.stream.Collectors.toList());
+            long total = 0;
+            for (java.util.concurrent.Future<Long> f : futures) {
+                total += f.get();
+            }
+            return total;
+        } catch (Exception e) {
+            throw new IOException("Parallel row count failed", e);
+        } finally {
+            pool.shutdown();
+        }
+    }
+
+    @Override
+    public Optional<Instant> findMaxTimestamp() throws IOException {
+        Instant max = null;
         for (String path : filePaths) {
             try (BufferedReader reader = openReader(path)) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    if (!line.isBlank()) count++;
+                    if (line.isBlank()) continue;
+                    Map<String, Object> map = MAPPER.readValue(line, MAP_TYPE);
+                    Object ts = map.get("@timestamp");
+                    if (ts instanceof String s) {
+                        try {
+                            Instant t = Instant.parse(s);
+                            if (max == null || t.isAfter(max)) max = t;
+                        } catch (Exception ignored) {}
+                    }
                 }
+            }
+        }
+        return Optional.ofNullable(max);
+    }
+
+    private long countLinesInFile(String path) throws IOException {
+        long count = 0;
+        try (BufferedReader reader = openReader(path)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.isBlank()) count++;
             }
         }
         return count;

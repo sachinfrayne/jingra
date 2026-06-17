@@ -1312,6 +1312,90 @@ class ElasticsearchEngineBehaviorTest {
     }
 
     @Test
+    void applyIlmPolicyOperation_throwsOnNon2xx() throws Exception {
+        com.sun.net.httpserver.HttpServer srv = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress(0), 0);
+        srv.createContext("/_ilm/policy/bad-policy", ex -> {
+            byte[] msg = "{\"error\":\"bad\"}".getBytes();
+            ex.sendResponseHeaders(400, msg.length); ex.getResponseBody().write(msg); ex.close();
+        });
+        srv.setExecutor(null); srv.start();
+        Rest5Client rc = Rest5Client.builder(new HttpHost("http", "127.0.0.1", srv.getAddress().getPort())).build();
+        try {
+            ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+            injectRestClient(e, rc);
+            Method m = ElasticsearchEngine.class.getDeclaredMethod("applyIlmPolicyOperation", String.class, String.class);
+            m.setAccessible(true);
+            Exception ex2 = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> m.invoke(e, "bad-policy", "{}"));
+            assertTrue(ex2.getCause().getMessage().contains("400"));
+        } finally { rc.close(); srv.stop(0); }
+    }
+
+    @Test
+    void applyIndexTemplateOperation_throwsOnNon2xx() throws Exception {
+        com.sun.net.httpserver.HttpServer srv = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress(0), 0);
+        srv.createContext("/_index_template/bad-tmpl", ex -> {
+            byte[] msg = "{\"error\":\"bad\"}".getBytes();
+            ex.sendResponseHeaders(400, msg.length); ex.getResponseBody().write(msg); ex.close();
+        });
+        srv.setExecutor(null); srv.start();
+        Rest5Client rc = Rest5Client.builder(new HttpHost("http", "127.0.0.1", srv.getAddress().getPort())).build();
+        try {
+            ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+            injectRestClient(e, rc);
+            Method m = ElasticsearchEngine.class.getDeclaredMethod("applyIndexTemplateOperation", String.class, String.class);
+            m.setAccessible(true);
+            Exception ex2 = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> m.invoke(e, "bad-tmpl", "{}"));
+            assertTrue(ex2.getCause().getMessage().contains("400"));
+        } finally { rc.close(); srv.stop(0); }
+    }
+
+    @Test
+    void createDataStreamOperation_throwsOnNon2xx() throws Exception {
+        com.sun.net.httpserver.HttpServer srv = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress(0), 0);
+        srv.createContext("/_data_stream/bad-stream", ex -> {
+            byte[] msg = "{\"error\":\"bad\"}".getBytes();
+            ex.sendResponseHeaders(400, msg.length); ex.getResponseBody().write(msg); ex.close();
+        });
+        srv.setExecutor(null); srv.start();
+        Rest5Client rc = Rest5Client.builder(new HttpHost("http", "127.0.0.1", srv.getAddress().getPort())).build();
+        try {
+            ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+            injectRestClient(e, rc);
+            Method m = ElasticsearchEngine.class.getDeclaredMethod("createDataStreamOperation", String.class);
+            m.setAccessible(true);
+            Exception ex2 = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> m.invoke(e, "bad-stream"));
+            assertTrue(ex2.getCause().getMessage().contains("400"));
+        } finally { rc.close(); srv.stop(0); }
+    }
+
+    @Test
+    void deleteDataStreamOperation_throwsOnNon2xx() throws Exception {
+        com.sun.net.httpserver.HttpServer srv = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress(0), 0);
+        srv.createContext("/_data_stream/bad-stream", ex -> {
+            byte[] msg = "{\"error\":\"bad\"}".getBytes();
+            ex.sendResponseHeaders(500, msg.length); ex.getResponseBody().write(msg); ex.close();
+        });
+        srv.setExecutor(null); srv.start();
+        Rest5Client rc = Rest5Client.builder(new HttpHost("http", "127.0.0.1", srv.getAddress().getPort())).build();
+        try {
+            ElasticsearchEngine e = new ElasticsearchEngine(new HashMap<>());
+            injectRestClient(e, rc);
+            Method m = ElasticsearchEngine.class.getDeclaredMethod("deleteDataStreamOperation", String.class);
+            m.setAccessible(true);
+            Exception ex2 = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> m.invoke(e, "bad-stream"));
+            assertTrue(ex2.getCause().getMessage().contains("500"));
+        } finally { rc.close(); srv.stop(0); }
+    }
+
+    @Test
     void loadIlmFile_readsFromFilesystem() throws Exception {
         Path ilmDir = Path.of("jingra-config/ilm");
         Files.createDirectories(ilmDir);
@@ -1335,6 +1419,138 @@ class ElasticsearchEngineBehaviorTest {
         assertNull(result);
     }
 
+    // ── create() / data-stream operation type ────────────────────────────────────
+
+    @Test
+    void create_dataStream_usesBulkCreateOperation() throws Exception {
+        AtomicReference<BulkRequest> captured = new AtomicReference<>();
+        ConnectedHarness e = new ConnectedHarness(Map.of("data_stream", true)) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                captured.set(request);
+                return BulkResponse.of(b -> b.errors(false).took(1).items(List.of(
+                        BulkResponseItem.of(i -> i.operationType(OperationType.Create).index("metrics").status(201)))));
+            }
+        };
+        Document doc = new Document(Map.of("@timestamp", "2024-01-01T00:00:00Z", "val", 1.0));
+        assertEquals(1, e.create(List.of(doc), "metrics", null));
+        assertNotNull(captured.get());
+        assertTrue(captured.get().operations().get(0).isCreate(), "data stream must use create op");
+        assertFalse(captured.get().operations().get(0).isIndex());
+    }
+
+    @Test
+    void ingest_dataStream_delegatesToCreate() throws Exception {
+        AtomicReference<BulkRequest> captured = new AtomicReference<>();
+        ConnectedHarness e = new ConnectedHarness(Map.of("data_stream", true)) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                captured.set(request);
+                return BulkResponse.of(b -> b.errors(false).took(1).items(List.of(
+                        BulkResponseItem.of(i -> i.operationType(OperationType.Create).index("metrics").status(201)))));
+            }
+        };
+        Document doc = new Document(Map.of("@timestamp", "2024-01-01T00:00:00Z", "val", 1.0));
+        assertEquals(1, e.ingest(List.of(doc), "metrics", null));
+        assertNotNull(captured.get());
+        assertTrue(captured.get().operations().get(0).isCreate(), "ingest on data stream must delegate to create");
+    }
+
+    @Test
+    void ingest_regularIndex_usesIndexOperation() throws Exception {
+        AtomicReference<BulkRequest> captured = new AtomicReference<>();
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                captured.set(request);
+                return BulkResponse.of(b -> b.errors(false).took(1).items(List.of(
+                        BulkResponseItem.of(i -> i.operationType(OperationType.Index).index("idx").status(201)))));
+            }
+        };
+        Document doc = new Document(Map.of("field", "value"));
+        assertEquals(1, e.ingest(List.of(doc), "idx", null));
+        assertNotNull(captured.get());
+        assertTrue(captured.get().operations().get(0).isIndex(), "regular index must use index op");
+        assertFalse(captured.get().operations().get(0).isCreate());
+    }
+
+    @Test
+    void ingest_withIdField_setsDocumentId() throws Exception {
+        AtomicReference<BulkRequest> captured = new AtomicReference<>();
+        ConnectedHarness e = new ConnectedHarness(new HashMap<>()) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                captured.set(request);
+                return BulkResponse.of(b -> b.errors(false).took(1).items(List.of(
+                        BulkResponseItem.of(i -> i.operationType(OperationType.Index).index("idx").id("doc-1").status(200)))));
+            }
+        };
+        Document doc = new Document(Map.of("my_id", "doc-1", "field", "value"));
+        assertEquals(1, e.ingest(List.of(doc), "idx", "my_id"));
+        assertNotNull(captured.get());
+        assertEquals("doc-1", captured.get().operations().get(0).index().id());
+    }
+
+    @Test
+    void create_bulkErrors_throwsWhenFailOnPartialDefault() throws Exception {
+        BulkResponseItem errItem = BulkResponseItem.of(b -> b
+                .operationType(OperationType.Create).index("metrics").status(400)
+                .error(e -> e.type("mapper_exception").reason("bad field")));
+        BulkResponse br = BulkResponse.of(b -> b.errors(true).took(1).items(List.of(errItem)));
+        ConnectedHarness e = new ConnectedHarness(Map.of("data_stream", true)) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                return br;
+            }
+        };
+        List<Document> docs = List.of(new Document(Map.of("@timestamp", "2024-01-01T00:00:00Z")));
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> e.create(docs, "metrics", null));
+        assertInstanceOf(IllegalStateException.class, ex.getCause());
+    }
+
+    @Test
+    void create_bulkErrors_returnsPartialCountWhenFailOnPartialFalse() throws Exception {
+        BulkResponseItem okItem = BulkResponseItem.of(b -> b.operationType(OperationType.Create).index("metrics").status(201));
+        BulkResponseItem errItem = BulkResponseItem.of(b -> b
+                .operationType(OperationType.Create).index("metrics").status(400)
+                .error(e -> e.type("mapper_exception").reason("bad")));
+        BulkResponse br = BulkResponse.of(b -> b.errors(true).took(1).items(List.of(okItem, errItem)));
+        ConnectedHarness e = new ConnectedHarness(Map.of("data_stream", true, "ingest_fail_on_partial_errors", false)) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                return br;
+            }
+        };
+        List<Document> docs = List.of(
+                new Document(Map.of("@timestamp", "2024-01-01T00:00:00Z")),
+                new Document(Map.of("@timestamp", "2024-01-01T00:01:00Z")));
+        assertEquals(1, e.create(docs, "metrics", null));
+    }
+
+    @Test
+    void create_bulkErrors_suppressesLogAfterFiveErrors() throws Exception {
+        // 6 error items → errorCount > 5 branch hit → log is skipped for item 6+
+        List<BulkResponseItem> items = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            items.add(BulkResponseItem.of(b -> b
+                    .operationType(OperationType.Create).index("metrics").status(400)
+                    .error(e -> e.type("mapper_exception").reason("bad"))));
+        }
+        BulkResponse br = BulkResponse.of(b -> b.errors(true).took(1).items(items));
+        ConnectedHarness e = new ConnectedHarness(Map.of("data_stream", true)) {
+            @Override
+            protected BulkResponse bulkOperation(BulkRequest request) {
+                return br;
+            }
+        };
+        List<Document> docs = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            docs.add(new Document(Map.of("@timestamp", "2024-01-01T00:0" + i + ":00Z")));
+        }
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> e.create(docs, "metrics", null));
+        assertInstanceOf(IllegalStateException.class, ex.getCause());
+    }
+
     @Test
     void ingestBulkErrorsWithNullItemErrorStillCountsAsFailure() throws Exception {
         BulkResponseItem okItem = BulkResponseItem.of(b -> b.operationType(OperationType.Index).index("idx").status(201));
@@ -1349,5 +1565,123 @@ class ElasticsearchEngineBehaviorTest {
         List<Document> docs = List.of(new Document(Map.of("a", 1)), new Document(Map.of("a", 2)));
         RuntimeException ex = assertThrows(RuntimeException.class, () -> e.ingest(docs, "idx", null));
         assertInstanceOf(IllegalStateException.class, ex.getCause());
+    }
+
+    // ── Low-level operations (real implementations via mock REST client) ──────────────
+
+    @Test
+    void applyComponentTemplateOperation_realImplementation_putsToComponentTemplateEndpoint() throws Exception {
+        Response mockResponse = mock(Response.class);
+        when(mockResponse.getStatusCode()).thenReturn(200);
+        Rest5Client mockRest = mock(Rest5Client.class);
+        when(mockRest.performRequest(any())).thenReturn(mockResponse);
+
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of()) {
+            @Override protected boolean hasClient() { return true; }
+        };
+        injectRestClient(e, mockRest);
+        // should not throw
+        e.applyComponentTemplateOperation("metrics-otel@custom", "{\"template\":{\"settings\":{}}}");
+    }
+
+    @Test
+    void otlpOperation_realImplementation_postsToOtlpEndpoint() throws Exception {
+        Response mockResponse = mock(Response.class);
+        when(mockResponse.getStatusCode()).thenReturn(200);
+        Rest5Client mockRest = mock(Rest5Client.class);
+        when(mockRest.performRequest(any())).thenReturn(mockResponse);
+
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of()) {
+            @Override
+            protected boolean hasClient() { return true; }
+        };
+        injectRestClient(e, mockRest);
+
+        // Pass empty protobuf bytes (valid for the test — the mock always returns 200)
+        assertEquals(0, e.otlpOperation(new byte[0]));
+    }
+
+    // ── OTLP ingest mode ──────────────────────────────────────────────────────────
+
+    @Test
+    void ingest_otlpMode_callsOtlpOperation() throws Exception {
+        AtomicReference<byte[]> capturedOtlp = new AtomicReference<>();
+        ConnectedHarness e = new ConnectedHarness(Map.of("ingest_mode", "otlp", "data_stream", true)) {
+            @Override
+            protected int otlpOperation(byte[] protoBytes) {
+                capturedOtlp.set(protoBytes);
+                return 0;
+            }
+        };
+        List<Document> docs = List.of(new Document(Map.of(
+                "@timestamp", "2026-06-13T09:00:00Z",
+                "host.name", "host-0001",
+                "metrics.system.memory.utilization", 0.5)));
+        int count = e.ingest(docs, "metrics-jingra.otel-benchmark", null);
+        assertEquals(1, count);
+        assertNotNull(capturedOtlp.get(), "otlpOperation must have been called");
+        assertTrue(capturedOtlp.get().length > 0, "proto bytes must be non-empty");
+        // metric name "system.memory.utilization" must appear as raw UTF-8 bytes in the proto
+        assertTrue(containsUtf8(capturedOtlp.get(), "system.memory.utilization"));
+    }
+
+    @Test
+    void ingest_otlpMode_batchesLargeInputs() throws Exception {
+        AtomicInteger callCount = new AtomicInteger();
+        ConnectedHarness e = new ConnectedHarness(Map.of(
+                "ingest_mode", "otlp", "otlp_batch_size", 2)) {
+            @Override
+            protected int otlpOperation(byte[] protoBytes) {
+                callCount.incrementAndGet();
+                return 0;
+            }
+        };
+        List<Document> docs = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            docs.add(new Document(Map.of(
+                    "@timestamp", "2026-06-13T09:00:00Z",
+                    "host.name", "host-" + i,
+                    "metrics.system.memory.utilization", 0.5)));
+        }
+        int count = e.ingest(docs, "metrics-jingra.otel-benchmark", null);
+        assertEquals(5, count);
+        assertEquals(3, callCount.get(), "5 docs with batch_size=2 → 3 calls");
+    }
+
+    @Test
+    void ingest_otlpMode_noClient_returnsZero() {
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("ingest_mode", "otlp"));
+        List<Document> docs = List.of(new Document(Map.of(
+                "@timestamp", "2026-06-13T09:00:00Z",
+                "metrics.system.memory.utilization", 0.5)));
+        assertEquals(0, e.ingest(docs, "metrics-jingra.otel-benchmark", null));
+    }
+
+    @Test
+    void ingest_otlpMode_otlpFailure_throwsRuntime() {
+        ConnectedHarness e = new ConnectedHarness(Map.of("ingest_mode", "otlp")) {
+            @Override
+            protected int otlpOperation(byte[] protoBytes) throws Exception {
+                throw new Exception("connection refused");
+            }
+        };
+        List<Document> docs = List.of(new Document(Map.of(
+                "@timestamp", "2026-06-13T09:00:00Z",
+                "host.name", "h",
+                "metrics.system.memory.utilization", 0.5)));
+        assertThrows(RuntimeException.class, () -> e.ingest(docs, "idx", null));
+    }
+
+    /** Returns true if {@code needle} appears as raw UTF-8 bytes anywhere in {@code haystack}. */
+    private static boolean containsUtf8(byte[] haystack, String needle) {
+        byte[] n = needle.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        outer:
+        for (int i = 0; i <= haystack.length - n.length; i++) {
+            for (int j = 0; j < n.length; j++) {
+                if (haystack[i + j] != n[j]) continue outer;
+            }
+            return true;
+        }
+        return false;
     }
 }

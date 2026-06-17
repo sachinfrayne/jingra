@@ -1,3 +1,0 @@
-topk({{size}},
-  avg_over_time(system_cpu_load_average_1m[5m])
-)

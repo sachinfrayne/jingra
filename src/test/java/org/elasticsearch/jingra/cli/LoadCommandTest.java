@@ -3,6 +3,7 @@ package org.elasticsearch.jingra.cli;
 import org.elasticsearch.jingra.config.DatasetConfig;
 import org.elasticsearch.jingra.config.JingraConfig;
 import org.elasticsearch.jingra.config.LoadConfig;
+import org.elasticsearch.jingra.config.MetricsgenConfig;
 import org.elasticsearch.jingra.data.DatasetReader;
 import org.elasticsearch.jingra.data.ParquetReader;
 import org.elasticsearch.jingra.model.Document;
@@ -16,11 +17,14 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -934,6 +938,161 @@ class LoadCommandTest {
         assertTrue(engine.ingestCalls >= 1);
     }
 
+    // ── Timestamp shift ────────────────────────────────────────────────────────────
+
+    @Test
+    void timestampShift_whenEnabled_rebasesAllDocumentTimestampsToNow() throws Exception {
+        Instant pastTs = Instant.now().minus(30, ChronoUnit.DAYS);
+        String pastIso = pastTs.toString();
+
+        // Reader returns 2 docs with 30-day-old timestamps and reports max via findMaxTimestamp
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(2, oneBatchOf(2)) {
+            @Override
+            public Optional<Instant> findMaxTimestamp() { return Optional.of(pastTs); }
+
+            @Override
+            public void readInBatches(int batchSize, int threads,
+                                      DatasetReader.BatchConsumer consumer) throws IOException {
+                List<Document> batch = new ArrayList<>();
+                Document d1 = new Document(); d1.put("@timestamp", pastIso); d1.put("v", 1.0);
+                Document d2 = new Document(); d2.put("@timestamp", pastIso); d2.put("v", 2.0);
+                batch.add(d1); batch.add(d2);
+                consumer.accept(batch);
+            }
+        };
+
+        List<String> capturedTs = Collections.synchronizedList(new ArrayList<>());
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        config.getActiveDataset().setTimestampShiftToNow(true);
+
+        LoadCommand.run(config, c -> new MockBenchmarkEngine() {
+            @Override public boolean dataStoreExists(String i) { return false; }
+            @Override public int ingest(List<Document> docs, String i, String f) {
+                for (Document d : docs) {
+                    Object ts = d.get("@timestamp");
+                    if (ts instanceof String s) capturedTs.add(s);
+                }
+                return docs.size();
+            }
+        });
+
+        assertEquals(2, capturedTs.size(), "both docs must reach engine");
+        Instant now = Instant.now();
+        for (String ts : capturedTs) {
+            Instant shifted = Instant.parse(ts);
+            // Shifted timestamp must be within the last 2 minutes (shift lands ~1 min before now)
+            assertTrue(shifted.isAfter(now.minus(2, ChronoUnit.MINUTES)),
+                    "shifted timestamp must be recent: " + shifted);
+            assertTrue(shifted.isBefore(now.plus(1, ChronoUnit.MINUTES)),
+                    "shifted timestamp must not be in the future: " + shifted);
+        }
+    }
+
+    @Test
+    void timestampShift_whenDisabled_leavesTimestampsUnchanged() throws Exception {
+        String fixedTs = "2020-01-01T00:00:00Z";
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1)) {
+            @Override
+            public void readInBatches(int batchSize, int threads,
+                                      DatasetReader.BatchConsumer consumer) throws IOException {
+                Document d = new Document(); d.put("@timestamp", fixedTs);
+                consumer.accept(List.of(d));
+            }
+        };
+
+        List<String> capturedTs = Collections.synchronizedList(new ArrayList<>());
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        // timestamp_shift_to_now defaults to false — no change expected
+
+        LoadCommand.run(config, c -> new MockBenchmarkEngine() {
+            @Override public boolean dataStoreExists(String i) { return false; }
+            @Override public int ingest(List<Document> docs, String i, String f) {
+                for (Document d : docs) {
+                    Object ts = d.get("@timestamp");
+                    if (ts instanceof String s) capturedTs.add(s);
+                }
+                return docs.size();
+            }
+        });
+
+        assertFalse(capturedTs.isEmpty());
+        assertEquals(fixedTs, capturedTs.get(0), "timestamp must be unchanged when shift is disabled");
+    }
+
+    @Test
+    void timestampShift_whenEnabled_butNoTimestampField_noError() throws Exception {
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1)) {
+            @Override public Optional<Instant> findMaxTimestamp() { return Optional.of(Instant.now()); }
+            @Override
+            public void readInBatches(int batchSize, int threads,
+                                      DatasetReader.BatchConsumer consumer) throws IOException {
+                Document d = new Document(); d.put("value", 42);
+                consumer.accept(List.of(d));
+            }
+        };
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        config.getActiveDataset().setTimestampShiftToNow(true);
+        // Should complete without error even when doc has no @timestamp
+        LoadCommand.run(config, c -> new MockBenchmarkEngine() {
+            @Override public boolean dataStoreExists(String i) { return false; }
+            @Override public int ingest(List<Document> docs, String i, String f) { return docs.size(); }
+        });
+    }
+
+    @Test
+    void timestampShift_whenEnabled_butFindMaxTimestampEmpty_noShift() throws Exception {
+        String fixedTs = "2020-01-01T00:00:00Z";
+        // No findMaxTimestamp() override → DatasetReader default returns Optional.empty() → no shift
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1)) {
+            @Override
+            public void readInBatches(int batchSize, int threads,
+                                      DatasetReader.BatchConsumer consumer) throws IOException {
+                Document d = new Document(); d.put("@timestamp", fixedTs);
+                consumer.accept(List.of(d));
+            }
+        };
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        config.getActiveDataset().setTimestampShiftToNow(true);
+
+        List<String> capturedTs = Collections.synchronizedList(new ArrayList<>());
+        LoadCommand.run(config, c -> new MockBenchmarkEngine() {
+            @Override public boolean dataStoreExists(String i) { return false; }
+            @Override public int ingest(List<Document> docs, String i, String f) {
+                for (Document d : docs) { Object ts = d.get("@timestamp"); if (ts instanceof String s) capturedTs.add(s); }
+                return docs.size();
+            }
+        });
+        assertEquals(fixedTs, capturedTs.get(0), "no shift when findMaxTimestamp returns empty");
+    }
+
+    @Test
+    void timestampShift_whenEnabled_unparseableTimestampIgnored() throws Exception {
+        Instant pastTs = Instant.now().minus(30, ChronoUnit.DAYS);
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1)) {
+            @Override public Optional<Instant> findMaxTimestamp() { return Optional.of(pastTs); }
+            @Override
+            public void readInBatches(int batchSize, int threads,
+                                      DatasetReader.BatchConsumer consumer) throws IOException {
+                Document d = new Document();
+                d.put("@timestamp", "not-a-valid-iso-timestamp"); // triggers catch in shift logic
+                consumer.accept(List.of(d));
+            }
+        };
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        config.getActiveDataset().setTimestampShiftToNow(true);
+        List<String> capturedTs = Collections.synchronizedList(new ArrayList<>());
+        LoadCommand.run(config, c -> new MockBenchmarkEngine() {
+            @Override public boolean dataStoreExists(String i) { return false; }
+            @Override public int ingest(List<Document> docs, String i, String f) {
+                for (Document d : docs) { Object ts = d.get("@timestamp"); if (ts instanceof String s) capturedTs.add(s); }
+                return docs.size();
+            }
+        });
+        // The bad timestamp is left unchanged (exception was swallowed)
+        assertFalse(capturedTs.isEmpty());
+        assertEquals("not-a-valid-iso-timestamp", capturedTs.get(0));
+    }
+
     private static class SlowIngest extends MockBenchmarkEngine {
         int ingestCalls;
 
@@ -953,5 +1112,92 @@ class LoadCommandTest {
             }
             return super.ingest(documents, indexName, idField);
         }
+    }
+
+    // ── customLoad branch ────────────────────────────────────────────────────────
+
+    @Test
+    void customLoad_isInvokedWhenEngineSupportsItAndMetricsgenConfigPresent() throws Exception {
+        AtomicBoolean customLoadCalled = new AtomicBoolean();
+        AtomicBoolean ingestCalled     = new AtomicBoolean();
+
+        BenchmarkEngine engine = new MockBenchmarkEngine() {
+            @Override public boolean supportsCustomLoad() { return true; }
+            @Override
+            public int customLoad(JingraConfig config, DatasetConfig dataset, String indexName) {
+                customLoadCalled.set(true);
+                return 42;
+            }
+            @Override
+            public int ingest(java.util.List<org.elasticsearch.jingra.model.Document> docs,
+                              String idx, String id) {
+                ingestCalled.set(true);
+                return docs.size();
+            }
+        };
+
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        LoadConfig load = new LoadConfig();
+        MetricsgenConfig mg = new MetricsgenConfig();
+        mg.setScale(1);
+        load.setMetricsgen(mg);
+        config.setLoad(load);
+
+        LoadCommand.run(config, c -> engine);
+
+        assertTrue(customLoadCalled.get(), "customLoad() should be called");
+        assertFalse(ingestCalled.get(),    "ingest() must NOT be called when customLoad is used");
+    }
+
+    @Test
+    void customLoad_invokesAwaitIndexReadyWhenConfigured() throws Exception {
+        AtomicBoolean awaitCalled = new AtomicBoolean();
+
+        BenchmarkEngine engine = new MockBenchmarkEngine() {
+            @Override public boolean supportsCustomLoad() { return true; }
+            @Override
+            public int customLoad(JingraConfig config, DatasetConfig dataset, String indexName) {
+                return 0;
+            }
+            @Override
+            public void awaitIndexReady(String indexName) {
+                awaitCalled.set(true);
+            }
+        };
+
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        LoadConfig load = new LoadConfig();
+        MetricsgenConfig mg = new MetricsgenConfig();
+        mg.setScale(1);
+        load.setMetricsgen(mg);
+        load.setAwaitIndexReady(true);
+        config.setLoad(load);
+
+        LoadCommand.run(config, c -> engine);
+        assertTrue(awaitCalled.get(), "awaitIndexReady() should be called when awaitIndexReady=true");
+    }
+
+    @Test
+    void customLoad_notInvokedWhenMetricsgenConfigAbsent() throws Exception {
+        AtomicBoolean customLoadCalled = new AtomicBoolean();
+
+        LoadCommand.datasetReaderFactory = p -> new StubParquetReader(1, oneBatchOf(1));
+        BenchmarkEngine engine = new MockBenchmarkEngine() {
+            @Override public boolean supportsCustomLoad() { return true; }
+            @Override
+            public int customLoad(JingraConfig config, DatasetConfig dataset, String indexName) {
+                customLoadCalled.set(true);
+                return 0;
+            }
+        };
+
+        // No metricsgen in load config → file-batch path
+        JingraConfig config = buildLoadConfig("src/test/resources/parquet/test_text_data.parquet");
+        LoadConfig load = new LoadConfig();
+        // metricsgen intentionally absent
+        config.setLoad(load);
+
+        LoadCommand.run(config, c -> engine);
+        assertFalse(customLoadCalled.get(), "customLoad() must NOT be called when load.metricsgen is absent");
     }
 }

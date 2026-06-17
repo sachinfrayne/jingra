@@ -2,6 +2,9 @@ package org.elasticsearch.jingra.engine;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.opentelemetry.proto.collector.metrics.v1.ExportMetricsServiceRequest;
+import org.elasticsearch.jingra.config.DatasetConfig;
+import org.elasticsearch.jingra.config.JingraConfig;
+import org.elasticsearch.jingra.config.MetricsgenConfig;
 import org.elasticsearch.jingra.model.Document;
 import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
@@ -13,6 +16,12 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -204,6 +213,99 @@ public class MimirEngine extends AbstractBenchmarkEngine {
             throw new IOException("instant query returned HTTP " + resp.statusCode());
         }
         return resp.body();
+    }
+
+    // ── Custom load (metricsgenreceiver) ─────────────────────────────────────────
+
+    /** Mimir uses the same label-merge transform as Prometheus. */
+    private static final String MIMIR_TRANSFORM_BLOCK =
+            "  transform:\n" +
+            "    metric_statements:\n" +
+            "      - context: resource\n" +
+            "        statements:\n" +
+            "          - delete_key(attributes, \"host.ip\")\n" +
+            "          - delete_key(attributes, \"host.mac\")\n" +
+            "      - context: datapoint\n" +
+            "        statements:\n" +
+            "          - merge_maps(attributes, resource.attributes, \"insert\")";
+
+    @Override
+    public boolean supportsCustomLoad() {
+        return true;
+    }
+
+    @Override
+    public int customLoad(JingraConfig config, DatasetConfig dataset, String indexName) throws Exception {
+        MetricsgenConfig cfg = config.getLoad().getMetricsgen();
+        String otlpEndpoint = baseUrl + "/otlp";
+        Map<String, String> headers = Map.of("X-Scope-OrgID", orgId());
+        String otelYaml = MetricsgenLoader.renderOtelConfig(
+                cfg, otlpEndpoint, "otlphttp/mimir", MIMIR_TRANSFORM_BLOCK, headers);
+
+        Path tmpConfig = Files.createTempFile("metricsgen-", ".yaml");
+        try {
+            Files.writeString(tmpConfig, otelYaml);
+            logger.info("Running metricsgenreceiver → {} (scale={}, window={})...",
+                    otlpEndpoint, cfg.scaleOrDefault(), cfg.startNowMinusOrDefault());
+
+            ScheduledExecutorService poller = startProgressPoller();
+            try {
+                MetricsgenLoader.ProcessResult result = runMetricsgenreceiver(tmpConfig, cfg);
+                if (result.exitCode() != 0) {
+                    throw new RuntimeException(
+                            "metricsgenreceiver exited with code " + result.exitCode()
+                                    + "\n" + result.stderr());
+                }
+                int dp   = MetricsgenLoader.parseDatapoints(result.stderr());
+                double rate = MetricsgenLoader.parseRate(result.stderr());
+                if (dp > 0) {
+                    logger.info("Ingested {} data points ({} dp/s)", dp, String.format("%.0f", rate));
+                }
+                return dp;
+            } finally {
+                poller.shutdownNow();
+                poller.awaitTermination(5, TimeUnit.SECONDS);
+            }
+        } finally {
+            Files.deleteIfExists(tmpConfig);
+        }
+    }
+
+    /**
+     * Launches metricsgenreceiver. Override in tests to inject canned output.
+     */
+    protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(Path configFile, MetricsgenConfig cfg)
+            throws Exception {
+        Path binary = MetricsgenLoader.resolveBinary(cfg.versionOrDefault());
+        return MetricsgenLoader.runBinary(binary, configFile);
+    }
+
+    /** Initial delay for the progress poller, in milliseconds. Override in tests. */
+    protected long progressPollerInitialDelayMs() { return 10_000L; }
+    /** Poll interval for the progress poller, in milliseconds. */
+    protected long progressPollerIntervalMs()     { return 10_000L; }
+
+    /**
+     * Returns the {@link Runnable} fired on each poller tick. Override in tests.
+     */
+    protected Runnable progressPoller() {
+        return () -> {
+            try {
+                boolean hasSeries = hasAnySeriesOperation();
+                logger.info("  Mimir: series present={}", hasSeries);
+            } catch (Exception ignored) {}
+        };
+    }
+
+    private ScheduledExecutorService startProgressPoller() {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "metricsgen-progress-poller");
+            t.setDaemon(true);
+            return t;
+        });
+        scheduler.scheduleAtFixedRate(progressPoller(),
+                progressPollerInitialDelayMs(), progressPollerIntervalMs(), TimeUnit.MILLISECONDS);
+        return scheduler;
     }
 
     @Override

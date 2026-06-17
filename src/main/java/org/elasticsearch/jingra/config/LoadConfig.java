@@ -19,6 +19,9 @@ public class LoadConfig {
     @JsonProperty("await_index_ready")
     private boolean awaitIndexReady = false;
 
+    @JsonProperty("metricsgen")
+    private MetricsgenConfig metricsgen;
+
     public Integer getBatchSize() {
         return batchSize;
     }
@@ -61,5 +64,13 @@ public class LoadConfig {
 
     public void setAwaitIndexReady(boolean awaitIndexReady) {
         this.awaitIndexReady = awaitIndexReady;
+    }
+
+    public MetricsgenConfig getMetricsgen() {
+        return metricsgen;
+    }
+
+    public void setMetricsgen(MetricsgenConfig metricsgen) {
+        this.metricsgen = metricsgen;
     }
 }

@@ -1,9 +1,0 @@
-FROM metrics
-| WHERE `system.cpu.load_average.1m` IS NOT NULL
-| STATS avg_load_1m = avg(`system.cpu.load_average.1m`),
-        max_load_1m = max(`system.cpu.load_average.1m`),
-        avg_load_5m = avg(`system.cpu.load_average.5m`),
-        avg_load_15m = avg(`system.cpu.load_average.15m`)
-  BY `host.name`
-| SORT avg_load_1m DESC
-| LIMIT {{size}}

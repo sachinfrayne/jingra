@@ -7,8 +7,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -415,6 +417,33 @@ class NdjsonReaderTest {
     }
 
     @Test
+    void getRowCount_multiFile_countsAllFilesInParallel_returnsExactTotal(@TempDir Path tmpDir) throws IOException {
+        Path f1 = tmpDir.resolve("a.ndjson");
+        Path f2 = tmpDir.resolve("b.ndjson");
+        Files.writeString(f1, "{\"id\":\"1\"}\n{\"id\":\"2\"}\n");          // 2 docs
+        Files.writeString(f2, "{\"id\":\"3\"}\n{\"id\":\"4\"}\n{\"id\":\"5\"}\n{\"id\":\"6\"}\n"); // 4 docs
+        assertEquals(6, new NdjsonReader(List.of(f1.toString(), f2.toString())).getRowCount());
+    }
+
+    @Test
+    void getRowCount_multiFile_parallelCount_handlesEmptyFile(@TempDir Path tmpDir) throws IOException {
+        Path empty = tmpDir.resolve("empty.ndjson");
+        Path docs  = tmpDir.resolve("docs.ndjson");
+        Files.writeString(empty, "");
+        Files.writeString(docs,  "{\"id\":\"1\"}\n{\"id\":\"2\"}\n");
+        assertEquals(2, new NdjsonReader(List.of(empty.toString(), docs.toString())).getRowCount());
+    }
+
+    @Test
+    void getRowCount_multiFile_parallelCount_throwsIOExceptionOnFailure(@TempDir Path tmpDir) throws IOException {
+        Path f1 = tmpDir.resolve("a.ndjson");
+        Path missing = tmpDir.resolve("nonexistent.ndjson"); // does not exist → file not found
+        Files.writeString(f1, "{\"id\":\"1\"}\n");
+        assertThrows(IOException.class,
+            () -> new NdjsonReader(List.of(f1.toString(), missing.toString())).getRowCount());
+    }
+
+    @Test
     void readAll_invalidJson_throwsIOException(@TempDir Path tmpDir) throws IOException {
         Path f = tmpDir.resolve("bad.ndjson");
         Files.writeString(f, "not-valid-json\n");
@@ -533,5 +562,77 @@ class NdjsonReaderTest {
              var w = new java.io.OutputStreamWriter(out, java.nio.charset.StandardCharsets.UTF_8)) {
             w.write(content);
         }
+    }
+
+    // ── findMaxTimestamp ──────────────────────────────────────────────────────────
+
+    @Test
+    void findMaxTimestamp_returnsLatestTimestamp(@TempDir Path tmp) throws IOException {
+        Path f = tmp.resolve("ts.ndjson");
+        Files.writeString(f,
+                "{\"@timestamp\":\"2026-06-13T08:00:00Z\",\"metrics.system.memory.utilization\":0.5}\n" +
+                "{\"@timestamp\":\"2026-06-13T10:00:00Z\",\"metrics.system.memory.utilization\":0.6}\n" +
+                "{\"@timestamp\":\"2026-06-13T06:00:00Z\",\"metrics.system.memory.utilization\":0.4}\n");
+        Optional<Instant> result = new NdjsonReader(f.toString()).findMaxTimestamp();
+        assertTrue(result.isPresent());
+        assertEquals(Instant.parse("2026-06-13T10:00:00Z"), result.get());
+    }
+
+    @Test
+    void findMaxTimestamp_gzipFile_returnsLatestTimestamp(@TempDir Path tmp) throws IOException {
+        Path f = tmp.resolve("ts.ndjson.gz");
+        writeGzip(f,
+                "{\"@timestamp\":\"2026-06-13T09:00:00Z\",\"metrics.system.memory.utilization\":0.5}\n" +
+                "{\"@timestamp\":\"2026-06-13T11:00:00Z\",\"metrics.system.memory.utilization\":0.7}\n");
+        Optional<Instant> result = new NdjsonReader(f.toString()).findMaxTimestamp();
+        assertTrue(result.isPresent());
+        assertEquals(Instant.parse("2026-06-13T11:00:00Z"), result.get());
+    }
+
+    @Test
+    void findMaxTimestamp_noTimestampField_returnsEmpty(@TempDir Path tmp) throws IOException {
+        Path f = tmp.resolve("no_ts.ndjson");
+        Files.writeString(f, "{\"id\":\"1\",\"value\":42}\n{\"id\":\"2\",\"value\":99}\n");
+        Optional<Instant> result = new NdjsonReader(f.toString()).findMaxTimestamp();
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void findMaxTimestamp_emptyFile_returnsEmpty(@TempDir Path tmp) throws IOException {
+        Path f = tmp.resolve("empty.ndjson");
+        Files.writeString(f, "");
+        Optional<Instant> result = new NdjsonReader(f.toString()).findMaxTimestamp();
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void findMaxTimestamp_blankLines_skipped(@TempDir Path tmp) throws IOException {
+        Path f = tmp.resolve("blanks.ndjson");
+        Files.writeString(f, "\n\n{\"@timestamp\":\"2026-06-13T09:00:00Z\"}\n\n");
+        Optional<Instant> result = new NdjsonReader(f.toString()).findMaxTimestamp();
+        assertTrue(result.isPresent());
+        assertEquals(Instant.parse("2026-06-13T09:00:00Z"), result.get());
+    }
+
+    @Test
+    void findMaxTimestamp_invalidTimestampIgnored_returnsValidMax(@TempDir Path tmp) throws IOException {
+        Path f = tmp.resolve("mixed_ts.ndjson");
+        Files.writeString(f,
+                "{\"@timestamp\":\"not-a-date\"}\n" +
+                "{\"@timestamp\":\"2026-06-13T07:00:00Z\"}\n");
+        Optional<Instant> result = new NdjsonReader(f.toString()).findMaxTimestamp();
+        assertTrue(result.isPresent());
+        assertEquals(Instant.parse("2026-06-13T07:00:00Z"), result.get());
+    }
+
+    @Test
+    void findMaxTimestamp_multipleFiles_returnsOverallMax(@TempDir Path tmp) throws IOException {
+        Path f1 = tmp.resolve("a.ndjson");
+        Path f2 = tmp.resolve("b.ndjson");
+        Files.writeString(f1, "{\"@timestamp\":\"2026-06-13T06:00:00Z\"}\n");
+        Files.writeString(f2, "{\"@timestamp\":\"2026-06-13T12:00:00Z\"}\n");
+        Optional<Instant> result = new NdjsonReader(List.of(f1.toString(), f2.toString())).findMaxTimestamp();
+        assertTrue(result.isPresent());
+        assertEquals(Instant.parse("2026-06-13T12:00:00Z"), result.get());
     }
 }

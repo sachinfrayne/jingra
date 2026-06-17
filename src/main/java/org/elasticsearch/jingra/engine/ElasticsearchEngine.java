@@ -17,18 +17,29 @@ import co.elastic.clients.transport.rest5_client.low_level.Request;
 import co.elastic.clients.transport.rest5_client.low_level.Response;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.elasticsearch.jingra.config.DatasetConfig;
+import org.elasticsearch.jingra.config.JingraConfig;
+import org.elasticsearch.jingra.config.MetricsgenConfig;
 import org.elasticsearch.jingra.model.Document;
 import org.elasticsearch.jingra.model.QueryParams;
 import org.elasticsearch.jingra.model.QueryResponse;
 import org.elasticsearch.jingra.utils.TlsSettings;
 
+import org.apache.hc.core5.http.ContentType;
+import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
+
 import java.io.IOException;
 import java.io.StringReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Elasticsearch engine implementation.
@@ -37,6 +48,7 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
     private ElasticsearchClient client;
     private co.elastic.clients.transport.rest5_client.low_level.Rest5Client restClient;
+    private String baseUrl;
 
     public ElasticsearchEngine(Map<String, Object> config) {
         super(config);
@@ -103,24 +115,41 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
         return response.getStatusCode() == 200;
     }
 
+    private static void requireOk(Response response, String description) throws Exception {
+        int status = response.getStatusCode();
+        if (status >= 300) {
+            String body = new String(response.getEntity().getContent().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            throw new Exception(description + " failed with HTTP " + status + ": " + body);
+        }
+    }
+
     protected void applyIlmPolicyOperation(String policyName, String policyJson) throws Exception {
         Request req = new Request("PUT", "/_ilm/policy/" + policyName);
         req.setJsonEntity(policyJson);
-        restClient.performRequest(req);
+        requireOk(restClient.performRequest(req), "PUT /_ilm/policy/" + policyName);
     }
 
     protected void applyIndexTemplateOperation(String templateName, String templateJson) throws Exception {
         Request req = new Request("PUT", "/_index_template/" + templateName);
         req.setJsonEntity(templateJson);
-        restClient.performRequest(req);
+        requireOk(restClient.performRequest(req), "PUT /_index_template/" + templateName);
+    }
+
+    protected void applyComponentTemplateOperation(String templateName, String templateJson) throws Exception {
+        Request req = new Request("PUT", "/_component_template/" + templateName);
+        req.setJsonEntity(templateJson);
+        requireOk(restClient.performRequest(req), "PUT /_component_template/" + templateName);
     }
 
     protected void createDataStreamOperation(String name) throws Exception {
-        restClient.performRequest(new Request("PUT", "/_data_stream/" + name));
+        requireOk(restClient.performRequest(new Request("PUT", "/_data_stream/" + name)),
+                "PUT /_data_stream/" + name);
     }
 
     protected void deleteDataStreamOperation(String name) throws Exception {
-        restClient.performRequest(new Request("DELETE", "/_data_stream/" + name));
+        requireOk(restClient.performRequest(new Request("DELETE", "/_data_stream/" + name)),
+                "DELETE /_data_stream/" + name);
     }
 
     protected String loadIlmFile(String filename) throws java.io.IOException {
@@ -255,6 +284,7 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
             this.client = wrapper.getClient();
             this.restClient = wrapper.getRestClient();
+            this.baseUrl = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
 
             // Test connection
             client.info();
@@ -262,6 +292,61 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
             return true;
         } catch (Exception e) {
             logger.error("Failed to connect to Elasticsearch", e);
+            return false;
+        }
+    }
+
+    @Override
+    public boolean createDataStore(String indexName, org.elasticsearch.jingra.config.DatasetConfig dataset) {
+        if (isDataStream() && dataset != null) {
+            // Null policy/template means "skip" — rely on whatever already exists in ES
+            return createDataStreamWithNames(indexName, dataset.getIlmPolicy(),
+                    dataset.getIndexTemplate(), dataset.getComponentTemplate());
+        }
+        return createDataStore(indexName, dataset != null ? dataset.getSchemaName() : null);
+    }
+
+    private boolean createDataStreamWithNames(String indexName, String policyName,
+                                              String templateName, String componentTemplateName) {
+        if (!hasClient()) {
+            logger.error("Elasticsearch client not initialized");
+            return false;
+        }
+        if (dataStoreExists(indexName)) {
+            logger.warn("Data stream '{}' already exists", indexName);
+            return false;
+        }
+        try {
+            if (policyName != null) {
+                String policyJson = loadIlmFile(policyName + ".json");
+                if (policyJson == null) {
+                    return false;
+                }
+                applyIlmPolicyOperation(policyName, policyJson);
+            }
+            if (templateName != null) {
+                String templateJson = loadIlmFile(templateName + ".json");
+                if (templateJson == null) {
+                    return false;
+                }
+                applyIndexTemplateOperation(templateName, templateJson);
+            }
+            if (componentTemplateName != null) {
+                String componentJson = loadIlmFile(componentTemplateName + ".json");
+                if (componentJson == null) {
+                    return false;
+                }
+                applyComponentTemplateOperation(componentTemplateName, componentJson);
+            }
+            createDataStreamOperation(indexName);
+            logger.info("Created data stream '{}' (policy={}, template={}, componentTemplate={})",
+                    indexName,
+                    policyName != null ? policyName : "existing",
+                    templateName != null ? templateName : "existing",
+                    componentTemplateName != null ? componentTemplateName : "existing");
+            return true;
+        } catch (Exception e) {
+            logger.error("Failed to create data stream '{}'", indexName, e);
             return false;
         }
     }
@@ -378,10 +463,100 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
     }
 
     @Override
+    public int create(List<Document> documents, String indexName, String idField) {
+        if (!hasClient()) {
+            logger.error("Elasticsearch client not initialized");
+            return 0;
+        }
+        try {
+            BulkRequest.Builder bulkBuilder = new BulkRequest.Builder();
+            int count = 0;
+            for (Document doc : documents) {
+                Map<String, Object> fields = doc.getFields();
+                bulkBuilder.operations(op -> op.create(c -> c.index(indexName).document(fields)));
+                count++;
+            }
+            BulkResponse response = bulkOperation(bulkBuilder.build());
+            if (response.errors()) {
+                int errorCount = 0;
+                for (BulkResponseItem item : response.items()) {
+                    if (item.error() != null) {
+                        errorCount++;
+                        if (errorCount <= 5) {
+                            logger.error("Bulk error: {}", item.error().reason());
+                        }
+                    }
+                }
+                logger.warn("Bulk ingestion had {} errors out of {} documents", errorCount, count);
+                boolean failOnPartial = getConfigBoolean("ingest_fail_on_partial_errors", true);
+                if (failOnPartial) {
+                    throw new IllegalStateException(
+                            "Bulk ingestion had " + errorCount + " errors out of " + count + " documents");
+                }
+                return count - errorCount;
+            }
+            return count;
+        } catch (Exception e) {
+            logger.error("Failed to create documents", e);
+            throw new RuntimeException("Bulk create failed", e);
+        }
+    }
+
+    // ── OTLP ingest ───────────────────────────────────────────────────────────────
+
+    /**
+     * Low-level POST to {@code /_otlp} (or a namespaced variant).
+     * Overridden in tests to capture the request body without a real ES cluster.
+     */
+    protected int otlpOperation(byte[] protoBytes) throws Exception {
+        Request req = new Request("POST", "/_otlp/v1/metrics");
+        req.setEntity(new ByteArrayEntity(protoBytes, ContentType.create("application/x-protobuf")));
+        req.setOptions(co.elastic.clients.transport.rest5_client.low_level.RequestOptions.DEFAULT
+                .toBuilder()
+                .addHeader("Content-Type", "application/x-protobuf")
+                .build());
+        Response resp = restClient.performRequest(req);
+        requireOk(resp, "POST /_otlp/v1/metrics");
+        return 0;
+    }
+
+    private boolean isOtlpMode() {
+        return "otlp".equalsIgnoreCase(getConfigString("ingest_mode", null));
+    }
+
+    int ingestOtlp(List<Document> documents, String indexName) {
+        String dataset   = getConfigString("otlp_dataset",   "jingra");
+        String namespace = getConfigString("otlp_namespace",  "benchmark");
+        int batchSize    = getConfigInt("otlp_batch_size", 1000);
+        OtlpBatchConverter converter = new OtlpBatchConverter(dataset, namespace);
+        int total = 0;
+        for (int i = 0; i < documents.size(); i += batchSize) {
+            List<Document> batch = documents.subList(i, Math.min(i + batchSize, documents.size()));
+            byte[] protoBytes = converter.convert(batch);
+            try {
+                otlpOperation(protoBytes);
+                total += batch.size();
+            } catch (Exception e) {
+                logger.error("OTLP batch ingest failed at offset {}", i, e);
+                throw new RuntimeException("OTLP ingest failed", e);
+            }
+        }
+        return total;
+    }
+
+    @Override
     public int ingest(List<Document> documents, String indexName, String idField) {
         if (!hasClient()) {
             logger.error("Elasticsearch client not initialized");
             return 0;
+        }
+
+        if (isOtlpMode()) {
+            return ingestOtlp(documents, indexName);
+        }
+
+        if (isDataStream()) {
+            return create(documents, indexName, idField);
         }
 
         try {
@@ -648,6 +823,129 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
         }
 
         return metadata;
+    }
+
+    // ── Custom load (metricsgenreceiver) ─────────────────────────────────────────
+
+    /** ES transform block: sets data-stream routing attributes and strips noise. */
+    private static final String ES_TRANSFORM_BLOCK =
+            "  transform:\n" +
+            "    metric_statements:\n" +
+            "      - context: resource\n" +
+            "        statements:\n" +
+            "          - set(attributes[\"data_stream.dataset\"], \"demo\")\n" +
+            "          - set(attributes[\"data_stream.namespace\"], \"default\")\n" +
+            "          - delete_key(attributes, \"host.ip\")\n" +
+            "          - delete_key(attributes, \"host.mac\")";
+
+    @Override
+    public boolean supportsCustomLoad() {
+        return true;
+    }
+
+    @Override
+    public int customLoad(JingraConfig config, DatasetConfig dataset, String indexName) throws Exception {
+        MetricsgenConfig cfg = config.getLoad().getMetricsgen();
+        String otlpEndpoint = baseUrl + "/_otlp";
+        String otelYaml = MetricsgenLoader.renderOtelConfig(
+                cfg, otlpEndpoint, "otlphttp/elasticsearch", ES_TRANSFORM_BLOCK);
+
+        Path tmpConfig = Files.createTempFile("metricsgen-", ".yaml");
+        try {
+            Files.writeString(tmpConfig, otelYaml);
+            logger.info("Running metricsgenreceiver → {} (scale={}, window={})...",
+                    otlpEndpoint, cfg.scaleOrDefault(), cfg.startNowMinusOrDefault());
+
+            ScheduledExecutorService poller = startEsProgressPoller(indexName);
+            try {
+                MetricsgenLoader.ProcessResult result = runMetricsgenreceiver(tmpConfig, cfg);
+                if (result.exitCode() != 0) {
+                    throw new RuntimeException(
+                            "metricsgenreceiver exited with code " + result.exitCode()
+                                    + "\n" + result.stderr());
+                }
+                int dp   = MetricsgenLoader.parseDatapoints(result.stderr());
+                double rate = MetricsgenLoader.parseRate(result.stderr());
+                if (dp > 0) {
+                    logger.info("Ingested {} data points ({} dp/s)", dp, String.format("%.0f", rate));
+                }
+                logger.info("Force-merging '{}' to 1 segment per shard...", indexName);
+                forceMergeOperation(indexName);
+                logger.info("Force-merge complete.");
+                return dp;
+            } finally {
+                poller.shutdownNow();
+                poller.awaitTermination(5, TimeUnit.SECONDS);
+            }
+        } finally {
+            Files.deleteIfExists(tmpConfig);
+        }
+    }
+
+    /**
+     * Launches metricsgenreceiver with the given config file and returns its result.
+     * Override in tests to inject canned stderr without a real subprocess.
+     */
+    protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(Path configFile, MetricsgenConfig cfg) throws Exception {
+        Path binary = MetricsgenLoader.resolveBinary(cfg.versionOrDefault());
+        return MetricsgenLoader.runBinary(binary, configFile);
+    }
+
+    /**
+     * Force-merges the target index / data stream to {@code max_num_segments=1}.
+     * Blocks until the merge completes ({@code wait_for_completion=true}).
+     * Protected for test overriding.
+     * Called by {@link #awaitIndexReady} after custom load to compact the data before querying.
+     * Protected for test overriding.
+     */
+    protected void forceMergeOperation(String indexName) throws Exception {
+        Request req = new Request("POST", "/" + indexName + "/_forcemerge?max_num_segments=1&wait_for_completion=true");
+        requireOk(restClient.performRequest(req), "POST /" + indexName + "/_forcemerge");
+    }
+
+    /** Initial delay for the ES progress poller, in milliseconds. Override in tests to fire immediately. */
+    protected long esProgressPollerInitialDelayMs() { return 10_000L; }
+    /** Poll interval for the ES progress poller, in milliseconds. */
+    protected long esProgressPollerIntervalMs()     { return 10_000L; }
+
+    /**
+     * Called periodically during custom load to log ingest progress.
+     * Protected so tests can invoke it directly without waiting for the scheduler.
+     */
+    @SuppressWarnings("unchecked")
+    protected void logEsProgress(String indexName) {
+        try {
+            Request req = new Request("GET",
+                    "/_cat/indices/" + indexName + "?format=json&h=docs.count,store.size");
+            Response resp = restClient.performRequest(req);
+            byte[] body = resp.getEntity().getContent().readAllBytes();
+            List<Map<String, Object>> result = objectMapper.readValue(body,
+                    new TypeReference<List<Map<String, Object>>>() {});
+            if (!result.isEmpty()) {
+                Object docs = result.get(0).get("docs.count");
+                Object size = result.get(0).get("store.size");
+                logger.info("  ES: {} docs, {} stored", docs, size);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    /**
+     * Returns the {@link Runnable} that the progress poller will fire on each tick.
+     * Override in tests to assert the poller is wired correctly or to fire it directly.
+     */
+    protected Runnable esProgressPoller(String indexName) {
+        return () -> logEsProgress(indexName);
+    }
+
+    private ScheduledExecutorService startEsProgressPoller(String indexName) {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "metricsgen-progress-poller");
+            t.setDaemon(true);
+            return t;
+        });
+        scheduler.scheduleAtFixedRate(esProgressPoller(indexName),
+                esProgressPollerInitialDelayMs(), esProgressPollerIntervalMs(), TimeUnit.MILLISECONDS);
+        return scheduler;
     }
 
     @Override

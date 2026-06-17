@@ -145,9 +145,12 @@ public final class ConfigValidator {
      */
     public static void validateForLoad(JingraConfig config) {
         Objects.requireNonNull(config, "config");
+        boolean hasMetricsgen = config.getLoad() != null && config.getLoad().getMetricsgen() != null;
         for (DatasetConfig ds : config.getActiveDatasets()) {
             requireNonNullState(ds.getPath(), "dataset.path is required for load");
-            requireNonBlank(ds.getPath().getDataPath(), "dataset.path.data_path is required for load");
+            if (!hasMetricsgen) {
+                requireNonBlank(ds.getPath().getDataPath(), "dataset.path.data_path is required for load");
+            }
             // id_field is optional for metrics datasets (e.g. TSDS) where _id is engine-generated
             if (!"metrics".equals(ds.getType())) {
                 DatasetConfig.DataMappingConfig dm = ds.getDataMapping();

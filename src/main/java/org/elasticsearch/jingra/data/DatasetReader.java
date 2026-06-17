@@ -36,6 +36,17 @@ public interface DatasetReader {
      */
     long getRowCount() throws IOException;
 
+    /**
+     * Scan the dataset and return the maximum {@code @timestamp} value found, or
+     * {@link java.util.Optional#empty()} if the dataset contains no timestamp fields.
+     * Used by {@code LoadCommand} to rebase timestamps to "now" at ingest time so that
+     * a dataset generated once remains valid for any future benchmark run.
+     * Implementations that do not contain {@code @timestamp} fields may return empty.
+     */
+    default java.util.Optional<java.time.Instant> findMaxTimestamp() throws IOException {
+        return java.util.Optional.empty();
+    }
+
     @FunctionalInterface
     interface BatchConsumer {
         void accept(List<Document> batch) throws IOException;

@@ -1,9 +1,0 @@
-FROM metrics
-| WHERE `system.memory.usage` IS NOT NULL AND state == "used"
-| STATS avg_memory_used = avg(`system.memory.usage`),
-        max_memory_used = max(`system.memory.usage`),
-        min_memory_used = min(`system.memory.usage`),
-        median_memory_used = median(`system.memory.usage`)
-  BY `host.name`
-| SORT avg_memory_used DESC
-| LIMIT {{size}}

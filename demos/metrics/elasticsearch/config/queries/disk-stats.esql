@@ -1,8 +1,0 @@
-FROM metrics
-| WHERE `system.disk.io` IS NOT NULL AND device == "disk0"
-| STATS total_bytes = sum(`system.disk.io`),
-        avg_bytes = avg(`system.disk.io`),
-        max_bytes = max(`system.disk.io`)
-  BY `host.name`, direction
-| SORT total_bytes DESC
-| LIMIT {{size}}

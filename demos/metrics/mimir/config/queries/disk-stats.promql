@@ -1,3 +1,0 @@
-topk({{size}},
-  sum_over_time(system_disk_io{device="disk0"}[5m])
-)
