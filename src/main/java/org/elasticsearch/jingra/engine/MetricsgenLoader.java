@@ -214,84 +214,20 @@ public class MetricsgenLoader {
         return s.isEmpty() ? 0L : Long.parseLong(s, 8);
     }
 
-    // ── OTel config rendering ────────────────────────────────────────────────────
+    // ── Env var building ─────────────────────────────────────────────────────────
 
     /**
-     * Renders the OTel Collector YAML config that drives metricsgenreceiver.
-     *
-     * @param cfg            metricsgen settings (scale, interval, etc.)
-     * @param otlpEndpoint   OTLP HTTP base endpoint (e.g. {@code http://host:port/api/v1/otlp})
-     * @param exporterName   OTel exporter component name (e.g. {@code otlphttp/prometheus})
-     * @param transformBlock YAML block for the {@code transform} processor (engine-specific)
+     * Converts {@link MetricsgenConfig} fields into environment variables consumed by the
+     * OTel Collector's native {@code ${VAR}} expansion when reading the committed config template.
      */
-    public static String renderOtelConfig(MetricsgenConfig cfg, String otlpEndpoint,
-                                          String exporterName, String transformBlock) {
-        return renderOtelConfig(cfg, otlpEndpoint, exporterName, transformBlock, Map.of());
-    }
-
-    /**
-     * Renders the OTel Collector YAML config with optional exporter headers (e.g.
-     * {@code X-Scope-OrgID} for Mimir multi-tenancy).
-     */
-    public static String renderOtelConfig(MetricsgenConfig cfg, String otlpEndpoint,
-                                          String exporterName, String transformBlock,
-                                          Map<String, String> exporterHeaders) {
-        String headersBlock = "";
-        if (!exporterHeaders.isEmpty()) {
-            StringBuilder sb = new StringBuilder("    headers:\n");
-            new java.util.TreeMap<>(exporterHeaders).forEach((k, v) ->
-                    sb.append("      ").append(k).append(": ").append(v).append("\n"));
-            headersBlock = sb.toString();
-        }
-        return String.format("""
-receivers:
-  metricsgen:
-    seed: %d
-    start_now_minus: %s
-    interval: %s
-    real_time: false
-    exit_after_end: true
-    exit_after_end_timeout: 15s
-    scenarios:
-      - path: %s
-        scale: %d
-
-processors:
-%s
-  batch:
-
-exporters:
-  %s:
-    endpoint: %s
-%s    compression: gzip
-    tls:
-      insecure: true
-    sending_queue:
-      enabled: true
-      block_on_overflow: true
-      queue_size: 25
-      num_consumers: 25
-
-service:
-  telemetry:
-    metrics:
-      level: none
-  pipelines:
-    metrics:
-      receivers: [metricsgen]
-      processors: [transform, batch]
-      exporters: [%s]
-""",
-                cfg.seedOrDefault(),
-                cfg.startNowMinusOrDefault(),
-                cfg.intervalOrDefault(),
-                cfg.scenarioOrDefault(),
-                cfg.scaleOrDefault(),
-                transformBlock,
-                exporterName,
-                otlpEndpoint,
-                headersBlock,
-                exporterName);
+    public static Map<String, String> buildEnvVars(MetricsgenConfig cfg) {
+        Map<String, String> vars = new java.util.HashMap<>();
+        vars.put("METRICSGEN_SEED",            String.valueOf(cfg.seedOrDefault()));
+        vars.put("METRICSGEN_START_NOW_MINUS",  cfg.startNowMinusOrDefault());
+        vars.put("METRICSGEN_INTERVAL",         cfg.intervalOrDefault());
+        vars.put("METRICSGEN_SCENARIO",         cfg.scenarioOrDefault());
+        vars.put("METRICSGEN_SCALE",            String.valueOf(cfg.scaleOrDefault()));
+        return vars;
     }
 
     // ── Subprocess ───────────────────────────────────────────────────────────────
@@ -299,9 +235,23 @@ service:
     /**
      * Launches the binary with {@code --config <configFile>}, streams stderr to the logger,
      * and returns the exit code plus the full captured stderr string.
+     * Convenience overload with no extra environment variables.
      */
     public static ProcessResult runBinary(Path binary, Path configFile) throws Exception {
+        return runBinary(binary, configFile, Map.of());
+    }
+
+    /**
+     * Launches the binary with {@code --config <configFile>} and merges {@code envVars} into the
+     * process environment. The OTel Collector expands {@code ${VAR}} references in the config
+     * template using these variables at startup.
+     */
+    public static ProcessResult runBinary(Path binary, Path configFile,
+                                          Map<String, String> envVars) throws Exception {
         ProcessBuilder pb = new ProcessBuilder(binary.toString(), "--config", configFile.toString());
+        if (!envVars.isEmpty()) {
+            pb.environment().putAll(envVars);
+        }
         pb.redirectErrorStream(false);
         Process process = pb.start();
 

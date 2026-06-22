@@ -16,16 +16,14 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Map;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class MimirEngine extends AbstractBenchmarkEngine {
@@ -217,18 +215,6 @@ public class MimirEngine extends AbstractBenchmarkEngine {
 
     // ── Custom load (metricsgenreceiver) ─────────────────────────────────────────
 
-    /** Mimir uses the same label-merge transform as Prometheus. */
-    private static final String MIMIR_TRANSFORM_BLOCK =
-            "  transform:\n" +
-            "    metric_statements:\n" +
-            "      - context: resource\n" +
-            "        statements:\n" +
-            "          - delete_key(attributes, \"host.ip\")\n" +
-            "          - delete_key(attributes, \"host.mac\")\n" +
-            "      - context: datapoint\n" +
-            "        statements:\n" +
-            "          - merge_maps(attributes, resource.attributes, \"insert\")";
-
     @Override
     public boolean supportsCustomLoad() {
         return true;
@@ -237,47 +223,42 @@ public class MimirEngine extends AbstractBenchmarkEngine {
     @Override
     public int customLoad(JingraConfig config, DatasetConfig dataset, String indexName) throws Exception {
         MetricsgenConfig cfg = config.getLoad().getMetricsgen();
-        String otlpEndpoint = baseUrl + "/otlp";
-        Map<String, String> headers = Map.of("X-Scope-OrgID", orgId());
-        String otelYaml = MetricsgenLoader.renderOtelConfig(
-                cfg, otlpEndpoint, "otlphttp/mimir", MIMIR_TRANSFORM_BLOCK, headers);
+        Map<String, String> envVars = new HashMap<>(MetricsgenLoader.buildEnvVars(cfg));
+        envVars.put("MIMIR_URL",    baseUrl);
+        envVars.put("MIMIR_ORG_ID", orgId());
 
-        Path tmpConfig = Files.createTempFile("metricsgen-", ".yaml");
+        Path binary     = MetricsgenLoader.resolveBinary(cfg.versionOrDefault());
+        Path otelConfig = Path.of(cfg.otelColConfigOrDefault());
+        logger.info("Running metricsgenreceiver → {} (scale={}, window={}, config={})...",
+                baseUrl, cfg.scaleOrDefault(), cfg.startNowMinusOrDefault(), otelConfig);
+
+        ScheduledExecutorService poller = startProgressPoller();
         try {
-            Files.writeString(tmpConfig, otelYaml);
-            logger.info("Running metricsgenreceiver → {} (scale={}, window={})...",
-                    otlpEndpoint, cfg.scaleOrDefault(), cfg.startNowMinusOrDefault());
-
-            ScheduledExecutorService poller = startProgressPoller();
-            try {
-                MetricsgenLoader.ProcessResult result = runMetricsgenreceiver(tmpConfig, cfg);
-                if (result.exitCode() != 0) {
-                    throw new RuntimeException(
-                            "metricsgenreceiver exited with code " + result.exitCode()
-                                    + "\n" + result.stderr());
-                }
-                int dp   = MetricsgenLoader.parseDatapoints(result.stderr());
-                double rate = MetricsgenLoader.parseRate(result.stderr());
-                if (dp > 0) {
-                    logger.info("Ingested {} data points ({} dp/s)", dp, String.format("%.0f", rate));
-                }
-                return dp;
-            } finally {
-                poller.shutdownNow();
-                poller.awaitTermination(5, TimeUnit.SECONDS);
+            MetricsgenLoader.ProcessResult result = runMetricsgenreceiver(binary, otelConfig, envVars);
+            if (result.exitCode() != 0) {
+                throw new RuntimeException(
+                        "metricsgenreceiver exited with code " + result.exitCode()
+                                + "\n" + result.stderr());
             }
+            int dp   = MetricsgenLoader.parseDatapoints(result.stderr());
+            double rate = MetricsgenLoader.parseRate(result.stderr());
+            if (dp > 0) {
+                logger.info("Ingested {} data points ({} dp/s)", dp, String.format("%.0f", rate));
+            }
+            return dp;
         } finally {
-            Files.deleteIfExists(tmpConfig);
+            poller.shutdownNow();
+            poller.awaitTermination(5, TimeUnit.SECONDS);
         }
     }
 
     /**
      * Launches metricsgenreceiver. Override in tests to inject canned output.
      */
-    protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(Path configFile, MetricsgenConfig cfg)
+    protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(Path binary, Path configFile,
+                                                                    Map<String, String> envVars)
             throws Exception {
-        Path binary = MetricsgenLoader.resolveBinary(cfg.versionOrDefault());
-        return MetricsgenLoader.runBinary(binary, configFile);
+        return MetricsgenLoader.runBinary(binary, configFile, envVars);
     }
 
     /** Initial delay for the progress poller, in milliseconds. Override in tests. */

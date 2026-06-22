@@ -734,10 +734,42 @@ class ElasticsearchOfflineCoverageTest {
 
     // ── logEsProgress ────────────────────────────────────────────────────────────
 
+    private static String statsJson(long docCount, long sizeBytes) {
+        return "{\"_all\":{\"primaries\":{\"docs\":{\"count\":" + docCount
+                + "},\"store\":{\"size_in_bytes\":" + sizeBytes + "}}}}";
+    }
+
     @Test
-    void logEsProgress_logsDocCountWithoutThrowing() throws Exception {
-        String catJson = "[{\"docs.count\":\"1000\",\"store.size\":\"5mb\"}]";
-        Response resp = mockResponse(200, catJson);
+    void logEsProgress_logsGbRange() throws Exception {
+        Response resp = mockResponse(200, statsJson(1_000_000, 2L * 1024 * 1024 * 1024)); // 2 GB
+        Rest5Client mockRest = Mockito.mock(Rest5Client.class);
+        Mockito.when(mockRest.performRequest(Mockito.any())).thenReturn(resp);
+
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("url_env", BOGUS_URL_ENV)) {
+            @Override protected boolean hasClient() { return true; }
+        };
+        injectRestClient(e, mockRest);
+        assertDoesNotThrow(() -> e.logEsProgress("my-index"));
+        assertDoesNotThrow(e::close);
+    }
+
+    @Test
+    void logEsProgress_logsMbRange() throws Exception {
+        Response resp = mockResponse(200, statsJson(500, 5 * 1024 * 1024)); // 5 MB
+        Rest5Client mockRest = Mockito.mock(Rest5Client.class);
+        Mockito.when(mockRest.performRequest(Mockito.any())).thenReturn(resp);
+
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("url_env", BOGUS_URL_ENV)) {
+            @Override protected boolean hasClient() { return true; }
+        };
+        injectRestClient(e, mockRest);
+        assertDoesNotThrow(() -> e.logEsProgress("my-index"));
+        assertDoesNotThrow(e::close);
+    }
+
+    @Test
+    void logEsProgress_logsKbRange() throws Exception {
+        Response resp = mockResponse(200, statsJson(10, 512 * 1024)); // 512 KB
         Rest5Client mockRest = Mockito.mock(Rest5Client.class);
         Mockito.when(mockRest.performRequest(Mockito.any())).thenReturn(resp);
 
@@ -764,8 +796,8 @@ class ElasticsearchOfflineCoverageTest {
     }
 
     @Test
-    void logEsProgress_emptyResultSilent() throws Exception {
-        Response resp = mockResponse(200, "[]");
+    void logEsProgress_zeroDocsAndBytesDoesNotThrow() throws Exception {
+        Response resp = mockResponse(200, statsJson(0, 0));
         Rest5Client mockRest = Mockito.mock(Rest5Client.class);
         Mockito.when(mockRest.performRequest(Mockito.any())).thenReturn(resp);
 
@@ -823,31 +855,24 @@ class ElasticsearchOfflineCoverageTest {
         Files.write(script, scriptContent);
         Files.setPosixFilePermissions(script, PosixFilePermissions.fromString("rwxr-xr-x"));
 
-        MetricsgenLoader.binaryPathOverrideForTests.set(script);
-        try {
-            ElasticsearchEngine e = new ElasticsearchEngine(Map.of("url", "http://localhost:9200")) {
-                @Override public boolean connect() {
-                    try {
-                        Field f = ElasticsearchEngine.class.getDeclaredField("baseUrl");
-                        f.setAccessible(true);
-                        f.set(this, "http://localhost:9200");
-                    } catch (Exception ex) { throw new RuntimeException(ex); }
-                    return true;
-                }
-            };
-            assertTrue(e.connect());
-            org.elasticsearch.jingra.config.MetricsgenConfig cfg =
-                    new org.elasticsearch.jingra.config.MetricsgenConfig();
-            cfg.setVersion("1.0.7");
-            Path cfgFile = tmpDir.resolve("config.yaml");
-            Files.writeString(cfgFile, "placeholder: true\n");
-            MetricsgenLoader.ProcessResult result = e.runMetricsgenreceiver(cfgFile, cfg);
-            assertEquals(0, result.exitCode());
-            assertTrue(result.stderr().contains("datapoints"), result.stderr());
-            assertDoesNotThrow(e::close);
-        } finally {
-            MetricsgenLoader.binaryPathOverrideForTests.remove();
-        }
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("url", "http://localhost:9200")) {
+            @Override public boolean connect() {
+                try {
+                    Field f = ElasticsearchEngine.class.getDeclaredField("baseUrl");
+                    f.setAccessible(true);
+                    f.set(this, "http://localhost:9200");
+                } catch (Exception ex) { throw new RuntimeException(ex); }
+                return true;
+            }
+        };
+        assertTrue(e.connect());
+        Path cfgFile = tmpDir.resolve("otelcol.yaml");
+        Files.writeString(cfgFile, "placeholder: true\n");
+        MetricsgenLoader.ProcessResult result = e.runMetricsgenreceiver(
+                script, cfgFile, Map.of("ELASTICSEARCH_URL", "http://localhost:9200"));
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stderr().contains("datapoints"), result.stderr());
+        assertDoesNotThrow(e::close);
     }
 
     // ── esProgressPoller ────────────────────────────────────────────────────────
@@ -889,14 +914,11 @@ class ElasticsearchOfflineCoverageTest {
     }
 
     @Test
-    void customLoad_runsBinaryForceMergesAndReturnsDatapointCount() throws Exception {
+    void customLoad_withForceMergeTrue_callsForceMerge() throws Exception {
         String fakeStderr = "{\"datapoints\":100000,\"data_points_per_second\":50000.0}\n";
         AtomicBoolean forceMergeCalled = new AtomicBoolean();
         ElasticsearchEngine e = new ElasticsearchEngine(Map.of("url", "http://localhost:9200")) {
-            @Override
-            public boolean connect() {
-                // Set baseUrl directly via reflection-free approach: connect() normally stores baseUrl;
-                // we expose it by overriding connect() to also set the private field.
+            @Override public boolean connect() {
                 try {
                     var f = ElasticsearchEngine.class.getDeclaredField("baseUrl");
                     f.setAccessible(true);
@@ -904,21 +926,111 @@ class ElasticsearchOfflineCoverageTest {
                 } catch (Exception ex) { throw new RuntimeException(ex); }
                 return true;
             }
-            @Override
-            protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
-                    java.nio.file.Path configFile, org.elasticsearch.jingra.config.MetricsgenConfig cfg) {
-                assertTrue(java.nio.file.Files.exists(configFile));
+            @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
+                    java.nio.file.Path binary, java.nio.file.Path configFile,
+                    java.util.Map<String, String> envVars) {
                 return new MetricsgenLoader.ProcessResult(0, fakeStderr);
             }
-            @Override
-            protected void forceMergeOperation(String indexName) {
+            @Override protected void forceMergeOperation(String indexName) {
                 forceMergeCalled.set(true);
             }
         };
         assertTrue(e.connect());
-        int dp = e.customLoad(buildCustomLoadConfig(), null, "metrics-demo.otel-default");
+        int dp = e.customLoad(buildCustomLoadConfig(true), null, "metrics-demo.otel-default");
         assertEquals(100_000, dp);
-        assertTrue(forceMergeCalled.get(), "forceMergeOperation should be called after ingest");
+        assertTrue(forceMergeCalled.get(), "forceMergeOperation must be called when force_merge=true");
+        assertDoesNotThrow(e::close);
+    }
+
+    @Test
+    void customLoad_withForceMergeFalse_skipsForceMerge() throws Exception {
+        AtomicBoolean forceMergeCalled = new AtomicBoolean();
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("url", "http://localhost:9200")) {
+            @Override public boolean connect() {
+                try {
+                    var f = ElasticsearchEngine.class.getDeclaredField("baseUrl");
+                    f.setAccessible(true);
+                    f.set(this, "http://localhost:9200");
+                } catch (Exception ex) { throw new RuntimeException(ex); }
+                return true;
+            }
+            @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
+                    java.nio.file.Path binary, java.nio.file.Path configFile,
+                    java.util.Map<String, String> envVars) {
+                return new MetricsgenLoader.ProcessResult(0, "{\"datapoints\":5000}\n");
+            }
+            @Override protected void forceMergeOperation(String indexName) {
+                forceMergeCalled.set(true);
+            }
+        };
+        assertTrue(e.connect());
+        e.customLoad(buildCustomLoadConfig(false), null, "idx");
+        assertFalse(forceMergeCalled.get(), "forceMergeOperation must NOT be called when force_merge=false");
+        assertDoesNotThrow(e::close);
+    }
+
+    @Test
+    void customLoad_withUserButNoPassword_omitsAuthorizationEnvVar() throws Exception {
+        // covers esUser != null && esPassword == null → no auth header
+        java.util.concurrent.atomic.AtomicReference<java.util.Map<String, String>> capturedEnv =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("url", "http://localhost:9200")) {
+            @Override public boolean connect() {
+                try {
+                    Field fb = ElasticsearchEngine.class.getDeclaredField("baseUrl");
+                    fb.setAccessible(true); fb.set(this, "http://localhost:9200");
+                    Field fu = ElasticsearchEngine.class.getDeclaredField("esUser");
+                    fu.setAccessible(true); fu.set(this, "elastic");
+                    // esPassword stays null
+                } catch (Exception ex) { throw new RuntimeException(ex); }
+                return true;
+            }
+            @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
+                    java.nio.file.Path binary, java.nio.file.Path configFile,
+                    java.util.Map<String, String> envVars) {
+                capturedEnv.set(envVars);
+                return new MetricsgenLoader.ProcessResult(0, "no datapoints\n");
+            }
+            @Override protected void forceMergeOperation(String indexName) {}
+        };
+        assertTrue(e.connect());
+        e.customLoad(buildCustomLoadConfig(), null, "idx");
+        assertNull(capturedEnv.get().get("ELASTICSEARCH_AUTHORIZATION"), "no auth header when password absent");
+        assertDoesNotThrow(e::close);
+    }
+
+    @Test
+    void customLoad_withAuth_setsAuthorizationEnvVar() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<java.util.Map<String, String>> capturedEnv =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        ElasticsearchEngine e = new ElasticsearchEngine(Map.of("url", "http://localhost:9200")) {
+            @Override public boolean connect() {
+                try {
+                    Field fb = ElasticsearchEngine.class.getDeclaredField("baseUrl");
+                    fb.setAccessible(true);
+                    fb.set(this, "http://localhost:9200");
+                    Field fu = ElasticsearchEngine.class.getDeclaredField("esUser");
+                    fu.setAccessible(true);
+                    fu.set(this, "elastic");
+                    Field fp = ElasticsearchEngine.class.getDeclaredField("esPassword");
+                    fp.setAccessible(true);
+                    fp.set(this, "changeme");
+                } catch (Exception ex) { throw new RuntimeException(ex); }
+                return true;
+            }
+            @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
+                    java.nio.file.Path binary, java.nio.file.Path configFile,
+                    java.util.Map<String, String> envVars) {
+                capturedEnv.set(envVars);
+                return new MetricsgenLoader.ProcessResult(0, "no datapoints\n");
+            }
+            @Override protected void forceMergeOperation(String indexName) {}
+        };
+        assertTrue(e.connect());
+        e.customLoad(buildCustomLoadConfig(), null, "idx");
+        assertNotNull(capturedEnv.get().get("ELASTICSEARCH_AUTHORIZATION"), "auth header should be set");
+        assertTrue(capturedEnv.get().get("ELASTICSEARCH_AUTHORIZATION").startsWith("Basic "),
+                capturedEnv.get().get("ELASTICSEARCH_AUTHORIZATION"));
         assertDoesNotThrow(e::close);
     }
 
@@ -933,24 +1045,23 @@ class ElasticsearchOfflineCoverageTest {
                 } catch (Exception ex) { throw new RuntimeException(ex); }
                 return true;
             }
-            @Override
-            protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
-                    java.nio.file.Path configFile, org.elasticsearch.jingra.config.MetricsgenConfig cfg) {
+            @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
+                    java.nio.file.Path binary, java.nio.file.Path configFile,
+                    java.util.Map<String, String> envVars) {
                 return new MetricsgenLoader.ProcessResult(0, "no datapoints here\n");
             }
             @Override protected void forceMergeOperation(String indexName) {}
         };
         assertTrue(e.connect());
         int dp = e.customLoad(buildCustomLoadConfig(), null, "idx");
-        assertEquals(0, dp); // covers if (dp > 0) false branch
+        assertEquals(0, dp);
         assertDoesNotThrow(e::close);
     }
 
     @Test
     void customLoad_throwsWhenBinaryExitsNonZero() throws Exception {
         ElasticsearchEngine e = new ElasticsearchEngine(Map.of("url", "http://localhost:9200")) {
-            @Override
-            public boolean connect() {
+            @Override public boolean connect() {
                 try {
                     var f = ElasticsearchEngine.class.getDeclaredField("baseUrl");
                     f.setAccessible(true);
@@ -958,13 +1069,12 @@ class ElasticsearchOfflineCoverageTest {
                 } catch (Exception ex) { throw new RuntimeException(ex); }
                 return true;
             }
-            @Override
-            protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
-                    java.nio.file.Path configFile, org.elasticsearch.jingra.config.MetricsgenConfig cfg) {
+            @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
+                    java.nio.file.Path binary, java.nio.file.Path configFile,
+                    java.util.Map<String, String> envVars) {
                 return new MetricsgenLoader.ProcessResult(1, "fatal: connection refused\n");
             }
-            @Override
-            protected void forceMergeOperation(String indexName) {}
+            @Override protected void forceMergeOperation(String indexName) {}
         };
         assertTrue(e.connect());
         RuntimeException ex = assertThrows(RuntimeException.class,
@@ -974,12 +1084,17 @@ class ElasticsearchOfflineCoverageTest {
     }
 
     private static org.elasticsearch.jingra.config.JingraConfig buildCustomLoadConfig() {
+        return buildCustomLoadConfig(false);
+    }
+
+    private static org.elasticsearch.jingra.config.JingraConfig buildCustomLoadConfig(boolean forceMerge) {
         org.elasticsearch.jingra.config.JingraConfig cfg = new org.elasticsearch.jingra.config.JingraConfig();
         org.elasticsearch.jingra.config.LoadConfig load = new org.elasticsearch.jingra.config.LoadConfig();
         org.elasticsearch.jingra.config.MetricsgenConfig mg = new org.elasticsearch.jingra.config.MetricsgenConfig();
         mg.setScale(10);
         mg.setStartNowMinus("5m");
         load.setMetricsgen(mg);
+        load.setForceMerge(forceMerge);
         cfg.setLoad(load);
         return cfg;
     }

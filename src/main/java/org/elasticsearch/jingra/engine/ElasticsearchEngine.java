@@ -30,7 +30,6 @@ import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
 
 import java.io.IOException;
 import java.io.StringReader;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -49,6 +48,8 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
     private ElasticsearchClient client;
     private co.elastic.clients.transport.rest5_client.low_level.Rest5Client restClient;
     private String baseUrl;
+    private String esUser;
+    private String esPassword;
 
     public ElasticsearchEngine(Map<String, Object> config) {
         super(config);
@@ -285,6 +286,8 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
             this.client = wrapper.getClient();
             this.restClient = wrapper.getRestClient();
             this.baseUrl = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+            this.esUser = user;
+            this.esPassword = password;
 
             // Test connection
             client.info();
@@ -827,17 +830,6 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
 
     // ── Custom load (metricsgenreceiver) ─────────────────────────────────────────
 
-    /** ES transform block: sets data-stream routing attributes and strips noise. */
-    private static final String ES_TRANSFORM_BLOCK =
-            "  transform:\n" +
-            "    metric_statements:\n" +
-            "      - context: resource\n" +
-            "        statements:\n" +
-            "          - set(attributes[\"data_stream.dataset\"], \"demo\")\n" +
-            "          - set(attributes[\"data_stream.namespace\"], \"default\")\n" +
-            "          - delete_key(attributes, \"host.ip\")\n" +
-            "          - delete_key(attributes, \"host.mac\")";
-
     @Override
     public boolean supportsCustomLoad() {
         return true;
@@ -846,49 +838,51 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
     @Override
     public int customLoad(JingraConfig config, DatasetConfig dataset, String indexName) throws Exception {
         MetricsgenConfig cfg = config.getLoad().getMetricsgen();
-        String otlpEndpoint = baseUrl + "/_otlp";
-        String otelYaml = MetricsgenLoader.renderOtelConfig(
-                cfg, otlpEndpoint, "otlphttp/elasticsearch", ES_TRANSFORM_BLOCK);
+        Map<String, String> envVars = new HashMap<>(MetricsgenLoader.buildEnvVars(cfg));
+        envVars.put("ELASTICSEARCH_URL", baseUrl);
+        if (esUser != null && esPassword != null) {
+            String credentials = java.util.Base64.getEncoder()
+                    .encodeToString((esUser + ":" + esPassword)
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            envVars.put("ELASTICSEARCH_AUTHORIZATION", "Basic " + credentials);
+        }
 
-        Path tmpConfig = Files.createTempFile("metricsgen-", ".yaml");
+        Path binary     = MetricsgenLoader.resolveBinary(cfg.versionOrDefault());
+        Path otelConfig = Path.of(cfg.otelColConfigOrDefault());
+        logger.info("Running metricsgenreceiver → {} (scale={}, window={}, config={})...",
+                baseUrl, cfg.scaleOrDefault(), cfg.startNowMinusOrDefault(), otelConfig);
+
+        ScheduledExecutorService poller = startEsProgressPoller(indexName);
         try {
-            Files.writeString(tmpConfig, otelYaml);
-            logger.info("Running metricsgenreceiver → {} (scale={}, window={})...",
-                    otlpEndpoint, cfg.scaleOrDefault(), cfg.startNowMinusOrDefault());
-
-            ScheduledExecutorService poller = startEsProgressPoller(indexName);
-            try {
-                MetricsgenLoader.ProcessResult result = runMetricsgenreceiver(tmpConfig, cfg);
-                if (result.exitCode() != 0) {
-                    throw new RuntimeException(
-                            "metricsgenreceiver exited with code " + result.exitCode()
-                                    + "\n" + result.stderr());
-                }
-                int dp   = MetricsgenLoader.parseDatapoints(result.stderr());
-                double rate = MetricsgenLoader.parseRate(result.stderr());
-                if (dp > 0) {
-                    logger.info("Ingested {} data points ({} dp/s)", dp, String.format("%.0f", rate));
-                }
+            MetricsgenLoader.ProcessResult result = runMetricsgenreceiver(binary, otelConfig, envVars);
+            if (result.exitCode() != 0) {
+                throw new RuntimeException(
+                        "metricsgenreceiver exited with code " + result.exitCode()
+                                + "\n" + result.stderr());
+            }
+            int dp   = MetricsgenLoader.parseDatapoints(result.stderr());
+            double rate = MetricsgenLoader.parseRate(result.stderr());
+            if (dp > 0) {
+                logger.info("Ingested {} data points ({} dp/s)", dp, String.format("%.0f", rate));
+            }
+            if (config.getLoad().isForceMerge()) {
                 logger.info("Force-merging '{}' to 1 segment per shard...", indexName);
                 forceMergeOperation(indexName);
                 logger.info("Force-merge complete.");
-                return dp;
-            } finally {
-                poller.shutdownNow();
-                poller.awaitTermination(5, TimeUnit.SECONDS);
             }
+            return dp;
         } finally {
-            Files.deleteIfExists(tmpConfig);
+            poller.shutdownNow();
+            poller.awaitTermination(5, TimeUnit.SECONDS);
         }
     }
 
     /**
-     * Launches metricsgenreceiver with the given config file and returns its result.
-     * Override in tests to inject canned stderr without a real subprocess.
+     * Launches metricsgenreceiver. Override in tests to inject canned stderr without spawning a process.
      */
-    protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(Path configFile, MetricsgenConfig cfg) throws Exception {
-        Path binary = MetricsgenLoader.resolveBinary(cfg.versionOrDefault());
-        return MetricsgenLoader.runBinary(binary, configFile);
+    protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(Path binary, Path configFile,
+                                                                    Map<String, String> envVars) throws Exception {
+        return MetricsgenLoader.runBinary(binary, configFile, envVars);
     }
 
     /**
@@ -916,16 +910,16 @@ public class ElasticsearchEngine extends AbstractBenchmarkEngine {
     protected void logEsProgress(String indexName) {
         try {
             Request req = new Request("GET",
-                    "/_cat/indices/" + indexName + "?format=json&h=docs.count,store.size");
+                    "/" + indexName + "/_stats/docs,store");
             Response resp = restClient.performRequest(req);
             byte[] body = resp.getEntity().getContent().readAllBytes();
-            List<Map<String, Object>> result = objectMapper.readValue(body,
-                    new TypeReference<List<Map<String, Object>>>() {});
-            if (!result.isEmpty()) {
-                Object docs = result.get(0).get("docs.count");
-                Object size = result.get(0).get("store.size");
-                logger.info("  ES: {} docs, {} stored", docs, size);
-            }
+            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(body);
+            long docs  = root.path("_all").path("primaries").path("docs").path("count").asLong();
+            long bytes = root.path("_all").path("primaries").path("store").path("size_in_bytes").asLong();
+            String size = bytes >= 1L << 30 ? String.format("%.1fgb", bytes / (double) (1L << 30))
+                        : bytes >= 1L << 20 ? String.format("%.1fmb", bytes / (double) (1L << 20))
+                        :                     String.format("%.0fkb", bytes / (double) (1L << 10));
+            logger.info("  ES: {} docs, {} stored", docs, size);
         } catch (Exception ignored) {}
     }
 

@@ -64,71 +64,34 @@ class MetricsgenLoaderTest {
         assertEquals(0.0, MetricsgenLoader.parseRate("nothing"), 0.0001);
     }
 
-    // ── renderOtelConfig ─────────────────────────────────────────────────────────
+    // ── buildEnvVars ─────────────────────────────────────────────────────────────
 
     @Test
-    void renderOtelConfig_prometheus_containsExpectedFields() {
+    void buildEnvVars_containsAllExpectedKeys() {
         MetricsgenConfig cfg = new MetricsgenConfig();
-        cfg.setVersion("1.0.7");
-        cfg.setScenario("builtin/hostmetrics");
         cfg.setScale(100);
-        cfg.setInterval("1s");
-        cfg.setStartNowMinus("270m");
+        cfg.setInterval("5s");
+        cfg.setStartNowMinus("30m");
         cfg.setSeed(42);
+        cfg.setScenario("builtin/hostmetrics");
 
-        String yaml = MetricsgenLoader.renderOtelConfig(
-                cfg, "http://prom:9090/api/v1/otlp", "otlphttp/prometheus", "  transform:\n    noop: true");
-
-        assertTrue(yaml.contains("seed: 42"));
-        assertTrue(yaml.contains("start_now_minus: 270m"));
-        assertTrue(yaml.contains("interval: 1s"));
-        assertTrue(yaml.contains("path: builtin/hostmetrics"));
-        assertTrue(yaml.contains("scale: 100"));
-        assertTrue(yaml.contains("otlphttp/prometheus"));
-        assertTrue(yaml.contains("endpoint: http://prom:9090/api/v1/otlp"));
-        assertTrue(yaml.contains("level: none"));
-        assertTrue(yaml.contains("receivers: [metricsgen]"));
-        assertTrue(yaml.contains("processors: [transform, batch]"));
-        assertTrue(yaml.contains("exporters: [otlphttp/prometheus]"));
+        Map<String, String> vars = MetricsgenLoader.buildEnvVars(cfg);
+        assertEquals("100",                vars.get("METRICSGEN_SCALE"));
+        assertEquals("5s",                 vars.get("METRICSGEN_INTERVAL"));
+        assertEquals("30m",                vars.get("METRICSGEN_START_NOW_MINUS"));
+        assertEquals("42",                 vars.get("METRICSGEN_SEED"));
+        assertEquals("builtin/hostmetrics", vars.get("METRICSGEN_SCENARIO"));
     }
 
     @Test
-    void renderOtelConfig_withHeaders_injectsHeadersBlock() {
-        MetricsgenConfig cfg = new MetricsgenConfig();
-        String yaml = MetricsgenLoader.renderOtelConfig(
-                cfg, "http://mimir:8080/otlp", "otlphttp/mimir", "  transform:",
-                Map.of("X-Scope-OrgID", "anonymous"));
-        assertTrue(yaml.contains("headers:"), yaml);
-        assertTrue(yaml.contains("X-Scope-OrgID: anonymous"), yaml);
-        assertTrue(yaml.contains("otlphttp/mimir"), yaml);
-    }
-
-    @Test
-    void renderOtelConfig_emptyHeaders_omitsHeadersBlock() {
-        MetricsgenConfig cfg = new MetricsgenConfig();
-        String yaml = MetricsgenLoader.renderOtelConfig(
-                cfg, "http://h/ep", "exp", "  transform:", Map.of());
-        assertFalse(yaml.contains("headers:"), yaml);
-    }
-
-    @Test
-    void renderOtelConfig_elasticsearch_containsEsExporter() {
-        MetricsgenConfig cfg = new MetricsgenConfig();
-        String yaml = MetricsgenLoader.renderOtelConfig(
-                cfg, "http://es:9200/_otlp", "otlphttp/elasticsearch", "  transform:\n    noop: true");
-        assertTrue(yaml.contains("otlphttp/elasticsearch"));
-        assertTrue(yaml.contains("endpoint: http://es:9200/_otlp"));
-    }
-
-    @Test
-    void renderOtelConfig_usesDefaults_whenFieldsNull() {
-        MetricsgenConfig cfg = new MetricsgenConfig(); // all nulls
-        String yaml = MetricsgenLoader.renderOtelConfig(
-                cfg, "http://h/endpoint", "exp", "  transform:");
-        assertTrue(yaml.contains("seed: 123"));
-        assertTrue(yaml.contains("start_now_minus: 270m"));
-        assertTrue(yaml.contains("interval: 1s"));
-        assertTrue(yaml.contains("scale: 10000"));
+    void buildEnvVars_usesDefaultsForNullFields() {
+        MetricsgenConfig cfg = new MetricsgenConfig(); // all null
+        Map<String, String> vars = MetricsgenLoader.buildEnvVars(cfg);
+        assertEquals("10000",              vars.get("METRICSGEN_SCALE"));
+        assertEquals("123",                vars.get("METRICSGEN_SEED"));
+        assertEquals("1s",                 vars.get("METRICSGEN_INTERVAL"));
+        assertEquals("270m",               vars.get("METRICSGEN_START_NOW_MINUS"));
+        assertEquals("builtin/hostmetrics", vars.get("METRICSGEN_SCENARIO"));
     }
 
     // ── detectOs / detectArch ────────────────────────────────────────────────────
@@ -521,6 +484,18 @@ class MetricsgenLoaderTest {
     }
 
     @Test
+    void runBinary_envVarsArePassedToSubprocess(@TempDir Path tmpDir) throws Exception {
+        Path script = createScript(tmpDir, "#!/bin/sh\necho TESTVAR=$TESTVAR >&2\n");
+        Path cfg    = tmpDir.resolve("config.yaml");
+        Files.writeString(cfg, "placeholder: true\n");
+
+        Map<String, String> envVars = Map.of("TESTVAR", "hello123");
+        MetricsgenLoader.ProcessResult result = MetricsgenLoader.runBinary(script, cfg, envVars);
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stderr().contains("TESTVAR=hello123"), result.stderr());
+    }
+
+    @Test
     void runBinary_stdoutDrainedWithoutBlocking(@TempDir Path tmpDir) throws Exception {
         // Writes a lot to stdout — verifies the stdout drain thread prevents blocking
         Path script = createScript(tmpDir, "#!/bin/sh\nfor i in $(seq 1 1000); do echo 'line'; done\n");
@@ -578,9 +553,19 @@ class MetricsgenLoaderTest {
         assertNull(cfg.getInterval());
         assertNull(cfg.getStartNowMinus());
         assertNull(cfg.getSeed());
+        assertNull(cfg.getOtelColConfig());
         // OrDefault methods with null fields return defaults
-        assertEquals("1.0.7",              cfg.versionOrDefault());
-        assertEquals("builtin/hostmetrics", cfg.scenarioOrDefault());
+        assertEquals("1.0.7",                  cfg.versionOrDefault());
+        assertEquals("builtin/hostmetrics",     cfg.scenarioOrDefault());
+        assertEquals("jingra-config/otelcol.yaml", cfg.otelColConfigOrDefault());
+    }
+
+    @Test
+    void metricsgenConfig_otelColConfigOrDefault_returnsSetValue() {
+        MetricsgenConfig cfg = new MetricsgenConfig();
+        cfg.setOtelColConfig("/custom/path/otelcol.yaml");
+        assertEquals("/custom/path/otelcol.yaml", cfg.otelColConfigOrDefault());
+        assertEquals("/custom/path/otelcol.yaml", cfg.getOtelColConfig());
     }
 
     @Test

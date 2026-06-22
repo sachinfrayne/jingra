@@ -1,0 +1,66 @@
+engine: elasticsearch
+
+elasticsearch:
+  url_env: ELASTICSEARCH_URL
+  data_stream: true
+
+dataset:
+  - avg_avgot_cpu_load_1m_filtered_by_hosts_5m
+
+datasets:
+  avg_avgot_cpu_load_1m_filtered_by_hosts_5m:
+    type: metrics
+    query_type: esql
+    index_name: metrics-demo.otel-default
+    ilm_policy: metrics-policy
+    component_template: metrics-otel-custom
+
+    path:
+      queries_path: data/avg_avgot_cpu_load_1m_filtered_by_hosts_5m-queries.ndjson
+
+    data_mapping: {}
+
+    queries_mapping:
+      expected_rows_field: expected_rows
+
+    param_groups:
+      latency:
+        - { query_name: avg_avgot_cpu_load_1m_filtered_by_hosts_5m }
+
+load:
+  await_index_ready: true
+  force_merge: true
+  metricsgen:
+    version: 1.0.7
+    scenario: builtin/hostmetrics
+    scale: 100
+    interval: 1s
+    start_now_minus: 5m
+
+evaluation:
+  run_id: metrics-direct
+  warmup_workers: 1
+  measurement_workers: 1
+  warmup_rounds: 3
+  measurement_rounds: 5
+
+output:
+  sinks:
+    - type: elasticsearch
+      write_query_metrics: false
+      config:
+        url_env: SINK_URL
+        index: jingra-results
+
+analysis:
+  run_id: metrics-direct
+  engines:
+    - elasticsearch
+  results_cluster:
+    url_env: SINK_URL
+    index: jingra-results
+  output_directory: ./output
+  generate_plots: true
+  latency_metrics:
+    - latency_median
+    - latency_avg

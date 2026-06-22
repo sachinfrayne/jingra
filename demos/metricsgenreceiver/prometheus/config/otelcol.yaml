@@ -1,0 +1,45 @@
+receivers:
+  metricsgen:
+    seed: ${METRICSGEN_SEED}
+    start_now_minus: ${METRICSGEN_START_NOW_MINUS}
+    interval: ${METRICSGEN_INTERVAL}
+    real_time: false
+    exit_after_end: true
+    exit_after_end_timeout: 15s
+    scenarios:
+      - path: ${METRICSGEN_SCENARIO}
+        scale: ${METRICSGEN_SCALE}
+
+processors:
+  transform:
+    metric_statements:
+      - context: resource
+        statements:
+          - delete_key(attributes, "host.ip")
+          - delete_key(attributes, "host.mac")
+      - context: datapoint
+        statements:
+          - merge_maps(attributes, resource.attributes, "insert")
+  batch:
+
+exporters:
+  otlphttp/prometheus:
+    endpoint: ${PROMETHEUS_URL}/api/v1/otlp
+    compression: gzip
+    tls:
+      insecure_skip_verify: true
+    sending_queue:
+      enabled: true
+      block_on_overflow: true
+      queue_size: 25
+      num_consumers: 25
+
+service:
+  telemetry:
+    metrics:
+      level: none
+  pipelines:
+    metrics:
+      receivers: [metricsgen]
+      processors: [transform, batch]
+      exporters: [otlphttp/prometheus]

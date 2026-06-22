@@ -1541,25 +1541,18 @@ class PrometheusOfflineCoverageTest {
         java.nio.file.Files.setPosixFilePermissions(script,
                 java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"));
 
-        MetricsgenLoader.binaryPathOverrideForTests.set(script);
-        try {
-            PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
-                @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
-            };
-            assertTrue(e.connect());
-            org.elasticsearch.jingra.config.MetricsgenConfig cfg =
-                    new org.elasticsearch.jingra.config.MetricsgenConfig();
-            cfg.setVersion("1.0.7");
-            Path cfgFile = tmpDir.resolve("config.yaml");
-            java.nio.file.Files.writeString(cfgFile, "placeholder: true\n");
-            // Call the real runMetricsgenreceiver (not overridden)
-            MetricsgenLoader.ProcessResult result = e.runMetricsgenreceiver(cfgFile, cfg);
-            assertEquals(0, result.exitCode());
-            assertTrue(result.stderr().contains("datapoints"), result.stderr());
-            assertDoesNotThrow(() -> e.close());
-        } finally {
-            MetricsgenLoader.binaryPathOverrideForTests.remove();
-        }
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
+        };
+        assertTrue(e.connect());
+        Path cfgFile = tmpDir.resolve("otelcol.yaml");
+        java.nio.file.Files.writeString(cfgFile, "placeholder: true\n");
+        // Call the real runMetricsgenreceiver (not overridden)
+        MetricsgenLoader.ProcessResult result = e.runMetricsgenreceiver(
+                script, cfgFile, Map.of("PROMETHEUS_URL", "http://localhost:9090"));
+        assertEquals(0, result.exitCode());
+        assertTrue(result.stderr().contains("datapoints"), result.stderr());
+        assertDoesNotThrow(() -> e.close());
     }
 
     // ── customLoad ───────────────────────────────────────────────────────────────
@@ -1575,9 +1568,9 @@ class PrometheusOfflineCoverageTest {
         PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
             @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
             @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
-                    java.nio.file.Path configFile, org.elasticsearch.jingra.config.MetricsgenConfig cfg) {
-                // verify config file was written
-                assertTrue(java.nio.file.Files.exists(configFile));
+                    java.nio.file.Path binary, java.nio.file.Path configFile,
+                    java.util.Map<String, String> envVars) {
+                assertTrue(envVars.containsKey("PROMETHEUS_URL"), "should have PROMETHEUS_URL");
                 return new MetricsgenLoader.ProcessResult(0, fakeSterrr);
             }
         };
@@ -1592,13 +1585,14 @@ class PrometheusOfflineCoverageTest {
         PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
             @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
             @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
-                    java.nio.file.Path configFile, org.elasticsearch.jingra.config.MetricsgenConfig cfg) {
+                    java.nio.file.Path binary, java.nio.file.Path configFile,
+                    java.util.Map<String, String> envVars) {
                 return new MetricsgenLoader.ProcessResult(0, "no datapoints in this run\n");
             }
         };
         assertTrue(e.connect());
         int dp = e.customLoad(buildCustomLoadConfig(), null, "metrics");
-        assertEquals(0, dp); // covers if (dp > 0) false branch
+        assertEquals(0, dp);
         assertDoesNotThrow(() -> e.close());
     }
 
@@ -1607,7 +1601,8 @@ class PrometheusOfflineCoverageTest {
         PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
             @Override protected String buildInfoOperation(String url) { return "2.45.0"; }
             @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
-                    java.nio.file.Path configFile, org.elasticsearch.jingra.config.MetricsgenConfig cfg) {
+                    java.nio.file.Path binary, java.nio.file.Path configFile,
+                    java.util.Map<String, String> envVars) {
                 return new MetricsgenLoader.ProcessResult(1, "error: binary not found\n");
             }
         };

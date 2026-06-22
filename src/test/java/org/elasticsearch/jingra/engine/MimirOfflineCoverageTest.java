@@ -719,8 +719,9 @@ class MimirOfflineCoverageTest {
         MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
             @Override protected String buildInfoOperation(String url) { return "2.15.0"; }
             @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
-                    Path configFile, org.elasticsearch.jingra.config.MetricsgenConfig cfg) {
-                assertTrue(Files.exists(configFile));
+                    Path binary, Path configFile, Map<String, String> envVars) {
+                assertTrue(envVars.containsKey("MIMIR_URL"), "should have MIMIR_URL");
+                assertTrue(envVars.containsKey("MIMIR_ORG_ID"), "should have MIMIR_ORG_ID");
                 return new MetricsgenLoader.ProcessResult(0, fakeStderr);
             }
         };
@@ -735,7 +736,7 @@ class MimirOfflineCoverageTest {
         MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
             @Override protected String buildInfoOperation(String url) { return "2.15.0"; }
             @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
-                    Path configFile, org.elasticsearch.jingra.config.MetricsgenConfig cfg) {
+                    Path binary, Path configFile, Map<String, String> envVars) {
                 return new MetricsgenLoader.ProcessResult(0, "no metrics here\n");
             }
         };
@@ -750,7 +751,7 @@ class MimirOfflineCoverageTest {
         MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
             @Override protected String buildInfoOperation(String url) { return "2.15.0"; }
             @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
-                    Path configFile, org.elasticsearch.jingra.config.MetricsgenConfig cfg) {
+                    Path binary, Path configFile, Map<String, String> envVars) {
                 return new MetricsgenLoader.ProcessResult(1, "fatal: cannot connect\n");
             }
         };
@@ -767,17 +768,15 @@ class MimirOfflineCoverageTest {
         Path bin = tmpDir.resolve("metricsgenreceiver");
         Files.write(bin, script);
         Files.setPosixFilePermissions(bin, PosixFilePermissions.fromString("rwxr-xr-x"));
-        MetricsgenLoader.binaryPathOverrideForTests.set(bin);
 
         MimirEngine e = new MimirEngine(Map.of("url", "http://localhost:8080")) {
             @Override protected String buildInfoOperation(String url) { return "2.15.0"; }
         };
         assertTrue(e.connect());
-        org.elasticsearch.jingra.config.MetricsgenConfig cfg = new org.elasticsearch.jingra.config.MetricsgenConfig();
-        cfg.setVersion("1.0.7");
-        Path cfgFile = tmpDir.resolve("otel.yaml");
+        Path cfgFile = tmpDir.resolve("otelcol.yaml");
         Files.writeString(cfgFile, "placeholder: true\n");
-        MetricsgenLoader.ProcessResult result = e.runMetricsgenreceiver(cfgFile, cfg);
+        MetricsgenLoader.ProcessResult result = e.runMetricsgenreceiver(
+                bin, cfgFile, Map.of("MIMIR_URL", "http://localhost:8080", "MIMIR_ORG_ID", "anonymous"));
         assertEquals(0, result.exitCode());
         assertTrue(result.stderr().contains("datapoints"), result.stderr());
         assertDoesNotThrow(() -> e.close());

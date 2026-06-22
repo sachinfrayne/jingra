@@ -19,6 +19,9 @@ public class LoadConfig {
     @JsonProperty("await_index_ready")
     private boolean awaitIndexReady = false;
 
+    @JsonProperty("force_merge")
+    private boolean forceMerge = false;
+
     @JsonProperty("metricsgen")
     private MetricsgenConfig metricsgen;
 
@@ -64,6 +67,14 @@ public class LoadConfig {
 
     public void setAwaitIndexReady(boolean awaitIndexReady) {
         this.awaitIndexReady = awaitIndexReady;
+    }
+
+    public boolean isForceMerge() {
+        return forceMerge;
+    }
+
+    public void setForceMerge(boolean forceMerge) {
+        this.forceMerge = forceMerge;
     }
 
     public MetricsgenConfig getMetricsgen() {
