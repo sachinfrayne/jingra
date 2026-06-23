@@ -1613,6 +1613,141 @@ class PrometheusOfflineCoverageTest {
         assertDoesNotThrow(() -> e.close());
     }
 
+    // ── auth ─────────────────────────────────────────────────────────────────────
+
+    @Test
+    void connectSucceeds_withUserAndPasswordFromConfig() {
+        PrometheusEngine e = new PrometheusEngine(Map.of(
+                "url", "http://localhost:9090",
+                "user", "alice",
+                "password", "s3cret"
+        )) {
+            @Override protected String buildInfoOperation(String url) { return "3.0.0"; }
+        };
+        assertTrue(e.connect());
+        java.net.http.HttpRequest req = e.authedRequest("http://x/foo").GET().build();
+        String expected = "Basic " + java.util.Base64.getEncoder()
+                .encodeToString("alice:s3cret".getBytes(StandardCharsets.UTF_8));
+        assertEquals(expected, req.headers().firstValue("Authorization").orElse(""));
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void connectSucceeds_withUserAndPasswordFromEnv() {
+        Map<String, String> envOverrides = Map.of(
+                "PROMETHEUS_URL", "http://prom:9090",
+                "PROMETHEUS_USER", "bob",
+                "PROMETHEUS_PASSWORD", "hunter2"
+        );
+        PrometheusEngine e = new PrometheusEngine(Map.of(
+                "url_env", "PROMETHEUS_URL",
+                "user_env", "PROMETHEUS_USER",
+                "password_env", "PROMETHEUS_PASSWORD"
+        )) {
+            @Override
+            protected String getEnv(String envVarName, String fallback) {
+                return envOverrides.getOrDefault(envVarName, fallback);
+            }
+            @Override protected String buildInfoOperation(String url) { return "3.12.0"; }
+        };
+        assertTrue(e.connect());
+        java.net.http.HttpRequest req = e.authedRequest("http://x/foo").GET().build();
+        String expected = "Basic " + java.util.Base64.getEncoder()
+                .encodeToString("bob:hunter2".getBytes(StandardCharsets.UTF_8));
+        assertEquals(expected, req.headers().firstValue("Authorization").orElse(""));
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void authedRequest_omitsAuthorizationHeader_whenNoCreds() {
+        PrometheusEngine e = connectedEngine();
+        assertTrue(e.connect());
+        java.net.http.HttpRequest req = e.authedRequest("http://x/foo").GET().build();
+        assertTrue(req.headers().firstValue("Authorization").isEmpty(),
+                "no Authorization header should be present when creds are absent");
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void connect_omitsAuthHeader_whenOnlyUserProvided() {
+        PrometheusEngine e = new PrometheusEngine(Map.of(
+                "url", "http://localhost:9090",
+                "user", "alice"
+        )) {
+            @Override protected String buildInfoOperation(String url) { return "3.0.0"; }
+        };
+        assertTrue(e.connect());
+        java.net.http.HttpRequest req = e.authedRequest("http://x/foo").GET().build();
+        assertTrue(req.headers().firstValue("Authorization").isEmpty(),
+                "no Authorization header when password is missing");
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void customLoad_withoutAuth_omitsAuthorizationEnvVar() throws Exception {
+        AtomicReference<Map<String, String>> capturedEnv = new AtomicReference<>();
+        PrometheusEngine e = new PrometheusEngine(Map.of("url", "http://localhost:9090")) {
+            @Override protected String buildInfoOperation(String url) { return "3.0.0"; }
+            @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
+                    java.nio.file.Path binary, java.nio.file.Path configFile,
+                    Map<String, String> envVars) {
+                capturedEnv.set(envVars);
+                return new MetricsgenLoader.ProcessResult(0, "no datapoints\n");
+            }
+        };
+        assertTrue(e.connect());
+        e.customLoad(buildCustomLoadConfig(), null, "metrics");
+        assertNull(capturedEnv.get().get("PROMETHEUS_AUTHORIZATION"),
+                "no auth env var when no creds configured");
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void customLoad_withUserButNoPassword_omitsAuthorizationEnvVar() throws Exception {
+        AtomicReference<Map<String, String>> capturedEnv = new AtomicReference<>();
+        PrometheusEngine e = new PrometheusEngine(Map.of(
+                "url", "http://localhost:9090",
+                "user", "alice"
+        )) {
+            @Override protected String buildInfoOperation(String url) { return "3.0.0"; }
+            @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
+                    java.nio.file.Path binary, java.nio.file.Path configFile,
+                    Map<String, String> envVars) {
+                capturedEnv.set(envVars);
+                return new MetricsgenLoader.ProcessResult(0, "no datapoints\n");
+            }
+        };
+        assertTrue(e.connect());
+        e.customLoad(buildCustomLoadConfig(), null, "metrics");
+        assertNull(capturedEnv.get().get("PROMETHEUS_AUTHORIZATION"),
+                "no auth env var when password is missing");
+        assertDoesNotThrow(() -> e.close());
+    }
+
+    @Test
+    void customLoad_withAuth_setsAuthorizationEnvVar() throws Exception {
+        AtomicReference<Map<String, String>> capturedEnv = new AtomicReference<>();
+        PrometheusEngine e = new PrometheusEngine(Map.of(
+                "url", "http://localhost:9090",
+                "user", "alice",
+                "password", "s3cret"
+        )) {
+            @Override protected String buildInfoOperation(String url) { return "3.0.0"; }
+            @Override protected MetricsgenLoader.ProcessResult runMetricsgenreceiver(
+                    java.nio.file.Path binary, java.nio.file.Path configFile,
+                    Map<String, String> envVars) {
+                capturedEnv.set(envVars);
+                return new MetricsgenLoader.ProcessResult(0, "no datapoints\n");
+            }
+        };
+        assertTrue(e.connect());
+        e.customLoad(buildCustomLoadConfig(), null, "metrics");
+        String expected = "Basic " + java.util.Base64.getEncoder()
+                .encodeToString("alice:s3cret".getBytes(StandardCharsets.UTF_8));
+        assertEquals(expected, capturedEnv.get().get("PROMETHEUS_AUTHORIZATION"));
+        assertDoesNotThrow(() -> e.close());
+    }
+
     private static org.elasticsearch.jingra.config.JingraConfig buildCustomLoadConfig() {
         org.elasticsearch.jingra.config.JingraConfig cfg = new org.elasticsearch.jingra.config.JingraConfig();
         org.elasticsearch.jingra.config.LoadConfig load = new org.elasticsearch.jingra.config.LoadConfig();
