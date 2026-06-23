@@ -29,6 +29,9 @@ import java.util.concurrent.atomic.AtomicLong;
 public class PrometheusEngine extends AbstractBenchmarkEngine {
 
     private String baseUrl;
+    private String promUser;
+    private String promPassword;
+    private String authHeaderValue;
     private final HttpClient httpClient;
     private final AtomicLong ingestTimestampOffset = new AtomicLong(Long.MIN_VALUE);
 
@@ -52,9 +55,15 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
     @Override
     public boolean connect() {
         String url = getConfigString("url", null);
+        String user = getConfigString("user", null);
+        String password = getConfigString("password", null);
         if (url == null) {
             String urlEnv = getConfigString("url_env", "PROMETHEUS_URL");
+            String userEnv = getConfigString("user_env", "PROMETHEUS_USER");
+            String passwordEnv = getConfigString("password_env", "PROMETHEUS_PASSWORD");
             url = getEnv(urlEnv, null);
+            user = getEnv(userEnv, null);
+            password = getEnv(passwordEnv, null);
         }
         if (url == null) {
             logger.error("Prometheus URL not set in config or environment: {}",
@@ -62,15 +71,32 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
             return false;
         }
         String resolvedUrl = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+        this.promUser = user;
+        this.promPassword = password;
+        if (user != null && password != null) {
+            String credentials = java.util.Base64.getEncoder()
+                    .encodeToString((user + ":" + password)
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            this.authHeaderValue = "Basic " + credentials;
+        }
         try {
             String version = buildInfoOperation(resolvedUrl);
             this.baseUrl = resolvedUrl;
-            logger.info("Connected to Prometheus {} at {}", version, resolvedUrl);
+            logger.info("Connected to Prometheus {} at {}{}", version, resolvedUrl,
+                    authHeaderValue != null ? " (basic auth)" : "");
             return true;
         } catch (Exception e) {
             logger.error("Failed to connect to Prometheus at {}", resolvedUrl, e);
             return false;
         }
+    }
+
+    protected HttpRequest.Builder authedRequest(String url) {
+        HttpRequest.Builder b = HttpRequest.newBuilder().uri(URI.create(url));
+        if (authHeaderValue != null) {
+            b.header("Authorization", authHeaderValue);
+        }
+        return b;
     }
 
     protected HttpResponse<String> httpSendString(HttpRequest req) throws Exception {
@@ -82,8 +108,7 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
     }
 
     protected String buildInfoOperation(String url) throws Exception {
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(url + "/api/v1/status/buildinfo"))
+        HttpRequest req = authedRequest(url + "/api/v1/status/buildinfo")
                 .GET()
                 .build();
         HttpResponse<String> resp = httpSendString(req);
@@ -138,8 +163,7 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
 
     @SuppressWarnings("unchecked")
     protected boolean hasAnySeriesOperation() throws Exception {
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/api/v1/label/__name__/values"))
+        HttpRequest req = authedRequest(baseUrl + "/api/v1/label/__name__/values")
                 .GET()
                 .build();
         HttpResponse<String> resp = httpSendString(req);
@@ -152,8 +176,7 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
     }
 
     protected void deleteSeriesOperation() throws Exception {
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/api/v1/admin/tsdb/delete_series"))
+        HttpRequest req = authedRequest(baseUrl + "/api/v1/admin/tsdb/delete_series")
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .POST(HttpRequest.BodyPublishers.ofString(DELETE_ALL_SERIES_BODY))
                 .build();
@@ -165,8 +188,7 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
     }
 
     protected void cleanTombstonesOperation() throws Exception {
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/api/v1/admin/tsdb/clean_tombstones"))
+        HttpRequest req = authedRequest(baseUrl + "/api/v1/admin/tsdb/clean_tombstones")
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
         HttpResponse<Void> resp = httpSendVoid(req);
@@ -194,8 +216,7 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
     }
 
     protected int otlpWriteOperation(byte[] body) throws Exception {
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/api/v1/otlp/v1/metrics"))
+        HttpRequest req = authedRequest(baseUrl + "/api/v1/otlp/v1/metrics")
                 .header("Content-Type", "application/x-protobuf")
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
@@ -226,8 +247,7 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
     protected String instantQueryOperation(String promql) throws Exception {
         String encoded = URLEncoder.encode(promql, StandardCharsets.UTF_8);
         String body = "query=" + encoded;
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/api/v1/query"))
+        HttpRequest req = authedRequest(baseUrl + "/api/v1/query")
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
@@ -289,6 +309,9 @@ public class PrometheusEngine extends AbstractBenchmarkEngine {
         MetricsgenConfig cfg = config.getLoad().getMetricsgen();
         Map<String, String> envVars = new HashMap<>(MetricsgenLoader.buildEnvVars(cfg));
         envVars.put("PROMETHEUS_URL", baseUrl);
+        if (authHeaderValue != null) {
+            envVars.put("PROMETHEUS_AUTHORIZATION", authHeaderValue);
+        }
 
         Path binary    = MetricsgenLoader.resolveBinary(cfg.versionOrDefault());
         Path otelConfig = Path.of(cfg.otelColConfigOrDefault());
