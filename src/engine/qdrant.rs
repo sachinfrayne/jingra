@@ -250,7 +250,10 @@ impl BenchmarkEngine for QdrantEngine {
 
         let count = points.len();
         client
-            .upsert_points(qdrant_client::qdrant::UpsertPointsBuilder::new(index_name, points))
+            // `wait(true)`: without it Qdrant acknowledges the upsert before it's actually
+            // applied, so an immediately-following document_count()/query() can race ahead of
+            // this batch -- exactly what a benchmark harness must not tolerate.
+            .upsert_points(qdrant_client::qdrant::UpsertPointsBuilder::new(index_name, points).wait(true))
             .await
             .map_err(|e| EngineError::Message(format!("Failed to ingest documents: {e}")))?;
         Ok(count)

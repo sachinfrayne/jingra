@@ -4,5 +4,5 @@
 mod evaluator;
 mod metrics;
 
-pub use evaluator::{BenchmarkEvaluator, EvaluationError};
+pub use evaluator::{resolve_run_id, BenchmarkEvaluator, EvaluationError};
 pub use metrics::{MetricsCalculator, QueryResult};

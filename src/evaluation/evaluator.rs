@@ -44,14 +44,25 @@ pub struct BenchmarkEvaluator {
     run_id: String,
 }
 
+/// Resolves the run id from `evaluation.run_id`, or generates a timestamp-based one. Exposed so
+/// callers building sinks that need the run id up front (e.g. the object-store sink's storage
+/// path) use the exact same value `BenchmarkEvaluator` will use, rather than each generating
+/// their own timestamp and silently diverging.
+pub fn resolve_run_id(config: &JingraConfig) -> String {
+    config
+        .evaluation
+        .as_ref()
+        .and_then(|e| e.run_id.clone())
+        .unwrap_or_else(generate_run_id)
+}
+
 impl BenchmarkEvaluator {
     pub fn new(config: &JingraConfig, engine: Arc<dyn BenchmarkEngine>, sinks: Vec<Arc<dyn ResultsSink>>) -> Self {
-        let run_id = config
-            .evaluation
-            .as_ref()
-            .and_then(|e| e.run_id.clone())
-            .unwrap_or_else(generate_run_id);
-        Self { engine, sinks, run_id }
+        Self {
+            engine,
+            sinks,
+            run_id: resolve_run_id(config),
+        }
     }
 
     pub async fn run_evaluation(&self, config: &JingraConfig) -> Result<(), EvaluationError> {
