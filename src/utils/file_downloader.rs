@@ -155,4 +155,111 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, UtilsError::Message(_)));
     }
+
+    /// Serves each `(status, body)` pair to one accepted connection in order, on a background
+    /// thread, over a real localhost TCP socket -- exercises the actual `reqwest` download path
+    /// without pulling in a mocking-server dependency for what's a handful of tiny fixed
+    /// responses.
+    fn spawn_test_server(responses: Vec<(u16, &'static [u8])>) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for (status, body) in responses {
+                let Ok((mut stream, _)) = listener.accept() else { return };
+
+                // Read until the end of the request headers before responding: dropping the
+                // socket while the client's request bytes are still unread can make the OS send
+                // an RST instead of a graceful FIN, which some HTTP clients then surface as a
+                // truncated/empty body even though the response was fully written and flushed.
+                let mut received = Vec::new();
+                let mut buf = [0u8; 512];
+                while !received.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => received.extend_from_slice(&buf[..n]),
+                    }
+                }
+
+                let reason = if status == 200 { "OK" } else { "Error" };
+                let header = format!("HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                let _ = stream.write_all(header.as_bytes());
+                let _ = stream.write_all(body);
+                let _ = stream.flush();
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+            }
+        });
+        format!("http://127.0.0.1:{port}")
+    }
+
+    #[tokio::test]
+    async fn ensure_file_exists_downloads_when_missing() {
+        let base_url = spawn_test_server(vec![(200, b"hello world")]);
+        unsafe {
+            std::env::set_var("JINGRA_TEST_DOWNLOAD_URL_A", &base_url);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("downloaded.ndjson");
+
+        ensure_file_exists(path.to_str().unwrap(), "JINGRA_TEST_DOWNLOAD_URL_A").await.unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"hello world");
+        unsafe {
+            std::env::remove_var("JINGRA_TEST_DOWNLOAD_URL_A");
+        }
+    }
+
+    #[tokio::test]
+    async fn ensure_file_exists_redownloads_a_corrupted_parquet_file() {
+        let base_url = spawn_test_server(vec![(200, b"PAR1validPAR1")]);
+        unsafe {
+            std::env::set_var("JINGRA_TEST_DOWNLOAD_URL_B", &base_url);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("data.parquet");
+        std::fs::write(&path, b"not a real parquet file").unwrap();
+
+        ensure_file_exists(path.to_str().unwrap(), "JINGRA_TEST_DOWNLOAD_URL_B").await.unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"PAR1validPAR1");
+        unsafe {
+            std::env::remove_var("JINGRA_TEST_DOWNLOAD_URL_B");
+        }
+    }
+
+    #[tokio::test]
+    async fn ensure_file_exists_fails_immediately_on_non_retryable_status() {
+        let base_url = spawn_test_server(vec![(404, b"not found")]);
+        unsafe {
+            std::env::set_var("JINGRA_TEST_DOWNLOAD_URL_C", &base_url);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.ndjson");
+
+        let err = ensure_file_exists(path.to_str().unwrap(), "JINGRA_TEST_DOWNLOAD_URL_C")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("404"));
+        assert!(!path.exists());
+        unsafe {
+            std::env::remove_var("JINGRA_TEST_DOWNLOAD_URL_C");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ensure_file_exists_retries_a_transient_5xx_then_succeeds() {
+        let base_url = spawn_test_server(vec![(503, b"try again"), (200, b"eventually ok")]);
+        unsafe {
+            std::env::set_var("JINGRA_TEST_DOWNLOAD_URL_D", &base_url);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("retried.ndjson");
+
+        ensure_file_exists(path.to_str().unwrap(), "JINGRA_TEST_DOWNLOAD_URL_D").await.unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"eventually ok");
+        unsafe {
+            std::env::remove_var("JINGRA_TEST_DOWNLOAD_URL_D");
+        }
+    }
 }
