@@ -74,3 +74,77 @@ pub async fn run_report(config: &JingraConfig) -> Result<(), ReportError> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ReportConfig;
+    use crate::output::{ObjectStoreResultsSink, ResultsSink};
+    use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn run_report_errors_when_report_block_missing() {
+        let config = JingraConfig::default();
+        assert!(run_report(&config).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn run_report_writes_csv_and_plots_for_matching_engine_results() {
+        let results_dir = tempfile::tempdir().unwrap();
+        let output_dir = tempfile::tempdir().unwrap();
+        let results_uri = format!("file://{}", results_dir.path().display());
+
+        let (store, prefix) = object_store::parse_url(&url::Url::parse(&results_uri).unwrap()).unwrap();
+        let sink = ObjectStoreResultsSink::from_store(store, prefix, "run-1", false);
+        let mut r = BenchmarkResult::new("run-1", "qdrant", "1.18.0", "vector", "demo", "hnsw_ef=32", HashMap::new());
+        r.add_metric("recall", 0.9);
+        r.add_metric("throughput", 500.0);
+        sink.write_result(&r).await.unwrap();
+        // A result from an engine not listed in report.engines must be excluded.
+        let mut other = BenchmarkResult::new("run-1", "elasticsearch", "9.0.0", "vector", "demo", "k=1", HashMap::new());
+        other.add_metric("recall", 0.5);
+        sink.write_result(&other).await.unwrap();
+
+        let config = JingraConfig {
+            report: Some(ReportConfig {
+                run_id: Some("run-1".to_string()),
+                engines: vec!["qdrant".to_string()],
+                results_uri: Some(results_uri),
+                output_directory: output_dir.path().to_str().unwrap().to_string(),
+                generate_plots: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        run_report(&config).await.unwrap();
+
+        let csv = std::fs::read_to_string(output_dir.path().join("comparison.csv")).unwrap();
+        assert_eq!(csv.lines().count(), 2, "only the qdrant result should appear");
+        assert!(csv.contains("qdrant"));
+        assert!(!csv.contains("elasticsearch"));
+        assert!(output_dir.path().join("recall_vs_throughput.svg").exists());
+        assert!(output_dir.path().join("recall_vs_server_latency_median.svg").exists());
+    }
+
+    #[tokio::test]
+    async fn run_report_skips_plots_when_disabled() {
+        let results_dir = tempfile::tempdir().unwrap();
+        let output_dir = tempfile::tempdir().unwrap();
+        let config = JingraConfig {
+            report: Some(ReportConfig {
+                run_id: Some("run-2".to_string()),
+                engines: vec!["qdrant".to_string()],
+                results_uri: Some(format!("file://{}", results_dir.path().display())),
+                output_directory: output_dir.path().to_str().unwrap().to_string(),
+                generate_plots: false,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        run_report(&config).await.unwrap();
+        assert!(output_dir.path().join("comparison.csv").exists());
+        assert!(!output_dir.path().join("recall_vs_throughput.svg").exists());
+    }
+}
