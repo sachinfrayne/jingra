@@ -15,7 +15,12 @@ use testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::GenericImage;
 
-const QDRANT_VERSION: &str = "v1.18.0";
+/// Sourced directly from `engine-versions/.qdrant` (the single pinned-version file also used by
+/// demos/docker-compose) so the server image tag here can never drift out of sync with it --
+/// no separate validation script needed.
+fn qdrant_version() -> String {
+    format!("v{}", include_str!("../engine-versions/.qdrant").trim())
+}
 
 fn write_template(subdir: &str, name: &str, contents: &serde_json::Value) {
     let dir = std::path::Path::new("jingra-config").join(subdir);
@@ -29,7 +34,7 @@ fn write_template(subdir: &str, name: &str, contents: &serde_json::Value) {
 
 #[tokio::test]
 async fn full_lifecycle_against_real_qdrant_container() {
-    let container = GenericImage::new("qdrant/qdrant", QDRANT_VERSION)
+    let container = GenericImage::new("qdrant/qdrant".to_string(), qdrant_version())
         .with_exposed_port(6333.tcp())
         .with_exposed_port(6334.tcp())
         .with_wait_for(WaitFor::message_on_stdout("Qdrant HTTP listening on 6333"))

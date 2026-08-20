@@ -8,6 +8,7 @@ services:
       - ./config.yaml:/app/config.yaml
       - ./config:/app/jingra-config
       - ./output:/app/output
+      - ./results:/app/results
     networks:
       - jingra-demo-net
 

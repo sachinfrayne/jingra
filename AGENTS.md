@@ -17,6 +17,7 @@ alwaysApply: true
 * **No fixed sleeps:** Do not use `thread::sleep`/`tokio::time::sleep` as a fixed delay for coordination, retries, backpressure, or waiting for readiness.
 * **Use proper concurrency tools instead:** Prefer `tokio::sync` primitives (`Notify`, channels, `Semaphore`), `JoinHandle`/`JoinSet`, bounded channels, or polling with a deadline/timeout (`tokio::time::timeout`).
 * **For async or eventual tests:** Poll with a bounded timeout, or use a crate like `awaitility`-style retry helpers. Do not use sleeps.
+* **Coverage is a ratchet, not a fixed bar:** `make test`/`make coverage` enforce `cargo llvm-cov --fail-under-lines --fail-under-regions` at whatever the codebase actually achieves today (see the threshold in `Makefile`), not a hardcoded 100%. When you raise coverage, raise the threshold in the same change so it can't silently regress. The goal is still 100% — branch coverage in particular is currently only approximated via region coverage, since `cargo-llvm-cov`'s `--branch` mode is nightly-only.
 
 # TOOLING
 

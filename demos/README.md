@@ -1,188 +1,154 @@
 # Jingra Demos
 
-End-to-end benchmarks that download real public datasets, index them into an engine,
-run the evaluation, and write results to a separate sink cluster.
+End-to-end benchmarks that download a real public dataset, index it into Qdrant, run the
+benchmark sweep, and generate recall/latency CSV + plots.
 
 ## Prerequisites
 
 - Docker and Docker Compose
+- Rust (`rust-toolchain.toml` at the repo root pins the version; `cargo build --release` compiles the binary the demo containers run)
 - Internet access (datasets download from HuggingFace on first run)
 
 ## Structure
 
 ```
 demos/
-  lexical-search/          # BM25 recall benchmarks
-    elasticsearch/
-    opensearch/
-  vector-search/           # ANN recall benchmarks
-    elasticsearch/
-    opensearch/
-    qdrant/
-  hybrid-search/           # RRF (BM25 + knn) recall benchmarks
-    elasticsearch/
-  parquet-file-format/     # Parquet ingestion smoke test
-    elasticsearch/
-  common/                  # Shared infrastructure
-    docker-compose.yml              # base: jingra service + network only
-    docker-compose.sink.yml         # results sink cluster
-    docker-compose.elasticsearch.yml
-    docker-compose.opensearch.yml
-    docker-compose.qdrant.yml
+  vector-search/qdrant/       # ANN recall benchmark
+  await-index-ready/qdrant/   # demos the awaitIndexReady optimizer-polling behavior
+  common/                     # Shared infrastructure
+    docker-compose.yml              # base: jingra service + network
+    docker-compose.qdrant.yml       # Qdrant engine-under-test container
+    Dockerfile                      # packages the pre-built jingra binary
+    Dockerfile.qdrant                # Qdrant image + curl (for healthchecks)
     demo.mk                         # shared make targets
     generate.mk                     # shared data generation target
 ```
+
+Elasticsearch/OpenSearch demos will return once those engines are added back to the Rust
+rewrite (see the repo root `README.md`); the demo infrastructure here (`demo.mk`,
+`docker-compose.yml`) is written to add an engine the same way it always was -- a new
+`docker-compose.<engine>.yml` override plus an engine-specific `config.yaml`.
 
 ## Running a demo
 
 From the repo root or `demos/` directory:
 
 ```bash
-make lexical-search/elasticsearch
 make vector-search/qdrant
 make all                           # run every demo sequentially
-```
-
-From the demo-type directory — generates data if absent, then runs:
-
-```bash
-cd demos/lexical-search
-make elasticsearch
-make opensearch
 ```
 
 From the engine directory — full lifecycle:
 
 ```bash
-cd demos/lexical-search/elasticsearch
+cd demos/vector-search/qdrant
 make run
 ```
 
 Individual steps (from the engine directory):
 
 ```bash
-make build     # compile Jingra
-make start     # start the sink + engine containers
+make build     # cargo build --release, then build the jingra image
+make start     # start the Qdrant container
 make load      # index the dataset
-make eval      # run the benchmark
-make analyze   # generate recall curves and latency plots → ./output/
-make stop      # tear down all containers
-make clean     # stop + delete ./output/
+make bench     # run the benchmark sweep
+make report    # generate recall/latency CSV + plots -> ./output/
+make stop      # tear down the container
+make clean     # stop + delete ./output/ and ./results/
 ```
 
 ## Infrastructure
 
-Every demo runs two independent clusters:
+| Service  | External port | Purpose                  |
+|----------|----------------|---------------------------|
+| `qdrant` | 6333 / 6334    | Engine under test          |
 
-| Service | External port | Purpose |
-|---|---|---|
-| `elasticsearch-sink` | 9200 | Results store (configured in `docker-compose.sink.yml`) |
-| `elasticsearch` | 9201 | Engine under test (ES demos) |
-| `opensearch` | 9201 | Engine under test (OS demos) |
-| `qdrant` | 6333 / 6334 | Engine under test (Qdrant demos) |
+`QDRANT_URL` is set by `docker-compose.qdrant.yml`. Results write to a local `file://` mount
+(`./results`, via `output.results_uri` / `report.results_uri` in `config.yaml`) rather than a
+separate results-storage cluster -- there's no sink service to stand up or wait for.
 
-`SINK_URL` always points to the results sink. Engine URLs (`ELASTICSEARCH_URL`,
-`OPENSEARCH_URL`, `QDRANT_URL`) are set by the engine's own compose override.
-
-Engine and sink versions are pinned in `engine-versions/`:
-
-```
-engine-versions/
-  .elasticsearch
-  .opensearch
-  .qdrant
-```
+The Qdrant version is pinned once, in `engine-versions/.qdrant`; the demo compose file and the
+Rust integration test (`tests/qdrant_engine.rs`) both read it from that single file, so they
+can't drift out of sync.
 
 ---
 
 ## Adding an engine to an existing demo type
 
-Example: adding OpenSearch to `hybrid-search`.
+Example: adding a new engine to `vector-search` once it exists in the Rust codebase.
 
 **1. Create the directory:**
 
 ```
-demos/hybrid-search/opensearch/
+demos/vector-search/<engine>/
   Makefile
   config.yaml
-  config/schemas/demo-hybrid-schema.json
-  config/queries/demo-hybrid-query.json
+  config/schemas/demo-vector-schema.json
+  config/queries/demo-vector-query.json
 ```
 
 **2. Makefile** — every engine Makefile follows the same pattern:
 
 ```makefile
-DEMO_NAME := OpenSearch Hybrid Search Demo
+DEMO_NAME := <Engine> Vector Search Demo
 export DATA_PATH := ../data
 export BUILD_CONTEXT := ../../..
-export OS_VERSION := $(shell cat ../../../engine-versions/.opensearch | tr -d '[:space:]')
-COMPOSE_OVERRIDES = -f ../../common/docker-compose.opensearch.yml
-ENGINE_SERVICE := opensearch
+export <ENGINE>_VERSION := $(shell cat ../../../engine-versions/.<engine> | tr -d '[:space:]')
+COMPOSE_OVERRIDES = -f ../../common/docker-compose.<engine>.yml
+ENGINE_SERVICE := <engine>
 include ../../common/demo.mk
 ```
 
-The version variable name must match what the engine's compose file uses
-(`ES_VERSION`, `OS_VERSION`, `QD_VERSION`).
-
-**3. config.yaml** — point `url_env` at the engine URL, use `SINK_URL` for the sink:
+**3. config.yaml** — point the engine block's `url_env` at the engine URL, and set
+`output.results_uri` / `report.results_uri` to a local mount (`file:///app/results` works the
+same way regardless of engine):
 
 ```yaml
-engine: opensearch
+engine: <engine>
 
-opensearch:
-  url_env: OPENSEARCH_URL
+<engine>:
+  url_env: <ENGINE>_URL
 
 # ... datasets, param_groups ...
 
 output:
-  sinks:
-    - type: elasticsearch
-      config:
-        url_env: SINK_URL
-        index: jingra-results
+  results_uri: "file:///app/results"
+  per_query_metrics: true
 
-analysis:
-  results_cluster:
-    url_env: SINK_URL
-    index: jingra-results
+report:
+  engines: [<engine>]
+  results_uri: "file:///app/results"
 ```
 
-**4. Register the engine in the demo-type Makefile** (`demos/hybrid-search/Makefile`):
-
-```makefile
-.PHONY: elasticsearch opensearch
-
-elasticsearch opensearch: generate_data
-    $(MAKE) -C $@ run
-```
+**4. Register the engine in the demo-type Makefile** (`demos/vector-search/Makefile`).
 
 ---
 
 ## Adding a new demo type
 
-Example: `sparse-search`.
+Example: `hybrid-search`.
 
 **1. Directory structure:**
 
 ```
-demos/sparse-search/
+demos/hybrid-search/
   Makefile
   generate_data.py
-  elasticsearch/
+  qdrant/
     Makefile
     config.yaml
     config/schemas/
     config/queries/
 ```
 
-**2. Top-level Makefile** (`demos/sparse-search/Makefile`):
+**2. Top-level Makefile** (`demos/hybrid-search/Makefile`):
 
 ```makefile
 include ../common/generate.mk
 
-.PHONY: elasticsearch
+.PHONY: qdrant
 
-elasticsearch: generate_data
+qdrant: generate_data
     $(MAKE) -C $@ run
 
 %:
@@ -196,8 +162,8 @@ Runs inside Docker (`common/Dockerfile.generate`). Must write two NDJSON files t
 - `docs.ndjson` — one document per line
 - `queries.ndjson` — one query per line, with a `ground_truth` field
 
-**Doc ID rule:** always convert source string IDs to sequential integers with an `id_map`.
-This is required for Qdrant and keeps all engines consistent:
+**Doc ID rule:** always convert source string IDs to sequential integers with an `id_map` --
+Qdrant point IDs are numeric-or-UUID, and sequential integers keep things simple:
 
 ```python
 corpus_list = list(corpus)
@@ -214,26 +180,6 @@ Data is generated once — if `./data/` is non-empty the step is skipped automat
 
 **4. Schema and query templates**
 
-Each engine has its own templates under `config/`. The filenames must match
-`schema_name` and `query_name` in `config.yaml`.
-
-For Elasticsearch/OpenSearch: standard index mapping and query DSL.
-For Qdrant: `{"template": {"vectors": {"size": N, "distance": "Cosine"}}}`.
-
----
-
-## Changing the results sink
-
-The sink is driven by a single variable in `demos/common/demo.mk`:
-
-```makefile
-SINK_ENGINE ?= elasticsearch
-```
-
-This controls:
-- **Version** — reads `engine-versions/.<SINK_ENGINE>` automatically
-- **Type** — passes `SINK_TYPE=<SINK_ENGINE>` to the jingra container
-
-To swap the sink, set `SINK_ENGINE` and replace `docker-compose.sink.yml`.
-All `config.yaml` files reference the sink only via `SINK_URL` and `SINK_TYPE`,
-so no other files need to change.
+Filenames must match `schema_name`/`query_name` in `config.yaml`. For Qdrant, schemas are a
+direct passthrough to its REST collection-creation API:
+`{"template": {"vectors": {"size": N, "distance": "Cosine"}}}`.

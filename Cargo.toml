@@ -15,7 +15,11 @@ name = "jingra"
 path = "src/main.rs"
 
 [profile.release]
-lto = true
+# "thin" LTO instead of fat LTO ("true"): fat LTO across this many heavy dependencies
+# (arrow/parquet/tonic/qdrant-client) OOM-killed the linker step in a 2GB-memory container
+# build during testing. A batch CLI tool doesn't need fat LTO's marginal runtime gain badly
+# enough to justify that build fragility on memory-constrained hosts.
+lto = "thin"
 
 [dependencies]
 anyhow = "1.0.104"
