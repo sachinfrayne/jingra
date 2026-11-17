@@ -1,0 +1,13 @@
+# Dataset preparation image: downloads GloVe-100, converts it to Parquet with exact ground
+# truth, and generates the jingra configs. Keeps numpy/h5py/pyarrow off the host.
+FROM python:3.12-slim
+
+WORKDIR /bench
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY download.py prepare_data.py generate_configs.py prepare.sh ./
+# Unprivileged by default; docker-compose overrides this with your own uid so that files written
+# to the mounted ./work directory belong to you.
+USER 10001:10001
+ENTRYPOINT ["bash", "/bench/prepare.sh"]
