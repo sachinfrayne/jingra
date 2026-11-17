@@ -20,7 +20,7 @@ make build            # or: cargo build --release
 target/release/jingra --version
 ```
 
-The version is the `version` field in `Cargo.toml` (currently 0.1.0), shown by
+The version is the `version` field in `Cargo.toml` (currently 0.3.0), shown by
 `jingra --version` and in the startup banner. Changes between versions are listed in
 [CHANGELOG.md](CHANGELOG.md).
 

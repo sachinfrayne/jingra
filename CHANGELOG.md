@@ -4,11 +4,13 @@ All notable changes to jingra are listed here. The project follows
 [semantic versioning](https://semver.org/). While the major version is 0, the command line and
 configuration format may still change between minor versions.
 
-## 0.1.0 - 2026-11-17
+## 0.3.0 - 2026-11-17
 
-First release. jingra is a benchmarking tool for vector search engines, rewritten in Rust from
-an earlier Java tool. This release supports Qdrant only; the engine interface is designed so
-other engines can be added.
+First release of the Rust rewrite. jingra is a benchmarking tool for vector search engines,
+rewritten in Rust from the earlier Java tool, whose last version was 0.2.3. This release
+continues the numbering from there, but it is a different program: the commands and the
+configuration format are not compatible with the Java 0.2.x line, and only Qdrant is supported.
+The engine interface is designed so other engines can be added.
 
 ### Added
 
