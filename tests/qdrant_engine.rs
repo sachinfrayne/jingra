@@ -37,7 +37,10 @@ async fn full_lifecycle_against_real_qdrant_container() {
     let container = GenericImage::new("qdrant/qdrant".to_string(), qdrant_version())
         .with_exposed_port(6333.tcp())
         .with_exposed_port(6334.tcp())
+        // The test connects over gRPC (6334) and REST (6333), and Qdrant logs each listener
+        // separately, so wait for both rather than assuming one implies the other.
         .with_wait_for(WaitFor::message_on_stdout("Qdrant HTTP listening on 6333"))
+        .with_wait_for(WaitFor::message_on_stdout("Qdrant gRPC listening on 6334"))
         .start()
         .await
         .expect("qdrant container starts");
