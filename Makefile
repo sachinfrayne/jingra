@@ -1,68 +1,56 @@
-# Build and push: make image=<DOCKER_URL>
-TAG := ${image}
-JAVA_VERSION := $(shell cat .java-version)
-
 .DEFAULT_GOAL := help
 
 help:
 	@echo "Jingra - Available Commands"
 	@echo "============================"
 	@echo ""
-	@echo "Build & Push:"
-	@echo "  make build image=<tag>          Build and push multi-arch Docker image"
-	@echo "  make build-no-cache image=<tag> Build and push without cache"
-	@echo "  make pull image=<tag>           Pull Docker image"
+	@echo "Build:"
+	@echo "  make build                      Build the optimized binary (target/release/jingra)"
+	@echo "  make docker-build               Build a local Docker image (jingra:local)"
 	@echo ""
 	@echo "Testing & Coverage:"
-	@echo "  make test                       Run tests with fail-fast (default)"
+	@echo "  make test                       Run tests with fail-fast (default; requires Docker)"
 	@echo "  make test-all                   Run all tests regardless of failures"
 	@echo "  make coverage                   View coverage report in browser"
 	@echo ""
 	@echo "Maintenance:"
-	@echo "  make clean                      Clean build artifacts and Docker cache"
-	@echo ""
-	@echo "Example:"
-	@echo "  make build image=<DOCKER_URL>"
+	@echo "  make clean                      Remove cargo build artifacts"
 	@echo ""
 
 # Run tests with fail-fast (default - best for CI/CD and development)
 test:
-	@echo "\n::: Validating Java version consistency"
-	@./validate-java-version.sh
-	@echo "\n::: Validating engine version consistency"
-	@./validate-engine-versions.sh
+	@echo "\n::: Running clippy (warnings are errors)"
+	cargo clippy --all-targets -- -D warnings
 	@echo "\n::: Running tests with fail-fast enabled"
-	mvn clean verify -Dsurefire.skipAfterFailureCount=1
+	cargo nextest run --fail-fast --retries 1
+	cargo test --doc
 
 # Run all tests regardless of failures (useful for seeing all issues at once)
 test-all:
-	@echo "\n::: Validating Java version consistency"
-	@./validate-java-version.sh
-	@echo "\n::: Validating engine version consistency"
-	@./validate-engine-versions.sh
-	@echo "\n::: Running all tests with coverage enforcement"
-	mvn clean verify
+	@echo "\n::: Running clippy (warnings are errors)"
+	cargo clippy --all-targets -- -D warnings
+	@echo "\n::: Running all tests"
+	cargo nextest run --retries 1
+	cargo test --doc
 
-# Build Docker image (tests must pass first)
-build: test
-	@echo "\n::: Building and pushing multi-arch image $(TAG) with Java $(JAVA_VERSION)"
-	docker buildx build --push -f Dockerfile --platform linux/amd64,linux/arm64/v8 --build-arg JAVA_VERSION=$(JAVA_VERSION) --tag $(TAG) .
+# Optimized release binary at target/release/jingra.
+build:
+	cargo build --release
 
-# Use if you see "parent snapshot does not exist" (stale/corrupt cache)
-build-no-cache: test
-	@echo "\n::: Building and pushing (no cache) $(TAG) with Java $(JAVA_VERSION)"
-	docker buildx build --no-cache --push -f Dockerfile --platform linux/amd64,linux/arm64/v8 --build-arg JAVA_VERSION=$(JAVA_VERSION) --tag $(TAG) .
+# Local Docker image. Images are not published: build your own from this source.
+docker-build:
+	docker build -t jingra:local .
 
-# View coverage report in browser
+# Generate an HTML coverage report and open it in a browser.
+# Threshold is a floor on the current codebase's actual coverage (~93% region / ~94% line as of
+# the Rust rewrite), not literal 100% -- see AGENTS.md for why, and raise it as coverage improves.
 coverage:
-	@echo "\n::: Opening coverage report"
-	@mvn jacoco:report
-	@open target/site/jacoco/index.html || xdg-open target/site/jacoco/index.html || echo "Coverage report: target/site/jacoco/index.html"
+	@echo "\n::: Generating coverage report"
+	cargo llvm-cov --html --fail-under-lines 94 --fail-under-regions 93
+	@open target/llvm-cov/html/index.html || xdg-open target/llvm-cov/html/index.html || echo "Coverage report: target/llvm-cov/html/index.html"
 
 clean:
-	@echo "\n::: Cleaning build artifacts and Docker cache"
-	mvn clean
-	docker buildx prune -f
+	@echo "\n::: Cleaning build artifacts"
+	cargo clean
 
-pull:
-	docker pull $(TAG)
+.PHONY: help test test-all build docker-build coverage clean

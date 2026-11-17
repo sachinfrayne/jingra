@@ -1,0 +1,45 @@
+# GloVe-100 HNSW sweep. Run it through run.sh, which supplies the required environment:
+#   benchmarks/glove-100-hnsw/run.sh          (full sweep, about 40 minutes)
+#   benchmarks/glove-100-hnsw/run.sh quick    (single build, about 10 minutes)
+name: jingra-glove-hnsw
+
+x-sweep-env: &sweep-env
+  BUILDS:
+  EF:
+  WORKERS:
+  WARMUP_ROUNDS:
+  MEASUREMENT_ROUNDS:
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v${QDRANT_VERSION:?run this through benchmarks/glove-100-hnsw/run.sh}
+
+  prepare:
+    build:
+      context: .
+      dockerfile: Dockerfile.prepare
+    user: "${HOST_UID:-0}:${HOST_GID:-0}"
+    environment:
+      <<: *sweep-env
+      DATASET_URL:
+    volumes:
+      - ./work:/work
+
+  bench:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    user: "${HOST_UID:-0}:${HOST_GID:-0}"
+    entrypoint: ["/bin/bash", "/bench/bench.sh"]
+    working_dir: /work
+    environment:
+      <<: *sweep-env
+      QDRANT_URL: http://qdrant:6334
+    volumes:
+      - ./work:/work
+      - ./bench.sh:/bench/bench.sh:ro
+    depends_on:
+      qdrant:
+        condition: service_started
+      prepare:
+        condition: service_completed_successfully

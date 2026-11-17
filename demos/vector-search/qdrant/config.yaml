@@ -49,19 +49,14 @@ evaluation:
   measurement_rounds: 1
 
 output:
-  sinks:
-    - type: elasticsearch
-      config:
-        url_env: SINK_URL
-        index: jingra-results
+  results_uri: "file:///app/results"
+  per_query_metrics: true
 
-analysis:
+report:
   run_id: demo-vector-qdrant
   engines:
     - qdrant
-  results_cluster:
-    url_env: SINK_URL
-    index: jingra-results
+  results_uri: "file:///app/results"
   output_directory: ./output
   generate_plots: true
   latency_metrics:

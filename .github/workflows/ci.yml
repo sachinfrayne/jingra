@@ -13,15 +13,33 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version-file: .java-version
-          cache: maven
+      - name: Install pinned Rust toolchain (from rust-toolchain.toml)
+        run: rustup show
 
-      - name: Set vm.max_map_count for Elasticsearch/OpenSearch integration tests
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-nextest and cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-llvm-cov
+
+      - name: Set vm.max_map_count for the Qdrant integration test
         run: sudo sysctl -w vm.max_map_count=262144
 
+      - name: Run clippy (warnings are errors)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run doc tests (not covered by the instrumentation below)
+        run: cargo test --doc
+
       - name: Run tests with coverage
-        run: make test
+        run: |
+          cargo llvm-cov --no-report nextest --retries 1
+          cargo llvm-cov report --fail-under-lines 94 --fail-under-regions 93 --lcov --output-path lcov.info
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: lcov.info

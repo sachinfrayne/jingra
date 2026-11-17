@@ -1,13 +1,5 @@
 DEMOS := \
-	await-index-ready/elasticsearch \
-	await-index-ready/opensearch \
 	await-index-ready/qdrant \
-	hybrid-search/elasticsearch \
-	lexical-search/elasticsearch \
-	lexical-search/opensearch \
-	parquet-file-format/elasticsearch \
-	vector-search/elasticsearch \
-	vector-search/opensearch \
 	vector-search/qdrant
 
 ENGINES := $(sort $(notdir $(DEMOS)))

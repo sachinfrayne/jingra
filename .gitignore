@@ -1,11 +1,12 @@
 # Local review / agent tracking (not committed)
 .local/
 
-# Maven build output
-target/
+# Cargo build output
+/target/
 
-# Compiled classes (e.g. accidental javac at repo root)
-*.class
+# LLVM coverage output
+/lcov.info
+/*.profraw
 
 # IDE files
 .idea/
@@ -13,11 +14,6 @@ target/
 *.iml
 *.iws
 *.ipr
-
-# Eclipse
-.settings/
-.classpath
-.project
 
 # macOS
 .DS_Store
@@ -29,13 +25,14 @@ target/
 # Test-generated artifacts
 jingra-config/
 
-# Python artifacts (from create_test_parquet.py)
+# Python artifacts (from generate_data.py)
 __pycache__/
 *.pyc
 
 # Demo analysis output (generated at runtime)
 demos/*/*/output/
 demos/.run-start
+demos/*/*/results/
 
 # Demo data files (generated locally by generate_data.py, not committed)
 demos/*/data/
@@ -43,3 +40,6 @@ demos/*/data/
 # Local review artifacts
 
 REVIEW*.md
+
+# Benchmark working directories (downloaded datasets, results)
+benchmarks/*/work/
