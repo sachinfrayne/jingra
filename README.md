@@ -9,13 +9,28 @@ the config/data/evaluation/CLI layers.
 - **Qdrant** - Vector search with binary quantization
 - More engines coming soon
 
+## Install
+
+jingra is distributed as source. Download a release from the
+[GitHub releases page](https://github.com/sachinfrayne/jingra/releases) (or `git clone` the
+repository) and build it yourself. No binaries or Docker images are published.
+
+```bash
+make build            # or: cargo build --release
+target/release/jingra --version
+```
+
+The version is the `version` field in `Cargo.toml` (currently 0.1.0), shown by
+`jingra --version` and in the startup banner. Changes between versions are listed in
+[CHANGELOG.md](CHANGELOG.md).
+
 ## Quick Start
 
 **Prerequisites:** Rust (see `rust-toolchain.toml` -- `rustup` installs the pinned version automatically), Docker (for integration tests)
 
 ```bash
 # Build
-cargo build --release
+make build   # same as: cargo build --release
 
 # Load data
 target/release/jingra load config.yaml
@@ -26,6 +41,15 @@ target/release/jingra bench config.yaml
 # Generate CSV + recall/latency plots from stored results
 target/release/jingra report config.yaml
 ```
+
+## Example result
+
+Recall vs throughput on GloVe-100 (1.18M vectors), sweeping Qdrant's HNSW build parameters
+(`m`, `ef_construct`) and the query-time `hnsw_ef`, produced by `jingra report`. Each line is one
+build's Pareto frontier. See [benchmarks/glove-100-hnsw](benchmarks/glove-100-hnsw/) for the
+setup, caveats and how to reproduce it.
+
+![Recall vs throughput](benchmarks/glove-100-hnsw/results/recall_vs_throughput.svg)
 
 ## Configuration
 
@@ -58,11 +82,25 @@ datasets:
       recall@100:
         - {size: 100, hnsw_ef: 128}
 
+load:
+  threads: 4               # concurrent ingest requests (default 10)
+  batch_size: 1000         # documents per request (default 1000)
+  queue_capacity: 8        # batches buffered in memory (default 8)
+  await_index_ready: true  # wait for the engine to finish background indexing
+  index_ready_timeout_seconds: 14400
+  max_retries: 10          # per batch, transient errors only (default 10)
+  recreate_existing_index: true   # false: fail instead of dropping an existing index
+
 evaluation:
   warmup_workers: 16
   measurement_workers: 16
   warmup_rounds: 3
   measurement_rounds: 1
+
+logging:
+  level: INFO              # also: DEBUG, WARN, ERROR
+  loggers:
+    "jingra::engine": DEBUG   # optional per-module overrides
 
 output:
   # Any object_store-supported URI: file://, s3://, gs://, az://. Local by default, so `bench`
@@ -78,17 +116,44 @@ report:
   generate_plots: true
 ```
 
+### What `load` does to an existing index
+
+`load` starts from an empty index: if `index_name` already exists it is **deleted and recreated**.
+That is what a benchmark needs, but on a shared cluster set `load.recreate_existing_index: false`
+and `load` will refuse (and delete nothing) instead. The data file is located and read before the
+engine is touched, so a mistyped `data_path` never costs you an existing index.
+
+Ingest batches are retried only for transient failures (timeouts, dropped connections), up to
+`load.max_retries` times with backoff. Permanent errors, such as a vector of the wrong dimension
+or a bad API key, fail the load immediately. Keep `batch_size` and `queue_capacity` modest for
+high-dimensional vectors: each queued batch is held in memory (roughly 32 bytes per vector
+component).
+
+### Results location
+
+`output.results_uri` and `report.results_uri` accept `file://` paths (absolute, or relative to
+the working directory such as `file://./results`), `s3://`, `gs://` and `az://` locations.
+Running `bench` again with the same `run_id` adds results next to the old ones; `report` uses
+the most recent result for each parameter set and says so in its log.
+
+### Secure connections
+
+Use an `https://` URL in `QDRANT_URL` for TLS. Certificates are checked against the system
+trust store, so a private CA must be trusted at the OS level or via `SSL_CERT_FILE`. Skipping
+certificate verification (for self-signed certificates) is not supported.
+
 See [demos/](demos/) for complete worked examples (config, schema/query templates, and a
 Docker Compose harness that spins up a real Qdrant container).
 
 ## Docker
 
 ```bash
-# Build image
-docker build -t jingra:local .
+# Build image locally (images are not published)
+make docker-build   # same as: docker build -t jingra:local .
 
 # Run
 docker run --rm \
+  --user "$(id -u):$(id -g)" \
   -e QDRANT_URL \
   -v "$PWD/config.yaml:/config/jingra.yaml:ro" \
   -v "$PWD/datasets:/app/datasets:ro" \
