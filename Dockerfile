@@ -24,8 +24,15 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
+# Run as an unprivileged user with a numeric uid, so Kubernetes' `runAsNonRoot` can verify it.
+# Mounted volumes the container must write to (results) need to be writable by this uid, or run
+# with `--user "$(id -u):$(id -g)"` / a pod `securityContext` to use your own.
+RUN useradd --system --uid 10001 --no-create-home --home-dir /app --shell /usr/sbin/nologin jingra && \
+    mkdir -p /app && chown jingra:jingra /app
+
 WORKDIR /app
 COPY --from=builder /build/target/release/jingra /app/jingra
+USER 10001:10001
 
 ENTRYPOINT ["/app/jingra"]
 # Override with e.g. `bench /config/jingra.yaml` -- first arg is the subcommand, second the config path.

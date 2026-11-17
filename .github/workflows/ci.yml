@@ -35,7 +35,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           cargo llvm-cov --no-report nextest --retries 1
-          cargo llvm-cov report --fail-under-lines 90 --fail-under-regions 88 --lcov --output-path lcov.info
+          cargo llvm-cov report --fail-under-lines 94 --fail-under-regions 93 --lcov --output-path lcov.info
 
       - name: Upload coverage report
         if: always()

@@ -1,16 +1,12 @@
-# Build and push: make build image=<DOCKER_URL>
-TAG := ${image}
-
 .DEFAULT_GOAL := help
 
 help:
 	@echo "Jingra - Available Commands"
 	@echo "============================"
 	@echo ""
-	@echo "Build & Push:"
-	@echo "  make build image=<tag>          Build and push multi-arch Docker image"
-	@echo "  make build-no-cache image=<tag> Build and push without cache"
-	@echo "  make pull image=<tag>           Pull Docker image"
+	@echo "Build:"
+	@echo "  make build                      Build the optimized binary (target/release/jingra)"
+	@echo "  make docker-build               Build a local Docker image (jingra:local)"
 	@echo ""
 	@echo "Testing & Coverage:"
 	@echo "  make test                       Run tests with fail-fast (default; requires Docker)"
@@ -18,10 +14,7 @@ help:
 	@echo "  make coverage                   View coverage report in browser"
 	@echo ""
 	@echo "Maintenance:"
-	@echo "  make clean                      Clean build artifacts and Docker cache"
-	@echo ""
-	@echo "Example:"
-	@echo "  make build image=<DOCKER_URL>"
+	@echo "  make clean                      Remove cargo build artifacts"
 	@echo ""
 
 # Run tests with fail-fast (default - best for CI/CD and development)
@@ -40,30 +33,24 @@ test-all:
 	cargo nextest run --retries 1
 	cargo test --doc
 
-# Build Docker image (tests must pass first)
-build: test
-	@echo "\n::: Building and pushing multi-arch image $(TAG)"
-	docker buildx build --push -f Dockerfile --platform linux/amd64,linux/arm64/v8 --tag $(TAG) .
+# Optimized release binary at target/release/jingra.
+build:
+	cargo build --release
 
-# Use if you see stale/corrupt buildx cache issues
-build-no-cache: test
-	@echo "\n::: Building and pushing (no cache) $(TAG)"
-	docker buildx build --no-cache --push -f Dockerfile --platform linux/amd64,linux/arm64/v8 --tag $(TAG) .
+# Local Docker image. Images are not published: build your own from this source.
+docker-build:
+	docker build -t jingra:local .
 
 # Generate an HTML coverage report and open it in a browser.
-# Threshold is a floor on the current codebase's actual coverage (~91% region / ~92% line as of
+# Threshold is a floor on the current codebase's actual coverage (~93% region / ~94% line as of
 # the Rust rewrite), not literal 100% -- see AGENTS.md for why, and raise it as coverage improves.
 coverage:
 	@echo "\n::: Generating coverage report"
-	cargo llvm-cov --html --fail-under-lines 90 --fail-under-regions 88
+	cargo llvm-cov --html --fail-under-lines 94 --fail-under-regions 93
 	@open target/llvm-cov/html/index.html || xdg-open target/llvm-cov/html/index.html || echo "Coverage report: target/llvm-cov/html/index.html"
 
 clean:
-	@echo "\n::: Cleaning build artifacts and Docker cache"
+	@echo "\n::: Cleaning build artifacts"
 	cargo clean
-	docker buildx prune -f
 
-pull:
-	docker pull $(TAG)
-
-.PHONY: help test test-all build build-no-cache coverage clean pull
+.PHONY: help test test-all build docker-build coverage clean

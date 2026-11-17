@@ -1,0 +1,19 @@
+# The image builds from source and only needs Cargo.toml, Cargo.lock, rust-toolchain.toml, src,
+# tests and engine-versions (see Dockerfile). Everything else is kept out of the build context:
+# without this, `target/` and downloaded benchmark data made it several GB.
+.git
+target
+lcov.info
+*.profraw
+.local
+.idea
+.vscode
+.DS_Store
+
+# Downloaded datasets, results and generated reports
+benchmarks/*/work
+demos/*/data
+demos/*/*/output
+demos/*/*/results
+jingra-config
+**/__pycache__

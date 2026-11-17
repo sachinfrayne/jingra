@@ -40,3 +40,6 @@ demos/*/data/
 # Local review artifacts
 
 REVIEW*.md
+
+# Benchmark working directories (downloaded datasets, results)
+benchmarks/*/work/
