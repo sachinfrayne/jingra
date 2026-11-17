@@ -157,17 +157,40 @@ pub struct LoadConfig {
     pub queue_capacity: Option<i64>,
     #[serde(default)]
     pub await_index_ready: bool,
+    /// Whether `load` may delete and recreate an index that already exists (default `true`:
+    /// every load starts from an empty index, which is what a benchmark needs). Set to `false`
+    /// when pointing at a shared cluster, so `load` errors instead of dropping data.
+    pub recreate_existing_index: Option<bool>,
+    /// Retries per ingest batch for transient failures (timeouts, connection drops). Permanent
+    /// failures such as a wrong vector dimension or a bad API key are never retried.
+    pub max_retries: Option<i64>,
+    /// Longest to wait for the engine to finish background indexing when `await_index_ready`
+    /// is set, in seconds.
+    pub index_ready_timeout_seconds: Option<i64>,
 }
 
 impl LoadConfig {
+    /// Default 1,000 documents per batch. Every queued batch is held in memory as JSON values
+    /// (about 32 bytes per vector component), so large batches times a deep queue scale to
+    /// gigabytes on high-dimensional data, and a single gRPC request must stay under the
+    /// server's message size limit.
     pub fn batch_size_or_default(&self) -> i64 {
-        self.batch_size.filter(|v| *v > 0).unwrap_or(10_000)
+        self.batch_size.filter(|v| *v > 0).unwrap_or(1_000)
     }
     pub fn threads_or_default(&self) -> i64 {
         self.threads.filter(|v| *v > 0).unwrap_or(10)
     }
     pub fn queue_capacity_or_default(&self) -> i64 {
-        self.queue_capacity.filter(|v| *v > 0).unwrap_or(20)
+        self.queue_capacity.filter(|v| *v > 0).unwrap_or(8)
+    }
+    pub fn recreate_existing_index_or_default(&self) -> bool {
+        self.recreate_existing_index.unwrap_or(true)
+    }
+    pub fn max_retries_or_default(&self) -> u32 {
+        self.max_retries.filter(|v| *v >= 0).unwrap_or(10) as u32
+    }
+    pub fn index_ready_timeout_or_default(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.index_ready_timeout_seconds.filter(|v| *v > 0).unwrap_or(4 * 60 * 60) as u64)
     }
 }
 
@@ -386,19 +409,28 @@ datasets:
     #[test]
     fn load_config_defaults_apply_when_unset_or_non_positive() {
         let lc = LoadConfig::default();
-        assert_eq!(lc.batch_size_or_default(), 10_000);
+        assert_eq!(lc.batch_size_or_default(), 1_000);
         assert_eq!(lc.threads_or_default(), 10);
-        assert_eq!(lc.queue_capacity_or_default(), 20);
+        assert_eq!(lc.queue_capacity_or_default(), 8);
+        assert!(lc.recreate_existing_index_or_default());
+        assert_eq!(lc.max_retries_or_default(), 10);
+        assert_eq!(lc.index_ready_timeout_or_default(), std::time::Duration::from_secs(4 * 3600));
 
         let lc2 = LoadConfig {
             batch_size: Some(0),
             threads: Some(-1),
             queue_capacity: Some(5),
             await_index_ready: true,
+            recreate_existing_index: Some(false),
+            max_retries: Some(0),
+            index_ready_timeout_seconds: Some(90),
         };
-        assert_eq!(lc2.batch_size_or_default(), 10_000);
+        assert_eq!(lc2.batch_size_or_default(), 1_000);
         assert_eq!(lc2.threads_or_default(), 10);
         assert_eq!(lc2.queue_capacity_or_default(), 5);
+        assert!(!lc2.recreate_existing_index_or_default());
+        assert_eq!(lc2.max_retries_or_default(), 0);
+        assert_eq!(lc2.index_ready_timeout_or_default(), std::time::Duration::from_secs(90));
     }
 
     #[test]

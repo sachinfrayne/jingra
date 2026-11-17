@@ -1,6 +1,5 @@
 //! Downloads a dataset file from a URL (read from an env var) if it isn't already present
-//! locally. Ported from the Java `FileDownloader`, minus the throttled progress-logging (the
-//! Rust version streams straight to disk without needing to; see [`download_once`]).
+//! locally. Streams straight to disk; see [`download_once`].
 
 use super::UtilsError;
 use futures::StreamExt;
@@ -12,6 +11,13 @@ use tokio::io::AsyncWriteExt;
 /// Ensures `file_path` exists locally, downloading from the URL in env var `url_env` if it's
 /// missing or (for `.parquet` files) corrupted, per the `PAR1` magic-byte check.
 pub async fn ensure_file_exists(file_path: &str, url_env: &str) -> Result<(), UtilsError> {
+    ensure_file_exists_from(file_path, url_env, std::env::var(url_env).ok()).await
+}
+
+/// [`ensure_file_exists`] with the env var's value passed in, so tests can exercise the download
+/// paths without mutating the process-global environment (which is `unsafe` and races with
+/// tests running in parallel).
+async fn ensure_file_exists_from(file_path: &str, url_env: &str, url: Option<String>) -> Result<(), UtilsError> {
     let path = Path::new(file_path);
 
     if path.exists() {
@@ -24,7 +30,7 @@ pub async fn ensure_file_exists(file_path: &str, url_env: &str) -> Result<(), Ut
         std::fs::remove_file(path)?;
     }
 
-    let url = std::env::var(url_env).map_err(|_| {
+    let url = url.ok_or_else(|| {
         UtilsError::Message(format!("File not found: {file_path} and no URL provided in env var: {url_env}"))
     })?;
     download_file(&url, path).await
@@ -89,6 +95,9 @@ async fn download_once(url: &str, path: &Path) -> Result<(), UtilsError> {
             let chunk = chunk.map_err(|e| UtilsError::Message(e.to_string()))?;
             file.write_all(&chunk).await?;
         }
+        // tokio::fs::File hands writes to a background thread: without an explicit flush, this
+        // function can return (and the caller read the file) before the data has landed.
+        file.flush().await?;
         Ok(())
     }
     .await;
@@ -195,71 +204,47 @@ mod tests {
     #[tokio::test]
     async fn ensure_file_exists_downloads_when_missing() {
         let base_url = spawn_test_server(vec![(200, b"hello world")]);
-        unsafe {
-            std::env::set_var("JINGRA_TEST_DOWNLOAD_URL_A", &base_url);
-        }
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("downloaded.ndjson");
 
-        ensure_file_exists(path.to_str().unwrap(), "JINGRA_TEST_DOWNLOAD_URL_A").await.unwrap();
+        ensure_file_exists_from(path.to_str().unwrap(), "JINGRA_TEST_DOWNLOAD_URL", Some(base_url)).await.unwrap();
 
         assert_eq!(std::fs::read(&path).unwrap(), b"hello world");
-        unsafe {
-            std::env::remove_var("JINGRA_TEST_DOWNLOAD_URL_A");
-        }
     }
 
     #[tokio::test]
     async fn ensure_file_exists_redownloads_a_corrupted_parquet_file() {
         let base_url = spawn_test_server(vec![(200, b"PAR1validPAR1")]);
-        unsafe {
-            std::env::set_var("JINGRA_TEST_DOWNLOAD_URL_B", &base_url);
-        }
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("data.parquet");
         std::fs::write(&path, b"not a real parquet file").unwrap();
 
-        ensure_file_exists(path.to_str().unwrap(), "JINGRA_TEST_DOWNLOAD_URL_B").await.unwrap();
+        ensure_file_exists_from(path.to_str().unwrap(), "JINGRA_TEST_DOWNLOAD_URL", Some(base_url)).await.unwrap();
 
         assert_eq!(std::fs::read(&path).unwrap(), b"PAR1validPAR1");
-        unsafe {
-            std::env::remove_var("JINGRA_TEST_DOWNLOAD_URL_B");
-        }
     }
 
     #[tokio::test]
     async fn ensure_file_exists_fails_immediately_on_non_retryable_status() {
         let base_url = spawn_test_server(vec![(404, b"not found")]);
-        unsafe {
-            std::env::set_var("JINGRA_TEST_DOWNLOAD_URL_C", &base_url);
-        }
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("missing.ndjson");
 
-        let err = ensure_file_exists(path.to_str().unwrap(), "JINGRA_TEST_DOWNLOAD_URL_C")
+        let err = ensure_file_exists_from(path.to_str().unwrap(), "JINGRA_TEST_DOWNLOAD_URL", Some(base_url))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("404"));
         assert!(!path.exists());
-        unsafe {
-            std::env::remove_var("JINGRA_TEST_DOWNLOAD_URL_C");
-        }
     }
 
     #[tokio::test(start_paused = true)]
     async fn ensure_file_exists_retries_a_transient_5xx_then_succeeds() {
         let base_url = spawn_test_server(vec![(503, b"try again"), (200, b"eventually ok")]);
-        unsafe {
-            std::env::set_var("JINGRA_TEST_DOWNLOAD_URL_D", &base_url);
-        }
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("retried.ndjson");
 
-        ensure_file_exists(path.to_str().unwrap(), "JINGRA_TEST_DOWNLOAD_URL_D").await.unwrap();
+        ensure_file_exists_from(path.to_str().unwrap(), "JINGRA_TEST_DOWNLOAD_URL", Some(base_url)).await.unwrap();
 
         assert_eq!(std::fs::read(&path).unwrap(), b"eventually ok");
-        unsafe {
-            std::env::remove_var("JINGRA_TEST_DOWNLOAD_URL_D");
-        }
     }
 }

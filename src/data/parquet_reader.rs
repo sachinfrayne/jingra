@@ -9,8 +9,7 @@ use std::fs::File;
 ///
 /// Row-to-JSON conversion is delegated to `arrow_json`'s own Arrow->JSON writer rather than
 /// hand-matching every Arrow `DataType` — it already handles nested lists/structs/nulls
-/// correctly, which is exactly the class of bug the Java version's manual Avro-value-unwrapping
-/// code existed to work around.
+/// correctly.
 pub struct ParquetReader {
     path: String,
 }
@@ -48,8 +47,7 @@ impl ParquetReader {
     /// Converts one batch, splitting it into `conversion_threads` roughly-equal row slices and
     /// converting them in parallel scoped threads when that's worth it. Parquet decode into
     /// Arrow arrays remains single-threaded (the reader itself isn't `Sync`-shared here); this
-    /// only parallelizes the Arrow->JSON->Document conversion step, mirroring the Java version's
-    /// division of labor (single-threaded Parquet decode, parallel Avro-to-Document conversion).
+    /// only parallelizes the Arrow->JSON->Document conversion step.
     fn convert_batch(batch: RecordBatch, conversion_threads: usize) -> Result<Vec<Document>, DataError> {
         let rows = batch.num_rows();
         if conversion_threads <= 1 || rows < conversion_threads {

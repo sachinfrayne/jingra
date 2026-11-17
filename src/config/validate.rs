@@ -87,6 +87,8 @@ pub fn validate_for_bench(config: &JingraConfig) -> Result<(), ConfigError> {
     )?;
 
     let ds = config.active_dataset()?;
+    require_non_blank(ds.index_name.as_deref(), "dataset.index_name is required for bench")?;
+    require_non_blank(ds.query_name.as_deref(), "dataset.query_name is required for bench")?;
     let path = ds
         .path
         .as_ref()
@@ -251,6 +253,8 @@ mod tests {
                 queries_path: Some("queries.parquet".to_string()),
                 ..Default::default()
             });
+            ds.index_name = Some("idx".to_string());
+            ds.query_name = Some("q".to_string());
             ds.queries_mapping = Some(QueriesMappingConfig {
                 ground_truth_field: Some("ground_truth".to_string()),
                 ..Default::default()
@@ -271,6 +275,8 @@ mod tests {
         let mut config = base_config();
         config.evaluation = Some(EvaluationConfig::default());
         let ds = config.datasets.as_mut().unwrap().get_mut("demo").unwrap();
+        ds.index_name = Some("idx".to_string());
+        ds.query_name = Some("q".to_string());
         ds.path = Some(PathConfig {
             queries_path: Some("queries.parquet".to_string()),
             ..Default::default()
@@ -281,6 +287,33 @@ mod tests {
             ..Default::default()
         });
         assert!(validate_for_bench(&config).is_err());
+    }
+
+    #[test]
+    fn validate_for_bench_requires_index_name_and_query_name() {
+        // Previously a missing index_name or query_name was silently replaced by an empty
+        // string and surfaced later as an obscure engine error.
+        let mut config = base_config();
+        config.evaluation = Some(EvaluationConfig::default());
+        {
+            let ds = config.datasets.as_mut().unwrap().get_mut("demo").unwrap();
+            ds.path = Some(PathConfig { queries_path: Some("queries.parquet".to_string()), ..Default::default() });
+            ds.queries_mapping = Some(QueriesMappingConfig {
+                query_vector_field: Some("embedding".to_string()),
+                ground_truth_field: Some("ground_truth".to_string()),
+                ..Default::default()
+            });
+            ds.param_groups = Some(HashMap::from([("recall@10".to_string(), vec![HashMap::new()])]));
+        }
+        let msg = validate_for_bench(&config).unwrap_err().to_string();
+        assert!(msg.contains("index_name"), "{msg}");
+
+        config.datasets.as_mut().unwrap().get_mut("demo").unwrap().index_name = Some("idx".to_string());
+        let msg = validate_for_bench(&config).unwrap_err().to_string();
+        assert!(msg.contains("query_name"), "{msg}");
+
+        config.datasets.as_mut().unwrap().get_mut("demo").unwrap().query_name = Some("q".to_string());
+        assert!(validate_for_bench(&config).is_ok());
     }
 
     #[test]

@@ -34,30 +34,18 @@ pub async fn run_load_with_engine(config: &JingraConfig, engine: Arc<dyn Benchma
     config::validate_for_load(config)?;
     let dataset = config.active_dataset()?;
 
-    tracing::info!("Connecting to {}...", engine.engine_name());
-    engine.connect().await?;
-
     let index_name = dataset
         .index_name
         .clone()
         .ok_or_else(|| CliError::Message("dataset.index_name is required for load".into()))?;
-
-    if engine.index_exists(&index_name).await? {
-        tracing::info!("Index '{index_name}' already exists - deleting...");
-        engine.delete_index(&index_name).await?;
-        tracing::info!("Index delete request accepted; waiting until index is gone before create...");
-        wait_until_index_absent(&engine, &index_name).await?;
-        tracing::info!("Index deleted successfully (no longer reported by cluster)");
-    }
-
     let schema_name = dataset
         .schema_name
         .clone()
         .ok_or_else(|| CliError::Message("dataset.schema_name is required for load".into()))?;
-    tracing::info!("Creating index '{index_name}'...");
-    engine.create_index(&index_name, &schema_name).await?;
-    tracing::info!("Index created successfully");
+    let load_config = config.load.clone().unwrap_or_default();
 
+    // Resolve and open the data file BEFORE touching the engine: if the path is wrong we must
+    // fail without having deleted an existing index.
     let path_config = dataset.path.as_ref().expect("validated by validate_for_load");
     let data_path = path_config.data_path.clone().expect("validated by validate_for_load");
     match &path_config.data_url_env {
@@ -67,17 +55,36 @@ pub async fn run_load_with_engine(config: &JingraConfig, engine: Arc<dyn Benchma
         }
         None => {}
     }
-    tracing::info!("Loading data from: {data_path}");
-
     let reader = data::create_reader(&data_path);
     let row_count = reader.row_count()?;
-    tracing::info!("Data file contains {row_count} documents");
+    tracing::info!("Data file {data_path} contains {row_count} documents");
+
+    tracing::info!("Connecting to {}...", engine.engine_name());
+    engine.connect().await?;
+
+    if engine.index_exists(&index_name).await? {
+        if !load_config.recreate_existing_index_or_default() {
+            return Err(CliError::Message(format!(
+                "Index '{index_name}' already exists and load.recreate_existing_index is false; \
+                 refusing to delete it. Remove it yourself or set recreate_existing_index to true."
+            )));
+        }
+        tracing::warn!("Index '{index_name}' already exists - deleting it (load.recreate_existing_index is true)...");
+        engine.delete_index(&index_name).await?;
+        tracing::info!("Index delete request accepted; waiting until index is gone before create...");
+        wait_until_index_absent(&engine, &index_name).await?;
+        tracing::info!("Index deleted successfully (no longer reported by cluster)");
+    }
+
+    tracing::info!("Creating index '{index_name}'...");
+    engine.create_index(&index_name, &schema_name).await?;
+    tracing::info!("Index created successfully");
 
     let id_field = dataset.data_mapping.as_ref().and_then(|d| d.id_field.clone());
-    let load_config = config.load.clone().unwrap_or_default();
     let batch_size = load_config.batch_size_or_default() as usize;
     let num_threads = load_config.threads_or_default() as usize;
     let queue_capacity = load_config.queue_capacity_or_default().max(1) as usize;
+    let max_retries = load_config.max_retries_or_default();
 
     tracing::info!("Starting parallel ingestion with {num_threads} threads (queue capacity: {queue_capacity})...");
 
@@ -101,14 +108,24 @@ pub async fn run_load_with_engine(config: &JingraConfig, engine: Arc<dyn Benchma
     let mut ingest_failures = 0usize;
 
     while let Some(batch) = rx.recv().await {
+        // Collect finished batches first, then wait for a free slot if every thread is busy.
+        while let Some(res) = tasks.try_join_next() {
+            record_ingest_outcome(res?, &total_ingested, &last_logged_milestone, row_count, start_time, &mut ingest_failures);
+        }
         while tasks.len() >= num_threads.max(1) {
             if let Some(res) = tasks.join_next().await {
                 record_ingest_outcome(res?, &total_ingested, &last_logged_milestone, row_count, start_time, &mut ingest_failures);
             }
         }
+        // A failed batch means the load cannot succeed. Stop reading and sending now: carrying
+        // on would spend retries (and, against a dead server, hours) on every remaining batch.
+        if ingest_failures > 0 {
+            break;
+        }
         let engine = engine.clone();
         let index_name = index_name.clone();
         let id_field = id_field.clone();
+        let batch = Arc::new(batch);
         tasks.spawn(async move {
             retry_with_backoff(
                 || {
@@ -116,20 +133,28 @@ pub async fn run_load_with_engine(config: &JingraConfig, engine: Arc<dyn Benchma
                     let index_name = index_name.clone();
                     let id_field = id_field.clone();
                     let batch = batch.clone();
-                    async move { engine.ingest(batch, &index_name, id_field.as_deref()).await }
+                    async move { engine.ingest(&batch, &index_name, id_field.as_deref()).await }
                 },
-                None, // infinite retries: critical for data integrity, matches the Java version
+                Some(max_retries),
                 1000,
-                |_e| true,
+                // Only transient errors (timeouts, dropped connections) are worth retrying; a
+                // wrong vector dimension or a bad API key fails identically every time.
+                |e: &crate::engine::EngineError| e.is_transient(),
             )
             .await
             .map_err(CliError::from)
         });
     }
+    // Closing the channel makes the reader's next send fail, which is expected if we stopped
+    // early; its error is only meaningful when ingestion itself did not fail.
+    drop(rx);
     while let Some(res) = tasks.join_next().await {
         record_ingest_outcome(res?, &total_ingested, &last_logged_milestone, row_count, start_time, &mut ingest_failures);
     }
-    reader_handle.await??;
+    let reader_result = reader_handle.await?;
+    if ingest_failures == 0 {
+        reader_result?;
+    }
 
     if ingest_failures > 0 {
         return Err(CliError::Message(format!(
@@ -146,7 +171,7 @@ pub async fn run_load_with_engine(config: &JingraConfig, engine: Arc<dyn Benchma
 
     if load_config.await_index_ready {
         tracing::info!("Waiting for index '{index_name}' to be ready (background merges/optimisation to settle)...");
-        engine.await_index_ready(&index_name).await?;
+        engine.await_index_ready(&index_name, load_config.index_ready_timeout_or_default()).await?;
         tracing::info!("Index ready; load command complete.");
     }
 
@@ -156,7 +181,10 @@ pub async fn run_load_with_engine(config: &JingraConfig, engine: Arc<dyn Benchma
     tracing::info!("  Total ingested: {final_count} documents");
     tracing::info!("  Total time: {total_time_sec:.1} sec ({:.1} min)", total_time_sec / 60.0);
     tracing::info!("  Average rate: {:.0} docs/sec", final_count as f64 / total_time_sec.max(1e-6));
-    tracing::info!("  Final count: {} documents", engine.document_count(&index_name).await.unwrap_or(0));
+    match engine.document_count(&index_name).await {
+        Ok(count) => tracing::info!("  Final count: {count} documents"),
+        Err(e) => tracing::warn!("  Final count: unavailable ({e})"),
+    }
     tracing::info!("{}", "=".repeat(80));
 
     Ok(())
@@ -250,7 +278,7 @@ mod tests {
                 threads: Some(2),
                 batch_size: Some(2),
                 queue_capacity: Some(4),
-                await_index_ready: false,
+                ..Default::default()
             }),
             ..Default::default()
         }
@@ -292,7 +320,7 @@ mod tests {
         let f = ndjson_fixture(&[r#"{"id": 1, "embedding": [1.0]}"#, r#"{"id": 2, "embedding": [2.0]}"#]);
         let config = test_config(f.path().to_str().unwrap());
         // Simulates documents silently dropped during ingest (e.g. missing vector field),
-        // matching Java's behavior -- so total ingested ends up less than the row count.
+        // so total ingested ends up less than the row count.
         let engine = Arc::new(MockBenchmarkEngine::under_reporting_ingest());
 
         let err = run_load_with_engine(&config, engine).await.unwrap_err();
@@ -305,5 +333,98 @@ mod tests {
         let engine = Arc::new(MockBenchmarkEngine::with_fixed_ids(vec![]));
         let err = run_load_with_engine(&config, engine).await.unwrap_err();
         assert!(err.to_string().contains("Data file not found"));
+    }
+
+    #[tokio::test]
+    async fn run_load_does_not_touch_an_existing_index_when_the_data_file_is_missing() {
+        // Regression: the old order deleted and recreated the collection *before* checking the
+        // data file, so a typo in `data_path` destroyed the existing collection for nothing.
+        let config = test_config("/no/such/file.ndjson");
+        let engine = Arc::new(MockBenchmarkEngine::index_exists_once_then_absent());
+
+        let err = run_load_with_engine(&config, engine.clone()).await.unwrap_err();
+
+        assert!(err.to_string().contains("Data file not found"));
+        assert_eq!(engine.delete_index_calls.load(Ordering::SeqCst), 0, "must not delete anything");
+        assert_eq!(engine.create_index_calls.load(Ordering::SeqCst), 0, "must not create anything");
+    }
+
+    #[tokio::test]
+    async fn run_load_refuses_to_drop_an_existing_index_when_recreate_is_disabled() {
+        let f = ndjson_fixture(&[r#"{"id": 1, "embedding": [1.0]}"#]);
+        let mut config = test_config(f.path().to_str().unwrap());
+        config.load.as_mut().unwrap().recreate_existing_index = Some(false);
+        let engine = Arc::new(MockBenchmarkEngine::index_exists_once_then_absent());
+
+        let err = run_load_with_engine(&config, engine.clone()).await.unwrap_err();
+
+        assert!(err.to_string().contains("recreate_existing_index"), "{err}");
+        assert_eq!(engine.delete_index_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(engine.ingest_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn run_load_does_not_retry_a_permanent_ingest_error() {
+        // A wrong vector dimension or bad API key will never succeed: it must fail the load
+        // after one attempt instead of retrying forever.
+        let f = ndjson_fixture(&[r#"{"id": 1, "embedding": [1.0]}"#]);
+        let config = test_config(f.path().to_str().unwrap());
+        let engine = Arc::new(MockBenchmarkEngine::failing_ingest(|| {
+            crate::engine::EngineError::Message("Wrong input: Vector dimension error".to_string())
+        }));
+
+        let err = run_load_with_engine(&config, engine.clone()).await.unwrap_err();
+
+        assert!(err.to_string().contains("failed ingest batch"), "{err}");
+        assert_eq!(engine.ingest_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn run_load_stops_ingesting_after_the_first_failed_batch() {
+        // Regression: the loop used to count failures but keep ingesting the rest of the
+        // dataset, so a dead server meant hours of per-batch retries before load reported it.
+        let lines: Vec<String> = (0..40).map(|i| format!(r#"{{"id": {i}, "embedding": [1.0]}}"#)).collect();
+        let line_refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let f = ndjson_fixture(&line_refs);
+        let mut config = test_config(f.path().to_str().unwrap());
+        let load = config.load.as_mut().unwrap();
+        load.threads = Some(1);
+        load.batch_size = Some(2); // 20 batches
+        let engine = Arc::new(MockBenchmarkEngine::failing_ingest(|| {
+            crate::engine::EngineError::Message("Wrong input: Vector dimension error".to_string())
+        }));
+
+        let err = run_load_with_engine(&config, engine.clone()).await.unwrap_err();
+
+        assert!(err.to_string().contains("failed ingest batch"), "{err}");
+        assert!(
+            engine.ingest_calls.load(Ordering::SeqCst) <= 2,
+            "kept ingesting after a failure: {} of 20 batches attempted",
+            engine.ingest_calls.load(Ordering::SeqCst)
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn run_load_retries_transient_ingest_errors_until_they_clear() {
+        let f = ndjson_fixture(&[r#"{"id": 1, "embedding": [1.0]}"#]);
+        let config = test_config(f.path().to_str().unwrap());
+        let engine = Arc::new(MockBenchmarkEngine::ingest_transiently_failing_first(2));
+
+        run_load_with_engine(&config, engine.clone()).await.unwrap();
+
+        assert_eq!(engine.ingest_calls.load(Ordering::SeqCst), 3, "2 failures + 1 success");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn run_load_gives_up_when_a_transient_error_never_clears() {
+        let f = ndjson_fixture(&[r#"{"id": 1, "embedding": [1.0]}"#]);
+        let mut config = test_config(f.path().to_str().unwrap());
+        config.load.as_mut().unwrap().max_retries = Some(3);
+        let engine = Arc::new(MockBenchmarkEngine::ingest_transiently_failing_first(usize::MAX));
+
+        let err = run_load_with_engine(&config, engine.clone()).await.unwrap_err();
+
+        assert!(err.to_string().contains("failed ingest batch"), "{err}");
+        assert_eq!(engine.ingest_calls.load(Ordering::SeqCst), 4, "1 attempt + 3 retries");
     }
 }

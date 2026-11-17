@@ -8,11 +8,12 @@ use crate::engine::{BenchmarkEngine, EngineError};
 use crate::model::{BenchmarkResult, QueryParams, QueryResponse};
 use crate::output::{OutputError, QueryMetricRecord, ResultsSink};
 use chrono::Utc;
-use futures::stream::{self, StreamExt};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::task::JoinSet;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EvaluationError {
@@ -24,17 +25,16 @@ pub enum EvaluationError {
     Engine(#[from] EngineError),
     #[error(transparent)]
     Output(#[from] OutputError),
-    #[error("{count} warmup queries failed")]
-    WarmupFailures { count: usize },
-    #[error("measurement round {round} had {count} failed queries")]
-    MeasurementFailures { round: usize, count: usize },
+    #[error("{count} warmup queries failed (first error: {first_error})")]
+    WarmupFailures { count: usize, first_error: String },
+    #[error("measurement round {round} had {count} failed queries (first error: {first_error})")]
+    MeasurementFailures { round: usize, count: usize, first_error: String },
 }
 
-#[derive(Clone)]
 struct QueryDocument {
-    query_vector: Option<Vec<f32>>,
+    query_vector: Option<Arc<[f32]>>,
     query_text: Option<String>,
-    ground_truth: Vec<String>,
+    ground_truth: Arc<[String]>,
     meta_conditions: Option<HashMap<String, Value>>,
 }
 
@@ -79,7 +79,7 @@ impl BenchmarkEvaluator {
             .ok_or_else(|| EvaluationError::Message("dataset.path.queries_path is required".into()))?;
         let reader = data::create_reader(&queries_path);
         let documents = reader.read_all(None)?;
-        let queries = parse_query_documents(&documents, dataset)?;
+        let queries = Arc::new(parse_query_documents(&documents, dataset)?);
         tracing::info!("Loaded {} queries", queries.len());
 
         let param_groups = dataset
@@ -92,7 +92,11 @@ impl BenchmarkEvaluator {
             .clone()
             .ok_or_else(|| EvaluationError::Message("dataset not specified".into()))?;
 
-        for (recall_label, params_list) in param_groups {
+        // Sorted by label: the config is a map, and iterating a HashMap directly made the run
+        // order differ from one run to the next.
+        let mut groups: Vec<_> = param_groups.iter().collect();
+        groups.sort_by(|a, b| a.0.cmp(b.0));
+        for (recall_label, params_list) in groups {
             for params in params_list {
                 self.evaluate_parameter_set(
                     &queries,
@@ -110,7 +114,7 @@ impl BenchmarkEvaluator {
 
     async fn evaluate_parameter_set(
         &self,
-        queries: &[QueryDocument],
+        queries: &Arc<Vec<QueryDocument>>,
         dataset: &DatasetConfig,
         dataset_name: &str,
         eval_config: &EvaluationConfig,
@@ -119,14 +123,18 @@ impl BenchmarkEvaluator {
     ) -> Result<(), EvaluationError> {
         let param_key = build_param_key(params);
         tracing::info!("Evaluating parameter set: {param_key}");
+        let shared_params = Arc::new(params.clone());
 
         for round in 1..=eval_config.warmup_rounds {
             tracing::info!("Warmup round {round}/{}", eval_config.warmup_rounds);
             let outcome = self
-                .execute_queries(queries, dataset, params, eval_config.warmup_workers.max(1) as usize, false)
+                .execute_queries(queries, dataset, &shared_params, eval_config.warmup_workers.max(1) as usize, false)
                 .await;
             if outcome.failures > 0 {
-                return Err(EvaluationError::WarmupFailures { count: outcome.failures });
+                return Err(EvaluationError::WarmupFailures {
+                    count: outcome.failures,
+                    first_error: outcome.first_error.unwrap_or_default(),
+                });
             }
         }
 
@@ -135,12 +143,13 @@ impl BenchmarkEvaluator {
         for round in 1..=eval_config.measurement_rounds {
             tracing::info!("Measurement round {round}/{}", eval_config.measurement_rounds);
             let outcome = self
-                .execute_queries(queries, dataset, params, eval_config.measurement_workers.max(1) as usize, true)
+                .execute_queries(queries, dataset, &shared_params, eval_config.measurement_workers.max(1) as usize, true)
                 .await;
             if outcome.failures > 0 {
                 return Err(EvaluationError::MeasurementFailures {
                     round: round as usize,
                     count: outcome.failures,
+                    first_error: outcome.first_error.unwrap_or_default(),
                 });
             }
             if !outcome.query_metrics.is_empty() {
@@ -165,58 +174,60 @@ impl BenchmarkEvaluator {
         Ok(())
     }
 
+    /// Runs every query once using `num_workers` concurrent workers.
+    ///
+    /// Each worker is its own spawned task pulling the next query index from a shared counter,
+    /// so with a multi-threaded runtime the client-side work (request encoding, response
+    /// handling, metric bookkeeping) runs on several threads. Driving the queries with
+    /// `buffer_unordered` instead keeps all of that on the one task awaiting it, which capped
+    /// the throughput the harness could measure regardless of `workers`.
     async fn execute_queries(
         &self,
-        queries: &[QueryDocument],
+        queries: &Arc<Vec<QueryDocument>>,
         dataset: &DatasetConfig,
-        params: &HashMap<String, Value>,
+        params: &Arc<HashMap<String, Value>>,
         num_workers: usize,
         collect_results: bool,
     ) -> ExecuteQueriesOutcome {
-        let index_name = dataset.index_name.clone().unwrap_or_default();
-        let query_name = dataset.query_name.clone().unwrap_or_default();
+        let collect_records = collect_results && self.sinks.iter().any(|s| s.wants_query_metrics());
+        let shared = Arc::new(WorkerShared {
+            engine: self.engine.clone(),
+            index_name: dataset.index_name.clone().unwrap_or_default(),
+            query_name: dataset.query_name.clone().unwrap_or_default(),
+            params: params.clone(),
+            run_id: self.run_id.clone(),
+            queries: queries.clone(),
+            next: AtomicUsize::new(0),
+            collect_records,
+        });
         let start = Instant::now();
 
-        let outcomes: Vec<Result<(QueryResult, Option<QueryMetricRecord>), EngineError>> = stream::iter(queries.iter())
-            .map(|query| {
-                let engine = self.engine.clone();
-                let index_name = index_name.clone();
-                let query_name = query_name.clone();
-                let params = params.clone();
-                let query = query.clone();
-                let run_id = self.run_id.clone();
-                async move { execute_single_query(&engine, &index_name, &query_name, &params, &query, &run_id).await }
-            })
-            .buffer_unordered(num_workers.max(1))
-            .collect()
-            .await;
+        let mut workers = JoinSet::new();
+        for _ in 0..num_workers.max(1).min(queries.len().max(1)) {
+            workers.spawn(run_worker(shared.clone()));
+        }
 
-        let mut results = Vec::new();
-        let mut query_metrics = Vec::new();
-        let mut failures = 0usize;
-        for outcome in outcomes {
-            match outcome {
-                Ok((qr, metric)) => {
+        let mut outcome = ExecuteQueriesOutcome::default();
+        while let Some(joined) = workers.join_next().await {
+            match joined {
+                Ok(worker) => {
                     if collect_results {
-                        results.push(qr);
-                        if let Some(m) = metric {
-                            query_metrics.push(m);
-                        }
+                        outcome.results.extend(worker.results);
+                    }
+                    outcome.query_metrics.extend(worker.query_metrics);
+                    outcome.failures += worker.failures;
+                    if outcome.first_error.is_none() {
+                        outcome.first_error = worker.first_error;
                     }
                 }
-                Err(e) => {
-                    failures += 1;
-                    tracing::error!("Query execution failed: {e}");
+                Err(join_error) => {
+                    outcome.failures += 1;
+                    outcome.first_error.get_or_insert_with(|| format!("query worker panicked: {join_error}"));
                 }
             }
         }
-
-        ExecuteQueriesOutcome {
-            results,
-            query_metrics,
-            wall_time_ms: start.elapsed().as_millis() as u64,
-            failures,
-        }
+        outcome.wall_time_ms = start.elapsed().as_millis() as u64;
+        outcome
     }
 
     async fn calculate_metrics(
@@ -227,7 +238,9 @@ impl BenchmarkEvaluator {
         ctx: &ResultContext<'_>,
     ) -> Result<BenchmarkResult, EvaluationError> {
         let calculator = MetricsCalculator::new(results, if total_wall_ms > 0 { Some(total_wall_ms) } else { None });
-        let version = self.engine.version().await.unwrap_or_else(|_| "unknown".to_string());
+        // A result labelled with an unknown engine version or a zero document count would be
+        // silently misleading, so these lookups must succeed.
+        let version = self.engine.version().await?;
 
         let mut result = BenchmarkResult::new(
             self.run_id.clone(),
@@ -264,10 +277,13 @@ impl BenchmarkEvaluator {
         result.add_metric("num_samples", results.len() as f64);
 
         if let Some(index_name) = &dataset.index_name {
-            let doc_count = self.engine.document_count(index_name).await.unwrap_or(0);
+            let doc_count = self.engine.document_count(index_name).await?;
             result.add_metric("documents_ingested", doc_count as f64);
 
-            let metadata = self.engine.index_metadata(index_name).await.unwrap_or_default();
+            let metadata = self.engine.index_metadata(index_name).await.unwrap_or_else(|e| {
+                tracing::warn!("Could not read index metadata for '{index_name}': {e}");
+                HashMap::new()
+            });
             if let Some(vt) = metadata.get("vector_type") {
                 result.add_metadata("vector_type", vt.clone());
             }
@@ -293,24 +309,63 @@ struct ResultContext<'a> {
     params: &'a HashMap<String, Value>,
 }
 
+#[derive(Default)]
 struct ExecuteQueriesOutcome {
     results: Vec<QueryResult>,
     query_metrics: Vec<QueryMetricRecord>,
     wall_time_ms: u64,
     failures: usize,
+    first_error: Option<String>,
+}
+
+/// State shared (read-only, apart from the work counter) by every worker of one pass.
+struct WorkerShared {
+    engine: Arc<dyn BenchmarkEngine>,
+    index_name: String,
+    query_name: String,
+    params: Arc<HashMap<String, Value>>,
+    run_id: String,
+    queries: Arc<Vec<QueryDocument>>,
+    next: AtomicUsize,
+    collect_records: bool,
+}
+
+#[derive(Default)]
+struct WorkerOutput {
+    results: Vec<QueryResult>,
+    query_metrics: Vec<QueryMetricRecord>,
+    failures: usize,
+    first_error: Option<String>,
+}
+
+async fn run_worker(shared: Arc<WorkerShared>) -> WorkerOutput {
+    let mut out = WorkerOutput::default();
+    loop {
+        let index = shared.next.fetch_add(1, Ordering::Relaxed);
+        let Some(query) = shared.queries.get(index) else {
+            return out;
+        };
+        match execute_single_query(&shared, query).await {
+            Ok((result, record)) => {
+                out.results.push(result);
+                out.query_metrics.extend(record);
+            }
+            Err(e) => {
+                out.failures += 1;
+                tracing::error!("Query execution failed: {e}");
+                out.first_error.get_or_insert_with(|| e.to_string());
+            }
+        }
+    }
 }
 
 async fn execute_single_query(
-    engine: &Arc<dyn BenchmarkEngine>,
-    index_name: &str,
-    query_name: &str,
-    benchmark_params: &HashMap<String, Value>,
+    shared: &WorkerShared,
     query: &QueryDocument,
-    run_id: &str,
 ) -> Result<(QueryResult, Option<QueryMetricRecord>), EngineError> {
-    let mut query_params = QueryParams::new(benchmark_params.clone());
+    let mut query_params = QueryParams::from_shared(shared.params.clone());
     if let Some(v) = &query.query_vector {
-        query_params.put("query_vector", serde_json::to_value(v).unwrap());
+        query_params.put_vector("query_vector", v.clone());
     }
     if let Some(t) = &query.query_text {
         query_params.put("query_text", t.clone());
@@ -319,49 +374,46 @@ async fn execute_single_query(
         query_params.put("meta_conditions", serde_json::to_value(mc).unwrap());
     }
 
-    let response: QueryResponse = engine.query(index_name, query_name, &query_params).await?;
+    let response: QueryResponse = shared.engine.query(&shared.index_name, &shared.query_name, &query_params).await?;
 
-    let relevant_retrieved = response
-        .document_ids
-        .iter()
-        .filter(|id| query.ground_truth.contains(id))
-        .count();
-    let precision = if response.document_ids.is_empty() {
-        0.0
-    } else {
-        relevant_retrieved as f64 / response.document_ids.len() as f64
-    };
-    let recall = if query.ground_truth.is_empty() {
-        0.0
-    } else {
-        relevant_retrieved as f64 / query.ground_truth.len() as f64
-    };
-
-    let metric = QueryMetricRecord {
-        run_id: run_id.to_string(),
-        engine: engine.engine_name().to_string(),
-        dataset: index_name.to_string(),
-        params: benchmark_params.clone(),
-        meta_conditions: query.meta_conditions.clone(),
-        ground_truth: query.ground_truth.clone(),
-        retrieved: response.document_ids.clone(),
-        num_ground_truth: query.ground_truth.len(),
-        num_retrieved: response.document_ids.len(),
-        client_latency_ms: response.client_latency_ms,
-        server_latency_ms: response.server_latency_ms,
-        precision,
-        recall,
-        relevant_retrieved,
-    };
+    let metric = shared.collect_records.then(|| {
+        let relevant_retrieved = response.document_ids.iter().filter(|id| query.ground_truth.contains(id)).count();
+        let precision = if response.document_ids.is_empty() {
+            0.0
+        } else {
+            relevant_retrieved as f64 / response.document_ids.len() as f64
+        };
+        let recall = if query.ground_truth.is_empty() {
+            0.0
+        } else {
+            relevant_retrieved as f64 / query.ground_truth.len() as f64
+        };
+        QueryMetricRecord {
+            run_id: shared.run_id.clone(),
+            engine: shared.engine.engine_name().to_string(),
+            dataset: shared.index_name.clone(),
+            params: shared.params.as_ref().clone(),
+            meta_conditions: query.meta_conditions.clone(),
+            ground_truth: query.ground_truth.to_vec(),
+            retrieved: response.document_ids.clone(),
+            num_ground_truth: query.ground_truth.len(),
+            num_retrieved: response.document_ids.len(),
+            client_latency_ms: response.client_latency_ms,
+            server_latency_ms: response.server_latency_ms,
+            precision,
+            recall,
+            relevant_retrieved,
+        }
+    });
 
     let qr = QueryResult::new(
-        query.ground_truth.clone(),
+        query.ground_truth.clone(), // shared, not copied
         response.document_ids,
         response.client_latency_ms,
         response.server_latency_ms,
     );
 
-    Ok((qr, Some(metric)))
+    Ok((qr, metric))
 }
 
 fn parse_query_documents(
@@ -401,7 +453,7 @@ fn parse_query_documents(
 
         let query_vector = match vector_field {
             Some(f) => match doc.get_float_list(f) {
-                Some(v) => Some(v),
+                Some(v) => Some(Arc::<[f32]>::from(v)),
                 None => {
                     skipped += 1;
                     continue;
@@ -410,7 +462,7 @@ fn parse_query_documents(
             None => None,
         };
 
-        let ground_truth = doc.get_string_list(ground_truth_field).unwrap_or_default();
+        let ground_truth: Arc<[String]> = doc.get_string_list(ground_truth_field).unwrap_or_default().into();
 
         let meta_conditions = conditions_field.and_then(|f| doc.get(f)).and_then(|v| match v {
             Value::Object(map) => Some(map.clone().into_iter().collect()),
@@ -589,5 +641,127 @@ mod tests {
 
         let err = evaluator.run_evaluation(&config).await.unwrap_err();
         assert!(matches!(err, EvaluationError::MeasurementFailures { round: 1, .. }));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn queries_execute_in_parallel_on_multiple_threads() {
+        // Regression: queries used to be driven by `buffer_unordered` on a single task, so all
+        // client-side CPU work ran on one thread however many workers were configured, capping
+        // measurable throughput. Each query records its thread, then waits (bounded) until a
+        // second thread has also started one: only true parallel workers can satisfy that.
+        let threads = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+        let hook_threads = threads.clone();
+        let engine = Arc::new(
+            MockBenchmarkEngine::with_fixed_ids(vec!["1".to_string()]).with_query_hook(move || {
+                hook_threads.lock().unwrap().insert(std::thread::current().id());
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                while hook_threads.lock().unwrap().len() < 2 && std::time::Instant::now() < deadline {
+                    std::thread::yield_now();
+                }
+            }),
+        );
+        let lines: Vec<String> = (0..16).map(|_| r#"{"embedding": [1.0, 0.0], "ground_truth": ["1"]}"#.to_string()).collect();
+        let line_refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let queries_file = write_queries_ndjson(&line_refs);
+        let mut config = test_config(queries_file.path().to_str().unwrap());
+        let eval = config.evaluation.as_mut().unwrap();
+        eval.warmup_rounds = 0;
+        eval.measurement_workers = 4;
+
+        let sink = Arc::new(MockResultsSink::default());
+        BenchmarkEvaluator::new(&config, engine, vec![sink.clone()]).run_evaluation(&config).await.unwrap();
+
+        assert!(threads.lock().unwrap().len() >= 2, "queries ran on a single thread");
+        assert_eq!(sink.results.lock().unwrap()[0].metrics["num_samples"], 16.0);
+    }
+
+    #[tokio::test]
+    async fn a_single_worker_still_runs_every_query_exactly_once() {
+        let lines: Vec<String> = (0..7).map(|_| r#"{"embedding": [1.0, 0.0], "ground_truth": ["1"]}"#.to_string()).collect();
+        let line_refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let queries_file = write_queries_ndjson(&line_refs);
+        let mut config = test_config(queries_file.path().to_str().unwrap());
+        let eval = config.evaluation.as_mut().unwrap();
+        eval.warmup_rounds = 0;
+        eval.measurement_workers = 1;
+        let engine = Arc::new(MockBenchmarkEngine::with_fixed_ids(vec!["1".to_string()]));
+        let sink = Arc::new(MockResultsSink::default());
+
+        BenchmarkEvaluator::new(&config, engine.clone(), vec![sink.clone()]).run_evaluation(&config).await.unwrap();
+
+        assert_eq!(engine.query_calls.load(std::sync::atomic::Ordering::SeqCst), 7);
+        assert_eq!(sink.results.lock().unwrap()[0].metrics["num_samples"], 7.0);
+    }
+
+    #[tokio::test]
+    async fn parameter_groups_run_in_a_deterministic_order() {
+        // `param_groups` is a HashMap; iterating it directly made the run order (and therefore
+        // the order results were written) differ from run to run.
+        let queries_file = write_queries_ndjson(&[r#"{"embedding": [1.0, 0.0], "ground_truth": ["1"]}"#]);
+        let mut config = test_config(queries_file.path().to_str().unwrap());
+        let labels = ["g", "c", "a", "h", "e", "b", "f", "d"];
+        let groups: HashMap<String, Vec<HashMap<String, Value>>> = labels
+            .iter()
+            .map(|l| (l.to_string(), vec![HashMap::from([("size".to_string(), Value::from(2))])]))
+            .collect();
+        config.datasets.as_mut().unwrap().get_mut("demo").unwrap().param_groups = Some(groups);
+        let engine = Arc::new(MockBenchmarkEngine::with_fixed_ids(vec!["1".to_string()]));
+        let sink = Arc::new(MockResultsSink::default());
+
+        BenchmarkEvaluator::new(&config, engine, vec![sink.clone()]).run_evaluation(&config).await.unwrap();
+
+        let order: Vec<String> = sink.results.lock().unwrap().iter().map(|r| r.metadata["recall_label"].clone()).collect();
+        assert_eq!(order, vec!["a", "b", "c", "d", "e", "f", "g", "h"]);
+    }
+
+    #[tokio::test]
+    async fn query_failures_report_the_first_underlying_error() {
+        let queries_file = write_queries_ndjson(&[r#"{"embedding": [1.0, 0.0], "ground_truth": ["1"]}"#]);
+        let config = test_config(queries_file.path().to_str().unwrap());
+        let engine = Arc::new(MockBenchmarkEngine::failing_on(vec!["1".to_string()], |_| true));
+        let evaluator = BenchmarkEvaluator::new(&config, engine, vec![]);
+
+        let err = evaluator.run_evaluation(&config).await.unwrap_err();
+
+        assert!(err.to_string().contains("injected failure"), "the cause must be in the message: {err}");
+    }
+
+    #[tokio::test]
+    async fn a_failing_version_lookup_fails_the_run_instead_of_recording_unknown() {
+        let queries_file = write_queries_ndjson(&[r#"{"embedding": [1.0, 0.0], "ground_truth": ["1"]}"#]);
+        let config = test_config(queries_file.path().to_str().unwrap());
+        let engine = Arc::new(MockBenchmarkEngine::with_fixed_ids(vec!["1".to_string()]).with_failing_version());
+        let sink = Arc::new(MockResultsSink::default());
+
+        let err = BenchmarkEvaluator::new(&config, engine, vec![sink.clone()]).run_evaluation(&config).await.unwrap_err();
+
+        assert!(err.to_string().contains("injected version failure"), "{err}");
+        assert!(sink.results.lock().unwrap().is_empty(), "no misleading result may be written");
+    }
+
+    #[tokio::test]
+    async fn a_failing_document_count_fails_the_run_instead_of_recording_zero() {
+        let queries_file = write_queries_ndjson(&[r#"{"embedding": [1.0, 0.0], "ground_truth": ["1"]}"#]);
+        let config = test_config(queries_file.path().to_str().unwrap());
+        let engine = Arc::new(MockBenchmarkEngine::with_fixed_ids(vec!["1".to_string()]).with_failing_document_count());
+        let sink = Arc::new(MockResultsSink::default());
+
+        let err = BenchmarkEvaluator::new(&config, engine, vec![sink.clone()]).run_evaluation(&config).await.unwrap_err();
+
+        assert!(err.to_string().contains("injected document_count failure"), "{err}");
+        assert!(sink.results.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn per_query_records_are_not_built_when_no_sink_wants_them() {
+        let queries_file = write_queries_ndjson(&[r#"{"embedding": [1.0, 0.0], "ground_truth": ["1"]}"#]);
+        let config = test_config(queries_file.path().to_str().unwrap());
+        let engine = Arc::new(MockBenchmarkEngine::with_fixed_ids(vec!["1".to_string()]));
+        let sink = Arc::new(MockResultsSink { declines_query_metrics: true, ..Default::default() });
+
+        BenchmarkEvaluator::new(&config, engine, vec![sink.clone()]).run_evaluation(&config).await.unwrap();
+
+        assert!(sink.query_metric_batches.lock().unwrap().is_empty());
+        assert_eq!(sink.results.lock().unwrap().len(), 1, "the aggregate result is still written");
     }
 }

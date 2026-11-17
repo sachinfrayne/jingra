@@ -1,9 +1,8 @@
 //! `report`: read back a run's stored results (via the same `object_store` layout `bench`
 //! wrote to) and produce a CSV export and recall-vs-QPS/latency plots.
 //!
-//! Unlike the Java version's `BenchmarkComparator` (which diffed exactly two named engines,
-//! baseline vs target), this reads *all* configured engines' results for a run and plots them
-//! together on the same axes -- the same code path handles one engine today and N engines once
+//! Rather than diffing exactly two named engines (a baseline and a target), this reads *all*
+//! configured engines' results for a run and plots them together on the same axes -- the same code path handles one engine today and N engines once
 //! Elasticsearch/OpenSearch return, without a separate "comparison" data model.
 
 mod csv_export;

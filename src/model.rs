@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// A single record read from a dataset (data or queries file). Field values are kept as
 /// [`serde_json::Value`] so that Parquet and NDJSON readers can converge on one representation
@@ -66,32 +67,59 @@ impl Document {
 
 /// Parameters for a single query execution: benchmark-configured params (e.g. `hnsw_ef`) merged
 /// with the per-query vector/text/conditions extracted from the queries dataset.
+///
+/// The benchmark-wide parameters are shared (`Arc`) across every query of a run, and query
+/// vectors are stored as typed `f32` slices, so building one `QueryParams` per query costs a few
+/// small allocations rather than a deep copy of the parameter map plus a JSON encoding of the
+/// vector.
 #[derive(Debug, Clone, Default)]
-pub struct QueryParams(HashMap<String, Value>);
+pub struct QueryParams {
+    base: Arc<HashMap<String, Value>>,
+    overrides: HashMap<String, Value>,
+    vectors: HashMap<String, Arc<[f32]>>,
+}
 
 impl QueryParams {
     pub fn new(params: HashMap<String, Value>) -> Self {
-        Self(params)
+        Self::from_shared(Arc::new(params))
+    }
+
+    /// Starts from parameters shared with other queries; later `put`s only affect this value.
+    pub fn from_shared(params: Arc<HashMap<String, Value>>) -> Self {
+        Self {
+            base: params,
+            overrides: HashMap::new(),
+            vectors: HashMap::new(),
+        }
     }
 
     pub fn put(&mut self, key: impl Into<String>, value: impl Into<Value>) {
-        self.0.insert(key.into(), value.into());
+        self.overrides.insert(key.into(), value.into());
     }
 
-    pub fn all(&self) -> &HashMap<String, Value> {
-        &self.0
+    /// Stores a vector without converting it to JSON. Takes precedence over a JSON value
+    /// stored under the same key.
+    pub fn put_vector(&mut self, key: impl Into<String>, vector: Arc<[f32]>) {
+        self.vectors.insert(key.into(), vector);
+    }
+
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.overrides.get(key).or_else(|| self.base.get(key))
     }
 
     pub fn get_integer(&self, key: &str) -> Option<i64> {
-        self.0.get(key)?.as_i64()
+        self.get(key)?.as_i64()
     }
 
     pub fn get_f64(&self, key: &str) -> Option<f64> {
-        self.0.get(key)?.as_f64()
+        self.get(key)?.as_f64()
     }
 
     pub fn get_float_list(&self, key: &str) -> Option<Vec<f32>> {
-        let arr = self.0.get(key)?.as_array()?;
+        if let Some(v) = self.vectors.get(key) {
+            return Some(v.to_vec());
+        }
+        let arr = self.get(key)?.as_array()?;
         arr.iter().map(|v| v.as_f64().map(|f| f as f32)).collect()
     }
 }
@@ -101,14 +129,14 @@ impl QueryParams {
 pub struct QueryResponse {
     pub document_ids: Vec<String>,
     pub client_latency_ms: Option<f64>,
-    pub server_latency_ms: Option<i64>,
+    pub server_latency_ms: Option<f64>,
 }
 
 impl QueryResponse {
     pub fn new(
         document_ids: Vec<String>,
         client_latency_ms: Option<f64>,
-        server_latency_ms: Option<i64>,
+        server_latency_ms: Option<f64>,
     ) -> Self {
         Self {
             document_ids,
@@ -235,6 +263,21 @@ mod tests {
         assert_eq!(p.get_integer("size"), Some(10));
         assert_eq!(p.get_float_list("query_vector"), Some(vec![1.0, 2.0]));
         assert_eq!(p.get_integer("missing"), None);
+    }
+
+    #[test]
+    fn query_params_typed_vectors_round_trip_without_json() {
+        let mut p = QueryParams::default();
+        p.put_vector("query_vector", std::sync::Arc::from(vec![1.0_f32, 2.5]));
+        assert_eq!(p.get_float_list("query_vector"), Some(vec![1.0, 2.5]));
+    }
+
+    #[test]
+    fn query_params_typed_vector_takes_precedence_over_a_json_value() {
+        let mut p = QueryParams::default();
+        p.put("query_vector", json!([9.0]));
+        p.put_vector("query_vector", std::sync::Arc::from(vec![1.0_f32]));
+        assert_eq!(p.get_float_list("query_vector"), Some(vec![1.0]));
     }
 
     #[test]

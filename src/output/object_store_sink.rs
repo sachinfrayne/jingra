@@ -16,12 +16,11 @@
 //! `report`'s reader lists and reads back everything under a run's prefix using this same
 //! layout.
 
-use super::{OutputError, QueryMetricRecord, ResultsSink};
+use super::{open_store, LocalDir, OutputError, QueryMetricRecord, ResultsSink};
 use crate::model::BenchmarkResult;
 use async_trait::async_trait;
 use object_store::path::Path as ObjectPath;
 use object_store::{ObjectStore, ObjectStoreExt};
-use url::Url;
 use uuid::Uuid;
 
 pub struct ObjectStoreResultsSink {
@@ -33,10 +32,7 @@ pub struct ObjectStoreResultsSink {
 
 impl ObjectStoreResultsSink {
     pub fn new(results_uri: &str, run_id: impl Into<String>, write_query_metrics: bool) -> Result<Self, OutputError> {
-        let url = Url::parse(results_uri)
-            .map_err(|e| OutputError::Message(format!("invalid results_uri '{results_uri}': {e}")))?;
-        let (store, prefix) = object_store::parse_url(&url)
-            .map_err(|e| OutputError::Message(format!("failed to open results_uri '{results_uri}': {e}")))?;
+        let (store, prefix) = open_store(results_uri, LocalDir::Create)?;
         Ok(Self::from_store(store, prefix, run_id, write_query_metrics))
     }
 
@@ -83,6 +79,10 @@ fn sanitize_key(key: &str) -> String {
 
 #[async_trait]
 impl ResultsSink for ObjectStoreResultsSink {
+    fn wants_query_metrics(&self) -> bool {
+        self.write_query_metrics
+    }
+
     async fn write_result(&self, result: &BenchmarkResult) -> Result<(), OutputError> {
         let bytes = serde_json::to_vec(result)?;
         self.store.put(&self.results_path(&result.param_key), bytes.into()).await?;
@@ -174,7 +174,7 @@ mod tests {
             num_ground_truth: 1,
             num_retrieved: 2,
             client_latency_ms: Some(2.0),
-            server_latency_ms: Some(1),
+            server_latency_ms: Some(1.0),
             precision: 0.5,
             recall: 1.0,
             relevant_retrieved: 1,

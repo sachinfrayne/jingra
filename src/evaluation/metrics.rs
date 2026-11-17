@@ -1,27 +1,27 @@
 //! Pure metric math over a set of query results: precision/recall/F1/MRR, latency percentiles,
-//! and throughput. Ported near verbatim from the Java `MetricsCalculator` -- this is exactly
-//! the kind of logic that shouldn't change shape just because the language did.
+//! and throughput.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 /// One query's ground truth vs retrieved document IDs, with its latencies.
 #[derive(Debug, Clone)]
 pub struct QueryResult {
-    pub ground_truth: Vec<String>,
+    pub ground_truth: Arc<[String]>,
     pub retrieved: Vec<String>,
     pub client_latency_ms: Option<f64>,
-    pub server_latency_ms: Option<i64>,
+    pub server_latency_ms: Option<f64>,
 }
 
 impl QueryResult {
     pub fn new(
-        ground_truth: Vec<String>,
+        ground_truth: impl Into<Arc<[String]>>,
         retrieved: Vec<String>,
         client_latency_ms: Option<f64>,
-        server_latency_ms: Option<i64>,
+        server_latency_ms: Option<f64>,
     ) -> Self {
         Self {
-            ground_truth,
+            ground_truth: ground_truth.into(),
             retrieved,
             client_latency_ms,
             server_latency_ms,
@@ -95,7 +95,7 @@ impl<'a> MetricsCalculator<'a> {
     }
 
     pub fn server_latency_avg(&self) -> f64 {
-        average(self.results.iter().filter_map(|r| r.server_latency_ms).map(|v| v as f64))
+        average(self.results.iter().filter_map(|r| r.server_latency_ms))
     }
 
     pub fn server_latency_median(&self) -> f64 {
@@ -107,7 +107,6 @@ impl<'a> MetricsCalculator<'a> {
             .results
             .iter()
             .filter_map(|r| r.server_latency_ms)
-            .map(|v| v as f64)
             .collect();
         values.sort_by(|a, b| a.total_cmp(b));
         percentile_of_sorted(&values, percentile)
@@ -187,8 +186,7 @@ fn average(values: impl Iterator<Item = f64>) -> f64 {
     }
 }
 
-/// Linear-interpolation percentile over an already-sorted slice, matching the Java version's
-/// `calculatePercentile`.
+/// Linear-interpolation percentile over an already-sorted slice.
 fn percentile_of_sorted(sorted_values: &[f64], percentile: u32) -> f64 {
     if sorted_values.is_empty() {
         return 0.0;
@@ -207,9 +205,9 @@ fn percentile_of_sorted(sorted_values: &[f64], percentile: u32) -> f64 {
 mod tests {
     use super::*;
 
-    fn qr(ground_truth: &[&str], retrieved: &[&str], client_ms: Option<f64>, server_ms: Option<i64>) -> QueryResult {
+    fn qr(ground_truth: &[&str], retrieved: &[&str], client_ms: Option<f64>, server_ms: Option<f64>) -> QueryResult {
         QueryResult::new(
-            ground_truth.iter().map(|s| s.to_string()).collect(),
+            ground_truth.iter().map(|s| s.to_string()).collect::<Vec<String>>(),
             retrieved.iter().map(|s| s.to_string()).collect(),
             client_ms,
             server_ms,
@@ -299,11 +297,26 @@ mod tests {
 
     #[test]
     fn server_latencies_present_when_any_result_has_one() {
-        let results = vec![qr(&[], &[], Some(1.0), None), qr(&[], &[], Some(2.0), Some(5))];
+        let results = vec![qr(&[], &[], Some(1.0), None), qr(&[], &[], Some(2.0), Some(5.0))];
         let calc = MetricsCalculator::new(&results, None);
         assert!(calc.has_server_latencies());
         assert_eq!(calc.server_latency_avg(), 5.0);
         assert_eq!(calc.server_latency_median(), 5.0);
+    }
+
+    #[test]
+    fn sub_millisecond_server_latencies_are_not_rounded_to_zero() {
+        // Qdrant answers fast queries in well under 1 ms; whole-millisecond rounding used to
+        // make the default report metric (server_latency_median) read 0 for them.
+        let results = vec![
+            qr(&[], &[], Some(1.0), Some(0.25)),
+            qr(&[], &[], Some(1.0), Some(0.75)),
+            qr(&[], &[], Some(1.0), Some(0.5)),
+        ];
+        let calc = MetricsCalculator::new(&results, None);
+        assert_eq!(calc.server_latency_median(), 0.5);
+        assert_eq!(calc.server_latency_avg(), 0.5);
+        assert!((calc.server_latency_percentile(99) - 0.745).abs() < 1e-9);
     }
 
     #[test]

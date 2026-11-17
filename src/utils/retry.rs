@@ -1,4 +1,4 @@
-//! Retry-with-backoff for transient failures. Ported from the Java `RetryHelper`: capped
+//! Retry-with-backoff for transient failures. Capped
 //! exponential backoff (`backoff_ms * 2^min(attempt, 6)`, capped at 60s), with `max_retries:
 //! None` meaning infinite retries -- used for ingest, where giving up silently would be worse
 //! than blocking.
@@ -34,19 +34,21 @@ where
                 if !is_transient(&e) {
                     return Err(e);
                 }
+                // Check for exhaustion before waiting: no point sleeping (or claiming to retry)
+                // when the next step is to give up.
+                if let Some(max) = max_retries
+                    && attempt >= max
+                {
+                    return Err(e);
+                }
                 let delay = compute_retry_delay_ms(attempt, backoff_ms);
                 tracing::warn!(
-                    "Transient failure on attempt {} (max: {}). Retrying in {delay}ms...",
+                    "Transient failure on attempt {} (max retries: {}). Retrying in {delay}ms...",
                     attempt + 1,
                     max_retries.map(|m| m.to_string()).unwrap_or_else(|| "unlimited".to_string())
                 );
                 tokio::time::sleep(Duration::from_millis(delay)).await;
                 attempt += 1;
-                if let Some(max) = max_retries
-                    && attempt > max
-                {
-                    return Err(e);
-                }
             }
         }
     }
@@ -98,6 +100,24 @@ mod tests {
         .await;
         assert_eq!(result, Err("permanent"));
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn does_not_wait_again_after_the_last_allowed_retry_fails() {
+        // Delays are 1000ms then 2000ms for two retries; a third, pointless wait before
+        // returning the error would make this 7000ms.
+        let started = tokio::time::Instant::now();
+        let result: Result<u32, &str> = retry_with_backoff(|| async { Err("transient") }, Some(2), 1000, |_e: &&str| true).await;
+        assert_eq!(result, Err("transient"));
+        assert_eq!(started.elapsed(), Duration::from_millis(3000));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn zero_retries_fails_immediately_without_waiting() {
+        let started = tokio::time::Instant::now();
+        let result: Result<u32, &str> = retry_with_backoff(|| async { Err("transient") }, Some(0), 1000, |_e: &&str| true).await;
+        assert_eq!(result, Err("transient"));
+        assert_eq!(started.elapsed(), Duration::ZERO);
     }
 
     #[tokio::test(start_paused = true)]

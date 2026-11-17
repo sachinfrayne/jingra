@@ -3,9 +3,11 @@
 
 mod console;
 mod object_store_sink;
+mod store;
 
 pub use console::ConsoleResultsSink;
 pub use object_store_sink::ObjectStoreResultsSink;
+pub use store::{local_path_from_uri, open_store, LocalDir};
 
 use crate::model::BenchmarkResult;
 use async_trait::async_trait;
@@ -23,8 +25,7 @@ pub enum OutputError {
     ObjectStore(#[from] object_store::Error),
 }
 
-/// One query's outcome plus context, flattened for JSONL export. Mirrors the Java version's
-/// `buildQueryMetric` map.
+/// One query's outcome plus context, flattened for JSONL export.
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct QueryMetricRecord {
     pub run_id: String,
@@ -39,7 +40,7 @@ pub struct QueryMetricRecord {
     pub num_retrieved: usize,
     pub client_latency_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub server_latency_ms: Option<i64>,
+    pub server_latency_ms: Option<f64>,
     pub precision: f64,
     pub recall: f64,
     pub relevant_retrieved: usize,
@@ -47,6 +48,12 @@ pub struct QueryMetricRecord {
 
 #[async_trait]
 pub trait ResultsSink: Send + Sync {
+    /// Whether this sink stores per-query records. The evaluator only builds them (several
+    /// allocations per query) if at least one sink wants them.
+    fn wants_query_metrics(&self) -> bool {
+        true
+    }
+
     async fn write_result(&self, result: &BenchmarkResult) -> Result<(), OutputError>;
     async fn write_query_metrics_batch(&self, metrics: &[QueryMetricRecord]) -> Result<(), OutputError>;
 }

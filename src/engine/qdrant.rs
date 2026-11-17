@@ -10,7 +10,7 @@ use qdrant_client::qdrant::{
     Condition, CreateFieldIndexCollectionBuilder, FieldType, Filter, PointId, PointStruct,
     QueryPointsBuilder, QuantizationSearchParamsBuilder, SearchParamsBuilder,
 };
-use qdrant_client::{Payload, Qdrant};
+use qdrant_client::{Payload, Qdrant, QdrantError};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -19,6 +19,9 @@ use tonic::Code;
 use uuid::Uuid;
 
 const DEFAULT_GRPC_TIMEOUT_SECS: u64 = 30;
+/// Collection creation can be slower than a query, and the REST client previously had no
+/// timeout at all, so an unresponsive server hung `load` forever.
+const DEFAULT_REST_TIMEOUT_SECS: u64 = 120;
 const DEFAULT_VECTOR_FIELD: &str = "search_catalog_embedding";
 const DEFAULT_POLL_INTERVAL_MS: u64 = 10_000;
 
@@ -150,9 +153,22 @@ impl BenchmarkEngine for QdrantEngine {
         };
 
         let _ = self.client.set(client);
-        let _ = self.rest_base_url.set(rest_base_url);
+        let _ = self.rest_base_url.set(rest_base_url.clone());
         let _ = self.rest_api_key.set(api_key.unwrap_or_default());
-        let _ = self.http.set(reqwest::Client::new());
+        let rest_timeout = Duration::from_secs(
+            self.config
+                .get("rest_timeout_seconds")
+                .and_then(Value::as_u64)
+                .unwrap_or(DEFAULT_REST_TIMEOUT_SECS),
+        );
+        let mut http = reqwest::Client::builder().timeout(rest_timeout);
+        for cert in extra_root_certificates_from(&rest_base_url, std::env::var("SSL_CERT_FILE").ok())? {
+            http = http.add_root_certificate(cert);
+        }
+        let http = http
+            .build()
+            .map_err(|e| EngineError::Message(format!("Failed to build REST client: {e}")))?;
+        let _ = self.http.set(http);
         let _ = port; // parsed for validation; gRPC port itself is embedded in `url` already
         Ok(())
     }
@@ -228,34 +244,32 @@ impl BenchmarkEngine for QdrantEngine {
 
     async fn ingest(
         &self,
-        documents: Vec<Document>,
+        documents: &[Document],
         index_name: &str,
         id_field: Option<&str>,
     ) -> Result<usize, EngineError> {
         let client = self.require_client()?;
         let vector_field = self.config_string("vector_field", DEFAULT_VECTOR_FIELD);
 
-        let mut points = Vec::with_capacity(documents.len());
-        for doc in documents {
-            let vector = match doc.get_float_list(&vector_field) {
-                Some(v) => v,
-                None => continue, // matches Java: log+skip documents missing the vector field
-            };
-            let point_id = resolve_point_id(id_field.and_then(|f| doc.get_id_string(f)));
-            let mut fields = doc.into_fields();
-            fields.remove(&vector_field);
-            let payload: Payload = fields.into();
-            points.push(PointStruct::new(point_id, vector, payload));
+        let (points, skipped) = build_points(documents, &vector_field, id_field);
+        if skipped > 0 {
+            // Surfaces again in `load` as an "incomplete load" error, because skipped documents
+            // are not counted as ingested; this line says why.
+            tracing::warn!("Skipped {skipped} document(s) with no usable '{vector_field}' vector field in this batch");
         }
 
         let count = points.len();
+        if count == 0 {
+            // Qdrant rejects an empty upsert ("Empty update request"): nothing to send.
+            return Ok(0);
+        }
         client
             // `wait(true)`: without it Qdrant acknowledges the upsert before it's actually
             // applied, so an immediately-following document_count()/query() can race ahead of
             // this batch -- exactly what a benchmark harness must not tolerate.
             .upsert_points(qdrant_client::qdrant::UpsertPointsBuilder::new(index_name, points).wait(true))
             .await
-            .map_err(|e| EngineError::Message(format!("Failed to ingest documents: {e}")))?;
+            .map_err(|e| classify_qdrant_error("Failed to ingest documents", e))?;
         Ok(count)
     }
 
@@ -312,7 +326,8 @@ impl BenchmarkEngine for QdrantEngine {
             .await
             .map_err(|e| EngineError::Message(format!("Query execution failed: {e}")))?;
         let client_latency_ms = start.elapsed().as_secs_f64() * 1000.0;
-        let server_latency_ms = (response.time * 1000.0).round() as i64;
+        // Qdrant reports server time in (fractional) seconds; keep sub-millisecond precision.
+        let server_latency_ms = response.time * 1000.0;
 
         let document_ids = response
             .result
@@ -379,26 +394,53 @@ impl BenchmarkEngine for QdrantEngine {
         }
     }
 
-    async fn await_index_ready(&self, index_name: &str) -> Result<(), EngineError> {
+    async fn await_index_ready(&self, index_name: &str, timeout: Duration) -> Result<(), EngineError> {
         use qdrant_client::qdrant::CollectionStatus;
 
         let client = self.require_client()?;
+        let started = Instant::now();
         loop {
-            let info = client
-                .collection_info(index_name)
-                .await
-                .map_err(|e| EngineError::Message(format!("Error polling Qdrant optimizer status for collection '{index_name}': {e}")))?;
+            let info = match client.collection_info(index_name).await {
+                Ok(info) => info,
+                Err(e) => {
+                    let e = classify_qdrant_error(&format!("Error polling Qdrant optimizer status for collection '{index_name}'"), e);
+                    let elapsed = started.elapsed();
+                    // Indexing can take hours; one dropped request must not throw that away.
+                    if poll_error_action(e.is_transient(), elapsed, timeout) == PollErrorAction::Fail {
+                        return Err(e);
+                    }
+                    tracing::warn!("{e}; will keep waiting ({}s elapsed)", elapsed.as_secs());
+                    tokio::time::sleep(Duration::from_millis(self.poll_interval_ms)).await;
+                    continue;
+                }
+            };
             let Some(result) = info.result else {
                 return Err(EngineError::Message(format!(
                     "Qdrant returned no collection info for '{index_name}'"
                 )));
             };
             let green = result.status == CollectionStatus::Green as i32;
-            let ok = result.optimizer_status.map(|s| s.ok).unwrap_or(false);
-            if green && ok {
-                return Ok(());
+            let ok = result.optimizer_status.as_ref().map(|s| s.ok).unwrap_or(false);
+            let elapsed = started.elapsed();
+            match index_readiness(green, ok, elapsed, timeout) {
+                Readiness::Ready => return Ok(()),
+                Readiness::TimedOut => {
+                    return Err(EngineError::Message(format!(
+                        "Collection '{index_name}' was not ready after {}s (status green: {green}, optimizer ok: {ok}); \
+                         raise load.index_ready_timeout_seconds if indexing is just slow",
+                        timeout.as_secs()
+                    )));
+                }
+                Readiness::Waiting => {
+                    tracing::info!(
+                        "Waiting for '{index_name}' to finish indexing ({}s elapsed): status green: {green}, optimizer ok: {ok}, indexed vectors: {}/{}",
+                        elapsed.as_secs(),
+                        result.indexed_vectors_count.unwrap_or(0),
+                        result.points_count.unwrap_or(0),
+                    );
+                    tokio::time::sleep(Duration::from_millis(self.poll_interval_ms)).await;
+                }
             }
-            tokio::time::sleep(Duration::from_millis(self.poll_interval_ms)).await;
         }
     }
 }
@@ -422,15 +464,135 @@ impl QdrantEngine {
     }
 }
 
+/// Extra trusted root certificates for the REST client, from the PEM bundle named by
+/// `SSL_CERT_FILE`. The gRPC client already honors that variable through the system certificate
+/// loader, but the REST client's platform verifier (macOS and Windows) does not, so without
+/// this a private CA would work for queries and ingest yet fail when creating the collection.
+///
+/// Only consulted for `https://` REST URLs: a stale `SSL_CERT_FILE` in the environment must not
+/// break a plain-http connection that never uses TLS.
+fn extra_root_certificates_from(
+    rest_base_url: &str,
+    ssl_cert_file: Option<String>,
+) -> Result<Vec<reqwest::Certificate>, EngineError> {
+    if !rest_base_url.starts_with("https://") {
+        return Ok(Vec::new());
+    }
+    match ssl_cert_file.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(path) => load_pem_bundle(std::path::Path::new(path)),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn load_pem_bundle(path: &std::path::Path) -> Result<Vec<reqwest::Certificate>, EngineError> {
+    let pem = std::fs::read(path)
+        .map_err(|e| EngineError::Message(format!("Cannot read certificate file {}: {e}", path.display())))?;
+    let certs = reqwest::Certificate::from_pem_bundle(&pem)
+        .map_err(|e| EngineError::Message(format!("Invalid certificate file {}: {e}", path.display())))?;
+    if certs.is_empty() {
+        return Err(EngineError::Message(format!("Certificate file {} contains no certificates", path.display())));
+    }
+    Ok(certs)
+}
+
+/// Builds upsert points from documents, returning them plus how many documents were skipped
+/// because they had no usable vector in `vector_field`.
+fn build_points(documents: &[Document], vector_field: &str, id_field: Option<&str>) -> (Vec<PointStruct>, usize) {
+    let mut points = Vec::with_capacity(documents.len());
+    let mut skipped = 0usize;
+    for doc in documents {
+        let Some(vector) = doc.get_float_list(vector_field) else {
+            skipped += 1;
+            continue;
+        };
+        let point_id = resolve_point_id(id_field.and_then(|f| doc.get_id_string(f)));
+        // Copy only the payload fields: the vector (the bulk of a document) was already
+        // converted to a compact Vec<f32> above and is not part of the payload.
+        let fields: HashMap<String, Value> = doc
+            .fields()
+            .iter()
+            .filter(|(k, _)| k.as_str() != vector_field)
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let payload: Payload = fields.into();
+        points.push(PointStruct::new(point_id, vector, payload));
+    }
+    (points, skipped)
+}
+
+/// gRPC status codes that can clear up on retry (server busy, restarting, or unreachable).
+/// Everything else (invalid argument, unauthenticated, not found, ...) is a request that will
+/// fail identically every time, so retrying it only hides the problem.
+fn is_transient_code(code: Code) -> bool {
+    matches!(
+        code,
+        Code::Unavailable
+            | Code::DeadlineExceeded
+            | Code::ResourceExhausted
+            | Code::Aborted
+            | Code::Cancelled
+            | Code::Unknown
+            | Code::Internal
+    )
+}
+
+/// Wraps a client error with context, marking it [`EngineError::Transient`] when a retry could
+/// succeed. Transport failures (connection refused or reset) surface from tonic as `Unavailable`
+/// or `Unknown` statuses, so they land in the transient bucket via [`is_transient_code`].
+fn classify_qdrant_error(context: &str, err: QdrantError) -> EngineError {
+    let transient = match &err {
+        QdrantError::ResponseError { status } => is_transient_code(status.code()),
+        QdrantError::ResourceExhaustedError { .. } | QdrantError::Io(_) | QdrantError::Reqwest(_) => true,
+        _ => false,
+    };
+    let message = format!("{context}: {err}");
+    if transient {
+        EngineError::Transient(message)
+    } else {
+        EngineError::Message(message)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Readiness {
+    Ready,
+    Waiting,
+    TimedOut,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PollErrorAction {
+    Retry,
+    Fail,
+}
+
+/// What `await_index_ready` does when polling the collection fails: ride out transient errors
+/// until the deadline, fail at once on permanent ones.
+fn poll_error_action(transient: bool, elapsed: Duration, timeout: Duration) -> PollErrorAction {
+    if transient && elapsed <= timeout {
+        PollErrorAction::Retry
+    } else {
+        PollErrorAction::Fail
+    }
+}
+
+/// Decides what `await_index_ready` does next. Being ready always wins over the deadline.
+fn index_readiness(green: bool, optimizer_ok: bool, elapsed: Duration, timeout: Duration) -> Readiness {
+    if green && optimizer_ok {
+        Readiness::Ready
+    } else if elapsed > timeout {
+        Readiness::TimedOut
+    } else {
+        Readiness::Waiting
+    }
+}
+
 /// Resolves a document's natural id (if present and parseable) into a Qdrant point ID,
 /// falling back to a deterministic name-based UUID (stable across re-ingests of the same
 /// document) and finally a random UUID when there is no natural id at all.
 ///
-/// Not byte-identical to the Java version's `UUID.nameUUIDFromBytes` fallback (which is an
-/// MD5-based name-UUID with no namespace) -- that exact scheme isn't reproducible without an
-/// extra MD5 dependency, and cross-language ID equality was never a requirement. `Uuid::new_v5`
-/// with a fixed namespace gives the same practical property: the same input id string always
-/// maps to the same point ID within one ingest run.
+/// `Uuid::new_v5` with a fixed namespace means the same input id string always maps to the
+/// same point ID, so re-ingesting a document overwrites rather than duplicates it.
 fn resolve_point_id(id_str: Option<String>) -> PointId {
     match id_str {
         Some(s) => {
@@ -596,7 +758,7 @@ impl VectorExpr {
 }
 
 /// Turns a JSON scalar into the `{{param}}`-or-literal expression text `IntExpr`/`DoubleExpr`
-/// compile from — mirrors Jackson's permissive `JsonNode.asText()` for numbers.
+/// compile from. Numbers and strings are both accepted.
 fn json_scalar_to_text(node: Option<&Value>) -> Option<String> {
     match node {
         Some(Value::String(s)) => Some(s.clone()),
@@ -848,7 +1010,7 @@ mod tests {
     #[test]
     fn parse_filter_skips_malformed_conditions_entirely_when_key_missing() {
         // A condition missing `key` fails to parse; the whole filter parse bails via `?`,
-        // matching the Java behavior of only ever emitting well-formed conditions.
+        // so a filter is only ever emitted when every condition in it is well-formed.
         let filter_node = json!({"must": [{"match": {"value": "x"}}]});
         assert!(parse_filter(&filter_node).is_none());
     }
@@ -882,6 +1044,133 @@ mod tests {
             Uuid::nil().to_string()
         );
         assert_eq!(point_id_to_string(None), "");
+    }
+
+    #[test]
+    fn grpc_codes_that_clear_up_on_their_own_are_transient() {
+        for code in [Code::Unavailable, Code::DeadlineExceeded, Code::ResourceExhausted, Code::Aborted, Code::Cancelled, Code::Unknown, Code::Internal] {
+            assert!(is_transient_code(code), "{code:?} should be retried");
+        }
+    }
+
+    #[test]
+    fn grpc_codes_that_will_never_succeed_are_permanent() {
+        for code in [Code::InvalidArgument, Code::Unauthenticated, Code::PermissionDenied, Code::NotFound, Code::AlreadyExists, Code::FailedPrecondition, Code::Unimplemented, Code::OutOfRange] {
+            assert!(!is_transient_code(code), "{code:?} must not be retried");
+        }
+    }
+
+    #[test]
+    fn classify_qdrant_error_keeps_context_and_picks_the_right_kind() {
+        let permanent = QdrantError::ResponseError { status: tonic::Status::invalid_argument("Vector dimension error") };
+        let e = classify_qdrant_error("Failed to ingest documents", permanent);
+        assert!(!e.is_transient());
+        assert!(e.to_string().starts_with("Failed to ingest documents: "), "{e}");
+        assert!(e.to_string().contains("Vector dimension error"), "{e}");
+
+        let transient = QdrantError::ResponseError { status: tonic::Status::unavailable("connection refused") };
+        assert!(classify_qdrant_error("x", transient).is_transient());
+
+        let exhausted = QdrantError::ResourceExhaustedError { status: tonic::Status::resource_exhausted("slow down"), retry_after_seconds: 3 };
+        assert!(classify_qdrant_error("x", exhausted).is_transient());
+
+        assert!(classify_qdrant_error("x", QdrantError::Io(std::io::Error::other("reset"))).is_transient());
+        assert!(!classify_qdrant_error("x", QdrantError::ConversionError("bad".into())).is_transient());
+    }
+
+    #[test]
+    fn index_readiness_waits_until_green_and_optimizer_ok() {
+        let timeout = Duration::from_secs(60);
+        let soon = Duration::from_secs(1);
+        assert_eq!(index_readiness(true, true, soon, timeout), Readiness::Ready);
+        assert_eq!(index_readiness(true, false, soon, timeout), Readiness::Waiting);
+        assert_eq!(index_readiness(false, true, soon, timeout), Readiness::Waiting);
+    }
+
+    #[test]
+    fn index_readiness_gives_up_only_after_the_timeout() {
+        let timeout = Duration::from_secs(60);
+        assert_eq!(index_readiness(false, false, Duration::from_secs(60), timeout), Readiness::Waiting);
+        assert_eq!(index_readiness(false, false, Duration::from_secs(61), timeout), Readiness::TimedOut);
+        // Being ready always wins, even past the deadline.
+        assert_eq!(index_readiness(true, true, Duration::from_secs(999), timeout), Readiness::Ready);
+    }
+
+    #[test]
+    fn missing_vector_fields_are_counted_not_silently_dropped() {
+        let with = Document::new(HashMap::from([("id".to_string(), json!(1)), ("embedding".to_string(), json!([1.0, 2.0]))]));
+        let without = Document::new(HashMap::from([("id".to_string(), json!(2))]));
+        let (points, skipped) = build_points(&[with, without], "embedding", Some("id"));
+        assert_eq!(points.len(), 1);
+        assert_eq!(skipped, 1);
+    }
+
+    /// A throwaway self-signed CA certificate, used only to check PEM parsing (expiry is not
+    /// examined when loading).
+    const TEST_CA_PEM: &str = r#"-----BEGIN CERTIFICATE-----
+MIIC8jCCAdqgAwIBAgIUaGRvI8xN4YF7QiszuDO6wV0Iu1kwDQYJKoZIhvcNAQEL
+BQAwGTEXMBUGA1UEAwwOamluZ3JhLXRlc3QtY2EwHhcNMjYxMTE3MTM1MDI2WhcN
+MjYxMTE5MTM1MDI2WjAZMRcwFQYDVQQDDA5qaW5ncmEtdGVzdC1jYTCCASIwDQYJ
+KoZIhvcNAQEBBQADggEPADCCAQoCggEBAL1dtr5wD0A+Eoa2YSEantFQ1X7O9nHH
+GPEcKZQnafXwpJWARS2ZD2AE5neEWAwcrzFbxy6d7VLE4jER0VvysdLtWUAdctB1
+H4BiAiR4f02hjQD2gzsiiNBZ9tWorbMTy+HTov2RGR5jfkycBp7qoeq6X68X3PNl
+Lrzfdv8YpOR70Hutw32UAwegV/fzmqqd4Zy5SPTyZKn+JgajUBUSWKerx3oWWeOe
+n+Bd3kzRvAa4IwSxwqHj6avbDMlkytUI4bokuxxzzO6+dowUVSn+Grv1BKIqZlKJ
+4gulfGUj+CjePKzifUMM7R18B63oOhlFU9AAkQeSh13c7CXfdD7758kCAwEAAaMy
+MDAwHQYDVR0OBBYEFKu0SmhpS5QIqKpDBlc67drUZ/7lMA8GA1UdEwEB/wQFMAMB
+Af8wDQYJKoZIhvcNAQELBQADggEBABxDTbfnnKliSmAwnn6BxrW2ALVoBQKerNop
+6QIVG9Z6BToNnpbY7t/K7DZ9LWdY/obZXMHC9XKtdHPkMZ4y4HoTcdgquLimKhvT
+Th5WEEZDLbtCs285ZpACqLQBmoGVmQiISfVqo9qTTpJ/8wNbA5FhKxpg2d7yqciy
+u0Ro1cyh2qpidgZ6deWyahgMJyi8i91cy5PxHjtt9JvqT6LrZ+/Zf+mmNaVOi9IW
+OcVgREOhvwjBlZX22pVyHb9cXH7BX52zF3Ex8NVvX5vtT4SzAklquHYKPt/cJFVZ
+6dKnmisgywh7tQn2KpYhtWsibSXxYm2C1KpnUFb6wV7W/ejXd68=
+-----END CERTIFICATE-----
+"#;
+
+    #[test]
+    fn pem_bundle_loading_reads_one_or_many_certificates() {
+        let dir = tempfile::tempdir().unwrap();
+        let one = dir.path().join("one.pem");
+        std::fs::write(&one, TEST_CA_PEM).unwrap();
+        assert_eq!(load_pem_bundle(&one).unwrap().len(), 1);
+
+        let two = dir.path().join("two.pem");
+        std::fs::write(&two, format!("{TEST_CA_PEM}{TEST_CA_PEM}")).unwrap();
+        assert_eq!(load_pem_bundle(&two).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn pem_bundle_loading_rejects_files_without_certificates_and_missing_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let empty = dir.path().join("empty.pem");
+        std::fs::write(&empty, "nothing to see here").unwrap();
+        let err = load_pem_bundle(&empty).unwrap_err().to_string();
+        assert!(err.contains("no certificates"), "{err}");
+
+        let err = load_pem_bundle(&dir.path().join("missing.pem")).unwrap_err().to_string();
+        assert!(err.contains("missing.pem"), "{err}");
+    }
+
+    #[test]
+    fn blank_or_unset_ssl_cert_file_adds_no_extra_roots() {
+        assert!(extra_root_certificates_from("https://h:6333", None).unwrap().is_empty());
+        assert!(extra_root_certificates_from("https://h:6333", Some("  ".to_string())).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_bad_ssl_cert_file_only_matters_for_https() {
+        // A stale SSL_CERT_FILE (common in CI images) must not break plain-http connections.
+        let bogus = Some("/no/such/ca.pem".to_string());
+        assert!(extra_root_certificates_from("http://qdrant:6333", bogus.clone()).unwrap().is_empty());
+        assert!(extra_root_certificates_from("https://qdrant:6333", bogus).is_err());
+    }
+
+    #[test]
+    fn transient_poll_errors_are_tolerated_until_the_deadline() {
+        let timeout = Duration::from_secs(60);
+        assert_eq!(poll_error_action(true, Duration::from_secs(10), timeout), PollErrorAction::Retry);
+        assert_eq!(poll_error_action(true, Duration::from_secs(61), timeout), PollErrorAction::Fail);
+        assert_eq!(poll_error_action(false, Duration::from_secs(1), timeout), PollErrorAction::Fail);
     }
 
     #[test]

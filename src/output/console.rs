@@ -3,11 +3,15 @@ use crate::model::BenchmarkResult;
 use async_trait::async_trait;
 
 /// Always-on human-readable summary printed to stdout. Per-query metrics are not echoed here
-/// (they can be large) -- only a count, matching the Java version's console sink behavior.
+/// (they can be large) -- only a count.
 pub struct ConsoleResultsSink;
 
 #[async_trait]
 impl ResultsSink for ConsoleResultsSink {
+    fn wants_query_metrics(&self) -> bool {
+        false
+    }
+
     async fn write_result(&self, result: &BenchmarkResult) -> Result<(), OutputError> {
         println!(
             "[{}] engine={} ({}) dataset={} params={}",

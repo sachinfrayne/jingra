@@ -97,12 +97,31 @@ async fn full_lifecycle_against_real_qdrant_container() {
         ])),
     ];
     let ingested = engine
-        .ingest(docs, index_name, Some("id"))
+        .ingest(&docs, index_name, Some("id"))
         .await
         .expect("ingest");
     assert_eq!(ingested, 2);
 
-    engine.await_index_ready(index_name).await.expect("await_index_ready");
+    // A vector of the wrong dimension can never succeed: it must come back as a permanent
+    // (non-transient) error so `load` fails fast instead of retrying it forever.
+    let wrong_dimension = vec![Document::new(HashMap::from([
+        ("id".to_string(), json!(3)),
+        ("embedding".to_string(), json!([1.0, 2.0])),
+    ]))];
+    let err = engine
+        .ingest(&wrong_dimension, index_name, Some("id"))
+        .await
+        .expect_err("wrong dimension must be rejected");
+    assert!(!err.is_transient(), "wrong dimension must be a permanent error, got: {err}");
+
+    // Documents without the vector field are skipped, and not counted as ingested.
+    let no_vector = vec![Document::new(HashMap::from([("id".to_string(), json!(4))]))];
+    assert_eq!(engine.ingest(&no_vector, index_name, Some("id")).await.expect("ingest"), 0);
+
+    engine
+        .await_index_ready(index_name, std::time::Duration::from_secs(120))
+        .await
+        .expect("await_index_ready");
 
     let count = engine.document_count(index_name).await.expect("document_count");
     assert_eq!(count, 2);
@@ -118,7 +137,7 @@ async fn full_lifecycle_against_real_qdrant_container() {
     assert_eq!(response.document_ids.len(), 1);
     assert_eq!(response.document_ids[0], "1");
     assert!(response.client_latency_ms.unwrap() >= 0.0);
-    assert!(response.server_latency_ms.unwrap() >= 0);
+    assert!(response.server_latency_ms.unwrap() >= 0.0);
 
     let metadata = engine.index_metadata(index_name).await.expect("index_metadata");
     assert_eq!(metadata.get("points_count"), Some(&"2".to_string()));
@@ -126,6 +145,25 @@ async fn full_lifecycle_against_real_qdrant_container() {
     engine.delete_index(index_name).await.expect("delete_index");
     assert!(!engine.index_exists(index_name).await.expect("index_exists after delete"));
 
-    // Deleting an already-absent collection is idempotent (matches Java's NOT_FOUND handling).
+    // Deleting an already-absent collection is idempotent (NOT_FOUND is treated as success).
     engine.delete_index(index_name).await.expect("delete_index idempotent");
+
+    // With the server gone, ingest failures are transport errors and must be classified as
+    // transient (worth retrying), unlike the permanent errors above.
+    let engine = QdrantEngine::new(HashMap::from([
+        ("url".to_string(), json!(format!("http://127.0.0.1:{grpc_port}"))),
+        ("rest_url".to_string(), json!(format!("http://127.0.0.1:{rest_port}"))),
+        ("vector_field".to_string(), json!("embedding")),
+    ]));
+    engine.connect().await.expect("reconnect");
+    container.stop().await.expect("stop qdrant");
+    let doc = Document::new(HashMap::from([
+        ("id".to_string(), json!(9)),
+        ("embedding".to_string(), json!([1.0, 0.0, 0.0, 0.0])),
+    ]));
+    let err = engine
+        .ingest(&[doc], index_name, Some("id"))
+        .await
+        .expect_err("ingest against a stopped server must fail");
+    assert!(err.is_transient(), "an unreachable server must be a transient error, got: {err}");
 }

@@ -1,14 +1,17 @@
-//! Builds a `tracing_subscriber` filter from the optional `logging:` config block, replacing
-//! the Java version's SLF4J/Logback runtime reconfiguration.
+//! Builds a `tracing_subscriber` filter from the optional `logging:` config block, so log levels
+//! can be set per run (and per module) without recompiling.
 
 use crate::config::LoggingConfig;
+use std::io::IsTerminal;
 use tracing_subscriber::EnvFilter;
 
 /// Initializes the global tracing subscriber. Safe to call once at process start; a config-less
-/// call (`config: None`) defaults to `info` level, matching the Java default.
+/// call (`config: None`) defaults to `info` level.
 pub fn configure_logging(config: Option<&LoggingConfig>) {
     let filter = build_filter(config);
-    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+    // Colour only on a terminal: Kubernetes/CI log collectors and files get plain text.
+    let ansi = std::io::stdout().is_terminal();
+    let _ = tracing_subscriber::fmt().with_env_filter(filter).with_ansi(ansi).try_init();
 }
 
 fn build_filter(config: Option<&LoggingConfig>) -> EnvFilter {

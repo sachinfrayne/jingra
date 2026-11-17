@@ -9,15 +9,27 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
+    /// A failure that will not fix itself (bad request, wrong dimension, authentication...).
     #[error("{0}")]
     Message(String),
+    /// A failure worth retrying: the server was unreachable, overloaded or timed out.
+    #[error("{0}")]
+    Transient(String),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+impl EngineError {
+    /// Whether retrying the same request could plausibly succeed.
+    pub fn is_transient(&self) -> bool {
+        matches!(self, Self::Transient(_))
+    }
 }
 
 /// Core abstraction for benchmarkable engines.
@@ -34,10 +46,11 @@ pub trait BenchmarkEngine: Send + Sync {
 
     async fn delete_index(&self, index_name: &str) -> Result<(), EngineError>;
 
-    /// Ingest documents, returning the number successfully ingested.
+    /// Ingest documents, returning the number successfully ingested. Takes a slice so callers
+    /// can retry the same batch without deep-copying it for every attempt.
     async fn ingest(
         &self,
-        documents: Vec<Document>,
+        documents: &[Document],
         index_name: &str,
         id_field: Option<&str>,
     ) -> Result<usize, EngineError>;
@@ -63,9 +76,10 @@ pub trait BenchmarkEngine: Send + Sync {
     /// recording alongside benchmark results.
     fn schema_template(&self, schema_name: &str) -> Result<Option<HashMap<String, Value>>, EngineError>;
 
-    /// Wait until the index is ready for querying (background optimization/merges settled).
-    /// Engines that don't need to wait keep the default no-op.
-    async fn await_index_ready(&self, _index_name: &str) -> Result<(), EngineError> {
+    /// Wait until the index is ready for querying (background optimization/merges settled),
+    /// failing if that takes longer than `timeout`. Engines that don't need to wait keep the
+    /// default no-op.
+    async fn await_index_ready(&self, _index_name: &str, _timeout: Duration) -> Result<(), EngineError> {
         Ok(())
     }
 }
@@ -128,6 +142,13 @@ mod tests {
     fn load_schema_template_missing_file_returns_none() {
         // Relies on there being no jingra-config/schemas/does-not-exist.json in the repo/CWD.
         assert!(load_schema_template("does-not-exist-xyz").unwrap().is_none());
+    }
+
+    #[test]
+    fn only_transient_errors_are_retryable() {
+        assert!(EngineError::Transient("timeout".into()).is_transient());
+        assert!(!EngineError::Message("bad dimension".into()).is_transient());
+        assert!(!EngineError::Io(std::io::Error::other("x")).is_transient());
     }
 
     #[test]
